@@ -143,10 +143,10 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClInclude Include="..\..\Public\UEBabyParmLogFilter.h" />
+    <ClInclude Include="..\..\Public\UEBabyPramLogFilter.h" />
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="..\..\Private\UEBabyParmLogFilter.cpp" />
+    <ClCompile Include="..\..\Private\UEBabyPramLogFilter.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

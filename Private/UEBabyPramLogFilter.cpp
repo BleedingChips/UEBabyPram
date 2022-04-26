@@ -1,4 +1,4 @@
-#include "../Public/UEBabyParmLogFilter.h"
+#include "../Public/UEBabyPramLogFilter.h"
 #include "Potato/Public/PotatoReg.h"
 
 namespace UEBabyPram::LogFilter

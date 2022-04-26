@@ -13,12 +13,12 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="..\..\Public\UEBabyParmLogFilter.h">
+    <ClInclude Include="..\..\Public\UEBabyPramLogFilter.h">
       <Filter>Public</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="..\..\Private\UEBabyParmLogFilter.cpp">
+    <ClCompile Include="..\..\Private\UEBabyPramLogFilter.cpp">
       <Filter>Private</Filter>
     </ClCompile>
   </ItemGroup>
