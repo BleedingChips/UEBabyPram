@@ -1,3 +1,0 @@
-set(UEBabyPram_FOUND TRUE)
-set(UEBabyPram_INCLUDE_DIRS ${CMAKE_CURRENT_LIST_DIR}/../include/)
-set(UEBabyPram_SUBDIRECTORY ${CMAKE_CURRENT_LIST_DIR}/../src/)
