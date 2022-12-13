@@ -6,6 +6,4 @@ add_executable(
 )
 
 target_compile_features(UEBabyPramUnitTest PUBLIC cxx_std_23)
-target_include_directories(UEBabyPramUnitTest PUBLIC "../include/")
-
-target_link_libraries(UEBabyPramUnitTest PUBLIC UEBabyPramLib)
+target_link_libraries(UEBabyPramUnitTest PUBLIC UEBabyPram)
