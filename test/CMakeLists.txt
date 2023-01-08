@@ -6,4 +6,4 @@ add_executable(
 )
 
 target_compile_features(UEBabyPramUnitTest PUBLIC cxx_std_23)
-target_link_libraries(UEBabyPramUnitTest PUBLIC UEBabyPram)
+target_link_libraries(UEBabyPramUnitTest PUBLIC UEBabyPramLib)
