@@ -1,9 +1,10 @@
-cmake_minimum_required(VERSION 3.20)
+cmake_minimum_required(VERSION 3.25.1)
 
 add_executable(
-	UEBabyPramUnitTest
-	UnitTest.cpp
+	LogFilterTest
+	LogFilterTest.cpp
 )
 
-target_compile_features(UEBabyPramUnitTest PUBLIC cxx_std_23)
-target_link_libraries(UEBabyPramUnitTest PUBLIC UEBabyPramLib)
+ENABLE_CPP_MODULE()
+
+target_link_libraries(LogFilterTest PUBLIC UEBabyPramModule)

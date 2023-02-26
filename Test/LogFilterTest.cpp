@@ -1,5 +1,4 @@
-#include "UEBabyPram/UEBabyPramLogFilter.h"
-#include <string_view>
+import UEBabyPram.LogFilter;
 
 std::u8string_view Source = 
 u8R"(LogConfig: Setting CVar [[net.AllowAsyncLoading:1]]

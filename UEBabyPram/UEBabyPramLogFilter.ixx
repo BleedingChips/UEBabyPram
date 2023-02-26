@@ -1,9 +1,14 @@
-#pragma once
-#include "Potato/PotatoStrFormat.h"
-#include "Potato/PotatoDocument.h"
-#include <string_view>
+module;
 
-namespace UEBabyPram::LogFilter
+#include <cassert>
+
+export module UEBabyPram.LogFilter;
+
+export import Potato.Encode;
+export import Potato.Reg;
+export import Potato.Document;
+
+export namespace UEBabyPram::LogFilter
 {
 
 	template<typename Type = std::size_t>

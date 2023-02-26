@@ -1,4 +1,10 @@
-#include "UEBabyPram/UEBabyPramLogFilter.h"
+module;
+
+#include <cassert>
+
+module UEBabyPram.LogFilter;
+
+import Potato.Format;
 
 namespace UEBabyPram::LogFilter
 {
@@ -121,7 +127,7 @@ namespace UEBabyPram::LogFilter
 			{
 				std::u8string_view Cur = Re->GetCaptureWrapper().GetTopSubCapture().Slice(Str);
 				std::size_t Index = 0;
-				StrFormat::DirectScan(Cur, Index);
+				Format::DirectScan(Cur, Index);
 				Buffer[I] = Index;
 				Str = Str.substr(Re->GetCaptureWrapper().GetCapture().End());
 			}
