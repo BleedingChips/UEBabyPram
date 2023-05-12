@@ -11,29 +11,25 @@ namespace UEBabyPram::LogFilter
 
 	using namespace Potato;
 
-	Reg::TableWrapper FastParsing() {
-		static auto Buffer = Reg::TableWrapper::Create(
-			u8R"(((?:\[[0-9\.\-:]+?\]\[\s*?[0-9]+?\])?)([0-9a-zA-Z\-\_\z]+?)\: )"
+	Reg::DfaBinaryTableWrapper FastParsing() {
+		static auto Buffer = Reg::DfaBinaryTableWrapper::Create(
+			Reg::DfaT::FormatE::HeadMatch,
+			UR"(((?:\[[0-9\.\-:]+?\]\[\s*?[0-9]+?\])?)([0-9a-zA-Z\-\_\z]+?)\: )"
 		);
-		return Reg::TableWrapper{Buffer};
+		return Reg::DfaBinaryTableWrapper{ Buffer };
 	}
 
 	LogLineProcessor::LogLineProcessor(std::u8string_view TotalStar) : Sperater(TotalStar), Pro(FastParsing()) {}
 
-	auto LogLineProcessor::Translate(Reg::HeadMatchProcessor::Result const& Re, std::size_t Offset, std::size_t StrSize, std::size_t LineOffset)
+	auto LogLineProcessor::Translate(Potato::Reg::ProcessorAcceptT const& Re, std::size_t Offset, std::size_t StrSize, std::size_t LineOffset)
 		-> LogLineIndex
 	{
 		LogLineIndex Result;
-		auto Wra = Re.GetCaptureWrapper();
-		Wra = Wra.GetTopSubCapture();
-		Result.Time = Wra.GetCapture();
-		Result.Time.Offset += Offset;
-		Wra = Wra.GetNextCapture();
-		Result.Category = Wra.GetCapture();
-		Result.Category.Offset += Offset;
+		Result.Time = Re.Capture[0];
+		Result.Category = Re.Capture[1];
 		auto MainCapture = Re.GetCaptureWrapper().GetCapture();
 		Result.Str = { MainCapture.End() + Offset, StrSize - MainCapture.End()};
-		Result.LineIndex = {LineOffset, 1};
+		Result.LineIndex = {LineOffset, LineOffset + 1};
 		return Result;
 	}
 
