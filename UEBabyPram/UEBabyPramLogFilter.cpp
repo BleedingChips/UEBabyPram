@@ -11,24 +11,27 @@ namespace UEBabyPram::LogFilter
 
 	using namespace Potato;
 
-	Reg::DfaBinaryTableWrapper FastParsing() {
-		static auto Buffer = Reg::DfaBinaryTableWrapper::Create(
-			Reg::DfaT::FormatE::HeadMatch,
+	Reg::DfaBinaryTableWrapper const& FastParsing() {
+		static auto Buffer = Reg::CreateDfaBinaryTable(
+			Reg::Dfa::FormatE::HeadMatch,
 			UR"(((?:\[[0-9\.\-:]+?\]\[\s*?[0-9]+?\])?)([0-9a-zA-Z\-\_\z]+?)\: )"
 		);
-		return Reg::DfaBinaryTableWrapper{ Buffer };
+		static Reg::DfaBinaryTableWrapper Wrap{Buffer};
+		return Wrap;
 	}
 
-	LogLineProcessor::LogLineProcessor(std::u8string_view TotalStar) : Sperater(TotalStar), Pro(FastParsing()) {}
+	LogLineProcessor::LogLineProcessor(std::u8string_view TotalStar) : Sperater(TotalStar) {
+		Pro.SetObserverTable(&FastParsing());
+		Pro.Clear();
+	}
 
-	auto LogLineProcessor::Translate(Potato::Reg::ProcessorAcceptT const& Re, std::size_t Offset, std::size_t StrSize, std::size_t LineOffset)
+	auto LogLineProcessor::Translate(Potato::Reg::ProcessorAcceptRef const& Re, std::size_t Offset, std::size_t StrSize, std::size_t LineOffset)
 		-> LogLineIndex
 	{
 		LogLineIndex Result;
-		Result.Time = Re.Capture[0];
-		Result.Category = Re.Capture[1];
-		auto MainCapture = Re.GetCaptureWrapper().GetCapture();
-		Result.Str = { MainCapture.End() + Offset, StrSize - MainCapture.End()};
+		Result.Time = Re[0].WholeOffset(Offset);
+		Result.Category = Re[1].WholeOffset(Offset);
+		Result.Str = Misc::IndexSpan<>{Re.MainCapture.End(), StrSize}.WholeOffset(Offset);
 		Result.LineIndex = {LineOffset, LineOffset + 1};
 		return Result;
 	}
@@ -40,7 +43,7 @@ namespace UEBabyPram::LogFilter
 			std::size_t CurPos = Sperater.GetItePosition();
 			auto LineSpe = Sperater.Consume();
 			Pro.Clear();
-			auto Re = Reg::HeadMatch(Pro, LineSpe.Str);
+			auto Re = Reg::Process(Pro, LineSpe.Str);
 			if (Re)
 			{
 				if (LastIndex.has_value())
@@ -52,21 +55,21 @@ namespace UEBabyPram::LogFilter
 					ReLine.Cagetory = std::u8string_view{ LastIndex->Category.Slice(TotalStr)};
 					ReLine.Str = std::u8string_view{ LastIndex->Str.Slice(TotalStr) };
 					ReLine.LineIndex = LastIndex->LineIndex;
-					IndexSpan<> New{LastIndex->Time.Begin(), LastIndex->Str.End() - LastIndex->Time.Begin() };
+					IndexSpan<> New{LastIndex->Time.Begin(), LastIndex->Str.End() };
 					ReLine.TotalStr = std::u8string_view{New.Slice(TotalStr)};
-					LastIndex = Translate(*Re, CurPos, LineSpe.Str.size(), LastLineCount + 1);
+					LastIndex = Translate(Re, CurPos, LineSpe.Str.size(), LastLineCount + 1);
 					return ReLine;
 				}
 				else {
 					assert(CurPos == 0);
-					LastIndex = Translate(*Re, CurPos, LineSpe.Str.size(), 0);
+					LastIndex = Translate(Re, CurPos, LineSpe.Str.size(), 0);
 				}
 			}
 			else {
 				if (LastIndex.has_value())
 				{
-					LastIndex->LineIndex.Length += 1;
-					LastIndex->Str.Length += LineSpe.Str.size();
+					LastIndex->LineIndex.BackwardEnd(1);
+					LastIndex->Str.BackwardEnd(LineSpe.Str.size());
 				}
 				else {
 					LastIndex = {
@@ -86,7 +89,7 @@ namespace UEBabyPram::LogFilter
 			ReLine.Cagetory = std::u8string_view{ LastIndex->Category.Slice(TotalStr) };
 			ReLine.Str = std::u8string_view{ LastIndex->Str.Slice(TotalStr) };
 			ReLine.LineIndex = LastIndex->LineIndex; 
-			IndexSpan<> New{ LastIndex->Time.Begin(), LastIndex->Str.End() - LastIndex->Time.Begin() };
+			IndexSpan<> New{ LastIndex->Time.Begin(), LastIndex->Str.End() };
 			ReLine.TotalStr = std::u8string_view{ New.Slice(TotalStr) };
 			LastIndex = {};
 			return ReLine;
@@ -101,31 +104,33 @@ namespace UEBabyPram::LogFilter
 		Sperater.Clear();
 	}
 
-	Reg::TableWrapper TimeParsing() {
-		static auto Buffer =
-			Reg::TableWrapper::Create(
+	Reg::DfaBinaryTableWrapper const& TimeParsing() {
+		static auto Buffer = Reg::CreateDfaBinaryTable(
+			Reg::Dfa::FormatE::HeadMatch,
 			u8R"(.*?([0-9]+))"
 		);
-		return Reg::TableWrapper{Buffer};
+		static Reg::DfaBinaryTableWrapper Wrap{Buffer};
+		return Wrap;
 	}
 
 	std::optional<LogTime> LogLineProcessor::GetTime(LogLine Line)
 	{
 		LogTime Result;
-		Reg::HeadMatchProcessor Pro(TimeParsing());
+		Reg::DfaProcessor Pro;
+		Pro.SetObserverTable(&TimeParsing());
 		std::u8string_view Str = Line.Time;
 		std::array<std::size_t, 8> Buffer;
 		for (std::size_t I = 0; I < 8; ++I)
 		{
 			Pro.Clear();
-			auto Re = Reg::HeadMatch(Pro, Str);
+			auto Re = Reg::Process(Pro, Str);
 			if (Re)
 			{
-				std::u8string_view Cur = Re->GetCaptureWrapper().GetTopSubCapture().Slice(Str);
+				std::u8string_view Cur = Re[0].Slice(Str);
 				std::size_t Index = 0;
 				Format::DirectScan(Cur, Index);
 				Buffer[I] = Index;
-				Str = Str.substr(Re->GetCaptureWrapper().GetCapture().End());
+				Str = Str.substr(Re.MainCapture.End());
 			}
 			else {
 				return {};

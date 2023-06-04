@@ -63,10 +63,10 @@ export namespace UEBabyPram::LogFilter
 			IndexSpan<> LineIndex;
 		};
 
-		static LogLineIndex Translate(Potato::Reg::ProcessorAcceptT const& Re, std::size_t Offset, std::size_t StrSize, std::size_t LineOffset);
+		static LogLineIndex Translate(Potato::Reg::ProcessorAcceptRef const& Re, std::size_t Offset, std::size_t StrSize, std::size_t LineOffset);
 
 		std::optional<LogLineIndex> LastIndex;
-		Potato::Reg::HeadMatchProcessor Pro;
+		Potato::Reg::DfaProcessor Pro;
 		Potato::Document::LineSperater Sperater;
 	};
 
