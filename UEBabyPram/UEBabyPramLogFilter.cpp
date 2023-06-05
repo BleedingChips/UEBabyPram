@@ -57,12 +57,12 @@ namespace UEBabyPram::LogFilter
 					ReLine.LineIndex = LastIndex->LineIndex;
 					IndexSpan<> New{LastIndex->Time.Begin(), LastIndex->Str.End() };
 					ReLine.TotalStr = std::u8string_view{New.Slice(TotalStr)};
-					LastIndex = Translate(Re, CurPos, LineSpe.Str.size(), LastLineCount + 1);
+					LastIndex = Translate(Re, CurPos, LineSpe.Str.size(), LastLineCount);
 					return ReLine;
 				}
 				else {
 					assert(CurPos == 0);
-					LastIndex = Translate(Re, CurPos, LineSpe.Str.size(), 0);
+					LastIndex = Translate(Re, CurPos, LineSpe.Str.size(), 1);
 				}
 			}
 			else {
@@ -76,7 +76,7 @@ namespace UEBabyPram::LogFilter
 						{0, 0},
 						{0, 0},
 						{0, LineSpe.Str.size()},
-						{0, 1}
+						{1, 2}
 					};
 				}
 			}
