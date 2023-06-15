@@ -11,17 +11,16 @@ namespace UEBabyPram::LogFilter
 
 	using namespace Potato;
 
-	Reg::DfaBinaryTableWrapper const& FastParsing() {
+	Reg::DfaBinaryTableWrapper FastParsing() {
 		static auto Buffer = Reg::CreateDfaBinaryTable(
 			Reg::Dfa::FormatE::HeadMatch,
 			UR"(((?:\[[0-9\.\-:]+?\]\[\s*?[0-9]+?\])?)([0-9a-zA-Z\-\_\z]+?)\: )"
 		);
-		static Reg::DfaBinaryTableWrapper Wrap{Buffer};
-		return Wrap;
+		return Reg::DfaBinaryTableWrapper{Buffer};
 	}
 
 	LogLineProcessor::LogLineProcessor(std::u8string_view TotalStar) : Sperater(TotalStar) {
-		Pro.SetObserverTable(&FastParsing());
+		Pro.SetObserverTable(FastParsing());
 		Pro.Clear();
 	}
 
@@ -104,20 +103,19 @@ namespace UEBabyPram::LogFilter
 		Sperater.Clear();
 	}
 
-	Reg::DfaBinaryTableWrapper const& TimeParsing() {
+	Reg::DfaBinaryTableWrapper TimeParsing() {
 		static auto Buffer = Reg::CreateDfaBinaryTable(
 			Reg::Dfa::FormatE::HeadMatch,
 			u8R"(.*?([0-9]+))"
 		);
-		static Reg::DfaBinaryTableWrapper Wrap{Buffer};
-		return Wrap;
+		return Reg::DfaBinaryTableWrapper{Buffer};
 	}
 
 	std::optional<LogTime> LogLineProcessor::GetTime(LogLine Line)
 	{
 		LogTime Result;
 		Reg::DfaProcessor Pro;
-		Pro.SetObserverTable(&TimeParsing());
+		Pro.SetObserverTable(TimeParsing());
 		std::u8string_view Str = Line.Time;
 		std::array<std::size_t, 8> Buffer;
 		for (std::size_t I = 0; I < 8; ++I)
