@@ -2,9 +2,9 @@ module;
 
 #include <cassert>
 
-module UEBabyPram.LogFilter;
+module UEBabyPramLogFilter;
 
-import Potato.Format;
+import PotatoFormat;
 
 namespace UEBabyPram::LogFilter
 {

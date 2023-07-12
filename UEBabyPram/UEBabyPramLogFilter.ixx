@@ -2,11 +2,11 @@ module;
 
 #include <cassert>
 
-export module UEBabyPram.LogFilter;
+export module UEBabyPramLogFilter;
 
-export import Potato.Encode;
-export import Potato.Reg;
-export import Potato.Document;
+export import PotatoEncode;
+export import PotatoReg;
+export import PotatoDocument;
 
 export namespace UEBabyPram::LogFilter
 {
