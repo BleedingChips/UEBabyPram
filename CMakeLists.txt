@@ -25,6 +25,7 @@ target_sources(
 	FILE_SET cxx_modules TYPE CXX_MODULES
 	FILES
 		"UEBabyPram/UEBabyPramLogFilter.ixx"
+		"UEBabyPram/UEBabyPram.ixx"
 )
 
 target_link_libraries(UEBabyPramModule PUBLIC PotatoModule)
