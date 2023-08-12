@@ -1,18 +1,27 @@
 set_project("UEBabyPram")
-add_rules("mode.debug", "mode.release")
-set_languages("cxxlatest")
+option("UEBabyPramUnitTest", {default = false, description = "Enable Unit Test"})
 
-includes("../Potato/")
+if has_config("UEBabyPramUnitTest") then
+    includes("../Potato/")
+end
 
 target("UEBabyPram")
     set_kind("static")
     add_files("UEBabyPram/*.cpp")
     add_files("UEBabyPram/*.ixx")
     add_deps("Potato")
+    add_rules("mode.debug", "mode.release")
+    set_languages("cxxlatest")
 
-target("UEBabyPramLogFilterTest")
-    set_kind("binary")
-    add_files("Test/LogFilterTest.cpp")
-    add_deps("UEBabyPram")
+if has_config("UEBabyPramUnitTest") then
+    target("UEBabyPramLogFilterTest")
+        set_kind("binary")
+        add_files("Test/LogFilterTest.cpp")
+        add_deps("UEBabyPram")
+end
+
+
+
+
 
 
