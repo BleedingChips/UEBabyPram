@@ -18,6 +18,8 @@ if has_config("UEBabyPramUnitTest") then
         set_kind("binary")
         add_files("Test/LogFilterTest.cpp")
         add_deps("UEBabyPram")
+        add_rules("mode.debug", "mode.release")
+        set_languages("cxxlatest")
 end
 
 
