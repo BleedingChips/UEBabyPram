@@ -4,9 +4,11 @@ module;
 
 export module UEBabyPramLogFilter;
 
-export import PotatoEncode;
-export import PotatoReg;
-export import PotatoDocument;
+import PotatoEncode;
+import PotatoReg;
+import PotatoDocument;
+import PotatoMisc;
+import std;
 
 export namespace UEBabyPram::LogFilter
 {
