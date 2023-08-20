@@ -2,7 +2,6 @@ add_rules("mode.debug", "mode.release")
 set_languages("cxxlatest")
 
 if os.scriptdir() == os.projectdir() then
-    set_project("UEBabyPram")
     includes("../Potato/")
 end
 
