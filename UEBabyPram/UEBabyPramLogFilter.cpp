@@ -4,6 +4,7 @@ module;
 
 module UEBabyPramLogFilter;
 
+import std;
 import PotatoFormat;
 
 namespace UEBabyPram::LogFilter
@@ -16,10 +17,10 @@ namespace UEBabyPram::LogFilter
 			Reg::Dfa::FormatE::HeadMatch,
 			UR"(((?:\[[0-9\.\-:]+?\]\[\s*?[0-9]+?\])?)([0-9a-zA-Z\-\_\z]+?)\: )"
 		);
-		return Reg::DfaBinaryTableWrapper{Buffer};
+		return Reg::DfaBinaryTableWrapper{std::span(Buffer)};
 	}
 
-	LogLineProcessor::LogLineProcessor(std::u8string_view TotalStar) : Sperater(TotalStar) {
+	LogLineProcessor::LogLineProcessor(std::u8string_view TotalStar) : TotalStr(TotalStar) {
 		Pro.SetObserverTable(FastParsing());
 		Pro.Clear();
 	}
@@ -37,18 +38,20 @@ namespace UEBabyPram::LogFilter
 
 	std::optional<LogLine> LogLineProcessor::Consume()
 	{
-		while (Sperater)
+		while (Offset < TotalStr.size())
 		{
-			std::size_t CurPos = Sperater.GetItePosition();
-			auto LineSpe = Sperater.Consume();
+
+			auto Result = Document::LineSplitter::Split(TotalStr, false, Offset);
+
+			std::size_t CurPos = Offset;
+			auto LineSpe = TotalStr.substr(Offset, Result.line_count);
 			Pro.Clear();
-			auto Re = Reg::Process(Pro, LineSpe.Str);
+			auto Re = Reg::Process(Pro, LineSpe);
 			if (Re)
 			{
 				if (LastIndex.has_value())
 				{
 					std::size_t LastLineCount = LastIndex->LineIndex.End();
-					auto TotalStr = Sperater.GetTotalStr();
 					LogLine ReLine;
 					ReLine.Time = std::u8string_view{LastIndex->Time.Slice(TotalStr)};
 					ReLine.Cagetory = std::u8string_view{ LastIndex->Category.Slice(TotalStr)};
@@ -56,25 +59,25 @@ namespace UEBabyPram::LogFilter
 					ReLine.LineIndex = LastIndex->LineIndex;
 					IndexSpan<> New{LastIndex->Time.Begin(), LastIndex->Str.End() };
 					ReLine.TotalStr = std::u8string_view{New.Slice(TotalStr)};
-					LastIndex = Translate(Re, CurPos, LineSpe.Str.size(), LastLineCount);
+					LastIndex = Translate(Re, CurPos, Result.line_count, LastLineCount);
 					return ReLine;
 				}
 				else {
 					assert(CurPos == 0);
-					LastIndex = Translate(Re, CurPos, LineSpe.Str.size(), 1);
+					LastIndex = Translate(Re, CurPos, Result.line_count, 1);
 				}
 			}
 			else {
 				if (LastIndex.has_value())
 				{
 					LastIndex->LineIndex.BackwardEnd(1);
-					LastIndex->Str.BackwardEnd(LineSpe.Str.size());
+					LastIndex->Str.BackwardEnd(Result.line_count);
 				}
 				else {
 					LastIndex = {
 						{0, 0},
 						{0, 0},
-						{0, LineSpe.Str.size()},
+						{0, Result.line_count},
 						{1, 2}
 					};
 				}
@@ -83,7 +86,6 @@ namespace UEBabyPram::LogFilter
 		if (LastIndex.has_value())
 		{
 			LogLine ReLine;
-			auto TotalStr = Sperater.GetTotalStr();
 			ReLine.Time = std::u8string_view{LastIndex->Time.Slice(TotalStr)};
 			ReLine.Cagetory = std::u8string_view{ LastIndex->Category.Slice(TotalStr) };
 			ReLine.Str = std::u8string_view{ LastIndex->Str.Slice(TotalStr) };
@@ -100,7 +102,7 @@ namespace UEBabyPram::LogFilter
 	{
 		LastIndex = {};
 		Pro.Clear();
-		Sperater.Clear();
+		Offset = 0;
 	}
 
 	Reg::DfaBinaryTableWrapper TimeParsing() {
@@ -108,7 +110,7 @@ namespace UEBabyPram::LogFilter
 			Reg::Dfa::FormatE::HeadMatch,
 			u8R"(.*?([0-9]+))"
 		);
-		return Reg::DfaBinaryTableWrapper{Buffer};
+		return Reg::DfaBinaryTableWrapper{std::span(Buffer)};
 	}
 
 	std::optional<LogTime> LogLineProcessor::GetTime(LogLine Line)

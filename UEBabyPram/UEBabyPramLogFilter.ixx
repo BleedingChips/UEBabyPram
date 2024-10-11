@@ -49,7 +49,7 @@ export namespace UEBabyPram::LogFilter
 
 		LogLineProcessor(std::u8string_view TotalStr);
 
-		operator bool() const {return Sperater || LastIndex.has_value(); }
+		operator bool() const {return Offset < TotalStr.size() || LastIndex.has_value(); }
 
 		static std::optional<LogTime> GetTime(LogLine InputLine);
 
@@ -69,7 +69,8 @@ export namespace UEBabyPram::LogFilter
 
 		std::optional<LogLineIndex> LastIndex;
 		Potato::Reg::DfaProcessor Pro;
-		Potato::Document::LineSperater Sperater;
+		std::size_t Offset = 0;
+		std::u8string_view TotalStr;
 	};
 
 	template<typename Func>
