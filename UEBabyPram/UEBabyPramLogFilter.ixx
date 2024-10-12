@@ -32,6 +32,7 @@ export namespace UEBabyPram::LogFilter
 	{
 		std::u8string_view Time;
 		std::u8string_view Cagetory;
+		std::u8string_view Level;
 		std::u8string_view Str;
 		std::u8string_view TotalStr;
 		IndexSpan<> LineIndex;

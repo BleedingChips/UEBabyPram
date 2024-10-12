@@ -36,15 +36,23 @@ namespace UEBabyPram::LogFilter
 		return Result;
 	}
 
+	constexpr std::u8string_view Levels[] = {
+		u8"Fatal: ",
+		u8"Error: ",
+		u8"Warning: ",
+		u8"Display: ",
+		u8"Verbose: ",
+		u8"VeryVerbose: "
+	};
+
 	std::optional<LogLine> LogLineProcessor::Consume()
 	{
 		while (Offset < TotalStr.size())
 		{
-
-			auto Result = Document::LineSplitter::Split(TotalStr, false, Offset);
-
 			std::size_t CurPos = Offset;
-			auto LineSpe = TotalStr.substr(Offset, Result.line_count);
+			auto Result = Document::StringSplitter::SplitLine(TotalStr, Offset);
+			auto LineSpe = Result.SliceWithoutLine(TotalStr);
+			Offset = Result.GetLineEnd();
 			Pro.Clear();
 			auto Re = Reg::Process(Pro, LineSpe);
 			if (Re)
@@ -55,29 +63,39 @@ namespace UEBabyPram::LogFilter
 					LogLine ReLine;
 					ReLine.Time = std::u8string_view{LastIndex->Time.Slice(TotalStr)};
 					ReLine.Cagetory = std::u8string_view{ LastIndex->Category.Slice(TotalStr)};
+					ReLine.Level = u8"Log";
 					ReLine.Str = std::u8string_view{ LastIndex->Str.Slice(TotalStr) };
+					for(auto ite : Levels)
+					{
+						if(ReLine.Str.starts_with(ite))
+						{
+							ReLine.Level = ReLine.Str.substr(0, ite.size() - 2);
+							ReLine.Str = ReLine.Str.substr(ite.size());
+							break;
+						}
+					}
 					ReLine.LineIndex = LastIndex->LineIndex;
 					IndexSpan<> New{LastIndex->Time.Begin(), LastIndex->Str.End() };
 					ReLine.TotalStr = std::u8string_view{New.Slice(TotalStr)};
-					LastIndex = Translate(Re, CurPos, Result.line_count, LastLineCount);
+					LastIndex = Translate(Re, CurPos, Result.SizeWithoutLine(), LastLineCount);
 					return ReLine;
 				}
 				else {
 					assert(CurPos == 0);
-					LastIndex = Translate(Re, CurPos, Result.line_count, 1);
+					LastIndex = Translate(Re, CurPos, Result.SizeWithoutLine(), 1);
 				}
 			}
 			else {
 				if (LastIndex.has_value())
 				{
 					LastIndex->LineIndex.BackwardEnd(1);
-					LastIndex->Str.BackwardEnd(Result.line_count);
+					LastIndex->Str.BackwardEnd(Result.SizeWithoutLine());
 				}
 				else {
 					LastIndex = {
 						{0, 0},
 						{0, 0},
-						{0, Result.line_count},
+						{0, Result.SizeWithoutLine()},
 						{1, 2}
 					};
 				}
@@ -88,7 +106,17 @@ namespace UEBabyPram::LogFilter
 			LogLine ReLine;
 			ReLine.Time = std::u8string_view{LastIndex->Time.Slice(TotalStr)};
 			ReLine.Cagetory = std::u8string_view{ LastIndex->Category.Slice(TotalStr) };
+			ReLine.Level = u8"Log";
 			ReLine.Str = std::u8string_view{ LastIndex->Str.Slice(TotalStr) };
+			for(auto ite : Levels)
+			{
+				if(ReLine.Str.starts_with(ite))
+				{
+					ReLine.Level = ReLine.Str.substr(0, ite.size() - 2);
+					ReLine.Str = ReLine.Str.substr(ite.size());
+					break;
+				}
+			}
 			ReLine.LineIndex = LastIndex->LineIndex; 
 			IndexSpan<> New{ LastIndex->Time.Begin(), LastIndex->Str.End() };
 			ReLine.TotalStr = std::u8string_view{ New.Slice(TotalStr) };
