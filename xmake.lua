@@ -8,7 +8,7 @@ end
 target("UEBabyPram")
     set_kind("static")
     add_files("UEBabyPram/*.cpp")
-    add_files("UEBabyPram/*.ixx")
+    add_files("UEBabyPram/*.ixx", {public=true})
     add_deps("Potato")
 target_end()
 
