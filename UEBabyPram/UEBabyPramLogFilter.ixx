@@ -4,11 +4,9 @@ module;
 
 export module UEBabyPramLogFilter;
 
-import PotatoEncode;
-import PotatoReg;
-import PotatoDocument;
-import PotatoMisc;
 import std;
+import Potato;
+
 
 export namespace UEBabyPram::LogFilter
 {
@@ -30,69 +28,80 @@ export namespace UEBabyPram::LogFilter
 
 	struct LogLine
 	{
-		std::u8string_view Time;
-		std::u8string_view Cagetory;
-		std::u8string_view Level;
-		std::u8string_view Str;
-		std::u8string_view TotalStr;
-		IndexSpan<> LineIndex;
+		std::wstring_view time;
+		std::wstring_view category;
+		std::wstring_view level;
+		std::wstring_view str;
+		std::wstring_view total_str;
+		IndexSpan<> line;
 	};
 
 	struct LogLineProcessor
 	{
-		struct Result
-		{
-			std::optional<LogLine> CaptureLine;
-			bool IsEnd;
-		};
-
-		std::optional<LogLine> Consume();
-
-		LogLineProcessor(std::u8string_view TotalStr);
-
-		operator bool() const {return Offset < TotalStr.size() || LastIndex.has_value(); }
-
-		static std::optional<LogTime> GetTime(LogLine InputLine);
-
+		std::optional<LogLine> ConsumeLinedString(std::wstring_view lined_string);
+		std::optional<LogLine> End();
 		void Clear();
-
-	private:
-
+		static std::optional<LogTime> GetTime(LogLine InputLine);
+		LogLineProcessor();
+	protected:
 		struct LogLineIndex
 		{
-			IndexSpan<> Time;
-			IndexSpan<> Category;
-			IndexSpan<> Str;
-			IndexSpan<> LineIndex;
+			IndexSpan<> time;
+			IndexSpan<> category;
+			IndexSpan<> line;
+			std::size_t str_offset;
 		};
-
-		static LogLineIndex Translate(Potato::Reg::ProcessorAcceptRef const& Re, std::size_t Offset, std::size_t StrSize, std::size_t LineOffset);
-
+		static LogLineIndex Translate(Potato::Reg::ProcessorAcceptRef const& Re, std::size_t LineOffset);
+		Potato::Reg::DfaProcessor processor;
+		std::wstring temporary_buffer;
+		std::wstring finished_string;
 		std::optional<LogLineIndex> LastIndex;
-		Potato::Reg::DfaProcessor Pro;
-		std::size_t Offset = 0;
-		std::u8string_view TotalStr;
 	};
 
 	template<typename Func>
-	std::size_t ForeachLogLine(LogLineProcessor& Pro, Func&& Fun) requires(std::is_invocable_v<Func&&, LogLine>)
+	void ForeachLogLine(std::wstring_view str, Func&& fun) requires(std::is_invocable_v<Func&&, LogLine>)
 	{
-		Pro.Clear();
-		std::size_t Count = 0;
-		while (Pro)
+		LogLineProcessor processor;
+		auto ite = str;
+		while (!ite.empty())
 		{
-			auto Re = Pro.Consume();
-			assert(Re);
-			std::forward<Func>(Fun)(*Re);
-			++Count;
+			auto offset = ite.find(L'\n');
+			if (offset != ite.size())
+				offset += 1;
+			auto line = processor.ConsumeLinedString(ite.substr(0, offset));
+			if (line)
+				fun(*line);
+			ite = ite.substr(offset);
 		}
-		return Count;
+		auto line = processor.End();
+		if (line)
+			fun(*line);
 	}
 
 	template<typename Func>
-	std::size_t ForeachLogLine(std::u8string_view Str, Func&& Fun) requires(std::is_invocable_v<Func&&, LogLine>)
+	void ForeachLogLine(Potato::Document::DocumentReader& reader, Func&& fun) requires(std::is_invocable_v<Func&&, LogLine>)
 	{
-		LogLineProcessor Pro(Str);
-		return ForeachLogLine(Pro, std::forward<Func>(Fun));
+		LogLineProcessor processor;
+
+		std::wstring current_line;
+
+		while (true)
+		{
+			current_line.clear();
+			reader.ReadLine(std::back_inserter(current_line));
+			std::optional<LogLine> logline_result;
+			if (!current_line.empty())
+			{
+				logline_result = processor.ConsumeLinedString(current_line);
+			}
+			else {
+				logline_result = processor.End();
+			}
+			if (logline_result)
+				fun(*logline_result);
+			
+			if (current_line.empty())
+				break;
+		}
 	}
 }
