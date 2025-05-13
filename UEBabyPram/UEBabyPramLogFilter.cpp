@@ -62,7 +62,7 @@ namespace UEBabyPram::LogFilter
 				ReLine.time = std::wstring_view{ LastIndex->time.Slice(std::wstring_view{finished_string}) };
 				ReLine.category = std::wstring_view{ LastIndex->category.Slice(std::wstring_view{finished_string}) };
 				ReLine.level = L"Log";
-				ReLine.str = std::wstring_view{ finished_string.substr(LastIndex->str_offset)};
+				ReLine.str = std::wstring_view{ finished_string }.substr(LastIndex->str_offset);
 				for (auto ite : Levels)
 				{
 					if (ReLine.str.starts_with(ite))

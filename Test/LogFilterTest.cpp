@@ -39,10 +39,15 @@ int main()
 					auto time = UEBabyPram::LogFilter::LogLineProcessor::GetTime(line);
 					volatile int i = 0;
 				}
-				doc_writer.Write(line.total_str);
+				std::format_to(
+					doc_writer.AsOutputIterator(),
+					L"Line-{}:{}",
+					line.line.Begin(),
+					line.total_str
+				);
 				volatile int i = 0;
 				});
-			std::format_to(doc_writer.AsOutputIterator(), L"Fuck You {}", L"你是多久啊是的");
+			std::format_to(doc_writer.AsOutputIterator(), L"\r\nEOF {}", L"EndOfFile");
 		}
 		
 		
