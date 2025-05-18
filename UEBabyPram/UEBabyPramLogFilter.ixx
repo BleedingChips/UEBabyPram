@@ -14,26 +14,18 @@ export namespace UEBabyPram::LogFilter
 	template<typename Type = std::size_t>
 	using IndexSpan = Potato::Misc::IndexSpan<Type>;
 
-	struct LogTime
-	{
-		std::size_t Year = 0;
-		std::size_t Month = 0;
-		std::size_t Day = 0;
-		std::size_t Hour = 0;
-		std::size_t Min = 0;
-		std::size_t Sec = 0;
-		std::size_t MSec = 0;
-		std::size_t FrameCount = 0;
-	};
-
 	struct LogLine
 	{
+		using TimeT = std::chrono::system_clock::time_point;
 		std::wstring_view time;
+		std::wstring_view frame_count;
 		std::wstring_view category;
 		std::wstring_view level;
 		std::wstring_view str;
 		std::wstring_view total_str;
 		IndexSpan<> line;
+		std::optional<std::size_t> GetFrameCount() const;
+		std::optional<TimeT> GetTimePoint() const;
 	};
 
 	struct LogLineProcessor
@@ -41,12 +33,12 @@ export namespace UEBabyPram::LogFilter
 		std::optional<LogLine> ConsumeLinedString(std::wstring_view lined_string);
 		std::optional<LogLine> End();
 		void Clear();
-		static std::optional<LogTime> GetTime(LogLine InputLine);
 		LogLineProcessor();
 	protected:
 		struct LogLineIndex
 		{
 			IndexSpan<> time;
+			IndexSpan<> frame_count;
 			IndexSpan<> category;
 			IndexSpan<> line;
 			std::size_t str_offset;
