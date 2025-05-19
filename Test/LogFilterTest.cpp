@@ -33,11 +33,7 @@ int main()
 			);
 
 			auto dif = std::chrono::duration_cast<std::chrono::years>(std::chrono::system_clock::now() - *time);
-
 		}
-
-		
-
 	});
 
 	std::filesystem::path filter = LR"(C:\Users\chips\Desktop\bat.txt)";
@@ -45,31 +41,46 @@ int main()
 	Potato::Document::BinaryStreamReader reader(filter);
 	if (reader)
 	{
-		Potato::Document::DocumentReader doc_reader(reader);
+		auto total_size = reader.GetStreamSize();
+		std::vector<std::byte> buffer;
+		buffer.resize(total_size);
+		reader.Read(std::span(buffer));
+
+		Potato::Document::DocumentReader doc_reader(buffer);
+
+		std::wstring str;
+
+		doc_reader.Read(std::back_inserter(str));
+
 		auto new_file = filter;
 		new_file.replace_extension(L"output");
 		Potato::Document::BinaryStreamWriter writter(new_file, Potato::Document::BinaryStreamWriter::OpenMode::CREATE_OR_EMPTY);
 		if (writter)
 		{
-			Potato::Document::DocumentWriter doc_writer(writter, Potato::Document::BomT::UTF8, true);
-			UEBabyPram::LogFilter::ForeachLogLine(doc_reader, [&](UEBabyPram::LogFilter::LogLine line) {
+			std::wstring output;
+			
+			UEBabyPram::LogFilter::ForeachLogLine(str, [&](UEBabyPram::LogFilter::LogLine line) {
 				if (!line.time.empty())
 				{
 					auto time = line.GetTimePoint();
 					volatile int i = 0;
 				}
 
-				for (std::size_t i = 0; i < 10000; ++i)
+				for (std::size_t i = 0; i < 10; ++i)
 				{
 					std::format_to(
-						doc_writer.AsOutputIterator(),
+						std::back_inserter(output),
 						L"Line-{}:{}",
 						line.line.Begin(),
 						line.total_str
 					);
 				}
 				});
-			std::format_to(doc_writer.AsOutputIterator(), L"\r\nEOF {}", L"EndOfFile");
+			std::format_to(std::back_inserter(output), L"\r\nEOF {}", L"EndOfFile");
+
+			Potato::Document::DocumentWriter doc_writer(Potato::Document::BomT::UTF8, true);
+			doc_writer.Write(output);
+			doc_writer.FlushTo(writter);
 		}
 	}
 

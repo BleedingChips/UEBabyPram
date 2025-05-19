@@ -69,31 +69,4 @@ export namespace UEBabyPram::LogFilter
 		if (line)
 			fun(*line);
 	}
-
-	template<typename Func>
-	void ForeachLogLine(Potato::Document::DocumentReader& reader, Func&& fun) requires(std::is_invocable_v<Func&&, LogLine>)
-	{
-		LogLineProcessor processor;
-
-		std::wstring current_line;
-
-		while (true)
-		{
-			current_line.clear();
-			reader.ReadLine(std::back_inserter(current_line));
-			std::optional<LogLine> logline_result;
-			if (!current_line.empty())
-			{
-				logline_result = processor.ConsumeLinedString(current_line);
-			}
-			else {
-				logline_result = processor.End();
-			}
-			if (logline_result)
-				fun(*logline_result);
-			
-			if (current_line.empty())
-				break;
-		}
-	}
 }
