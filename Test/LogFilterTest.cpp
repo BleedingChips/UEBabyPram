@@ -2,8 +2,8 @@ import UEBabyPramLogFilter;
 import std;
 import Potato;
 
-std::wstring_view Source = 
-LR"(LogConfig: Setting CVar [[net.AllowAsyncLoading:1]]
+std::string_view Source = 
+R"(LogConfig: Setting CVar [[net.AllowAsyncLoading:1]]
 [2021.10.11-11.53.12:082][178]LogConfig: Setting CVar [[con.DebugEarlyDefault:1]]
 [2021.10.11-11.53.12:082][  0]LogConfig: Display: Setting CVar [[con.DebugEarlyDefault:1]]
 )";
@@ -24,11 +24,11 @@ int main()
 				*time
 			};
 
-			std::wstring ptr;
+			std::string ptr;
 
 			std::format_to(
 				std::back_inserter(ptr),
-				L"{:%Y.%m.%d-%H:%M:%S}",
+				"{:%Y.%m.%d-%H:%M:%S}",
 				zone_t
 			);
 
@@ -36,7 +36,7 @@ int main()
 		}
 	});
 
-	std::filesystem::path filter = LR"(C:\Users\chips\Desktop\bat.txt)";
+	std::filesystem::path filter = R"(C:\Users\chips\Desktop\bat.txt)";
 
 	Potato::Document::BinaryStreamReader reader(filter);
 	if (reader)
@@ -48,16 +48,16 @@ int main()
 
 		Potato::Document::DocumentReader doc_reader(buffer);
 
-		std::wstring str;
+		std::string str;
 
 		doc_reader.Read(std::back_inserter(str));
 
 		auto new_file = filter;
-		new_file.replace_extension(L"output");
+		new_file.replace_extension("output");
 		Potato::Document::BinaryStreamWriter writter(new_file, Potato::Document::BinaryStreamWriter::OpenMode::CREATE_OR_EMPTY);
 		if (writter)
 		{
-			std::wstring output;
+			std::string output;
 			
 			UEBabyPram::LogFilter::ForeachLogLine(str, [&](UEBabyPram::LogFilter::LogLine line) {
 				if (!line.time.empty())
@@ -70,16 +70,16 @@ int main()
 				{
 					std::format_to(
 						std::back_inserter(output),
-						L"Line-{}:{}",
+						"Line-{}:{}",
 						line.line.Begin(),
 						line.total_str
 					);
 				}
 				});
-			std::format_to(std::back_inserter(output), L"\r\nEOF {}", L"EndOfFile");
+			std::format_to(std::back_inserter(output), "\r\nEOF {}", "EndOfFile");
 
 			Potato::Document::DocumentWriter doc_writer(Potato::Document::BomT::UTF8, true);
-			doc_writer.Write(output);
+			doc_writer.Write(std::string_view{ reinterpret_cast<char const*>(output.data()), output.size() });
 			doc_writer.FlushTo(writter);
 		}
 	}

@@ -17,12 +17,12 @@ export namespace UEBabyPram::LogFilter
 	struct LogLine
 	{
 		using TimeT = std::chrono::system_clock::time_point;
-		std::wstring_view time;
-		std::wstring_view frame_count;
-		std::wstring_view category;
-		std::wstring_view level;
-		std::wstring_view str;
-		std::wstring_view total_str;
+		std::string_view time;
+		std::string_view frame_count;
+		std::string_view category;
+		std::string_view level;
+		std::string_view str;
+		std::string_view total_str;
 		IndexSpan<> line;
 		std::optional<std::size_t> GetFrameCount() const;
 		std::optional<TimeT> GetTimePoint() const;
@@ -30,7 +30,7 @@ export namespace UEBabyPram::LogFilter
 
 	struct LogLineProcessor
 	{
-		std::optional<LogLine> ConsumeLinedString(std::wstring_view lined_string);
+		std::optional<LogLine> ConsumeLinedString(std::string_view lined_string);
 		std::optional<LogLine> End();
 		void Clear();
 		LogLineProcessor();
@@ -45,19 +45,19 @@ export namespace UEBabyPram::LogFilter
 		};
 		static LogLineIndex Translate(Potato::Reg::ProcessorAcceptRef const& Re, std::size_t LineOffset);
 		Potato::Reg::DfaProcessor processor;
-		std::wstring temporary_buffer;
-		std::wstring finished_string;
+		std::string temporary_buffer;
+		std::string finished_string;
 		std::optional<LogLineIndex> LastIndex;
 	};
 
 	template<typename Func>
-	void ForeachLogLine(std::wstring_view str, Func&& fun) requires(std::is_invocable_v<Func&&, LogLine>)
+	void ForeachLogLine(std::string_view str, Func&& fun) requires(std::is_invocable_v<Func&&, LogLine>)
 	{
 		LogLineProcessor processor;
 		auto ite = str;
 		while (!ite.empty())
 		{
-			auto offset = ite.find(L'\n');
+			auto offset = ite.find('\n');
 			if (offset != ite.size())
 				offset += 1;
 			auto line = processor.ConsumeLinedString(ite.substr(0, offset));

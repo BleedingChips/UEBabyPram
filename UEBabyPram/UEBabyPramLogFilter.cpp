@@ -38,16 +38,16 @@ namespace UEBabyPram::LogFilter
 		return line_index;
 	}
 
-	constexpr std::wstring_view Levels[] = {
-		L"Fatal: ",
-		L"Error: ",
-		L"Warning: ",
-		L"Display: ",
-		L"Verbose: ",
-		L"VeryVerbose: "
+	constexpr std::string_view Levels[] = {
+		"Fatal: ",
+		"Error: ",
+		"Warning: ",
+		"Display: ",
+		"Verbose: ",
+		"VeryVerbose: "
 	};
 
-	std::optional<LogLine> LogLineProcessor::ConsumeLinedString(std::wstring_view lined_string)
+	std::optional<LogLine> LogLineProcessor::ConsumeLinedString(std::string_view lined_string)
 	{
 		processor.Clear();
 		auto re = Reg::Process(processor, lined_string);
@@ -60,11 +60,11 @@ namespace UEBabyPram::LogFilter
 
 				std::size_t LastLineCount = LastIndex->line.End();
 				LogLine ReLine;
-				ReLine.time = std::wstring_view{ LastIndex->time.Slice(std::wstring_view{finished_string}) };
-				ReLine.frame_count = std::wstring_view{ LastIndex->frame_count.Slice(std::wstring_view{finished_string}) };
-				ReLine.category = std::wstring_view{ LastIndex->category.Slice(std::wstring_view{finished_string}) };
-				ReLine.level = L"Log";
-				ReLine.str = std::wstring_view{ finished_string }.substr(LastIndex->str_offset);
+				ReLine.time = std::string_view{ LastIndex->time.Slice(std::string_view{finished_string}) };
+				ReLine.frame_count = std::string_view{ LastIndex->frame_count.Slice(std::string_view{finished_string}) };
+				ReLine.category = std::string_view{ LastIndex->category.Slice(std::string_view{finished_string}) };
+				ReLine.level = "Log";
+				ReLine.str = std::string_view{ finished_string }.substr(LastIndex->str_offset);
 				for (auto ite : Levels)
 				{
 					if (ReLine.str.starts_with(ite))
@@ -75,7 +75,7 @@ namespace UEBabyPram::LogFilter
 					}
 				}
 				ReLine.line = LastIndex->line;
-				ReLine.total_str = std::wstring_view{ finished_string };
+				ReLine.total_str = std::string_view{ finished_string };
 				LastIndex = Translate(re, LastLineCount);
 				return ReLine;
 			}
@@ -111,10 +111,10 @@ namespace UEBabyPram::LogFilter
 
 			std::size_t LastLineCount = LastIndex->line.End();
 			LogLine ReLine;
-			ReLine.time = std::wstring_view{ LastIndex->time.Slice(std::wstring_view{finished_string}) };
-			ReLine.category = std::wstring_view{ LastIndex->category.Slice(std::wstring_view{finished_string}) };
-			ReLine.level = L"Log";
-			ReLine.str = std::wstring_view{ finished_string.substr(LastIndex->str_offset) };
+			ReLine.time = std::string_view{ LastIndex->time.Slice(std::string_view{finished_string}) };
+			ReLine.category = std::string_view{ LastIndex->category.Slice(std::string_view{finished_string}) };
+			ReLine.level = "Log";
+			ReLine.str = std::string_view{ finished_string.substr(LastIndex->str_offset) };
 			for (auto ite : Levels)
 			{
 				if (ReLine.str.starts_with(ite))
@@ -125,7 +125,7 @@ namespace UEBabyPram::LogFilter
 				}
 			}
 			ReLine.line = LastIndex->line;
-			ReLine.total_str = std::wstring_view{ finished_string };
+			ReLine.total_str = std::string_view{ finished_string };
 			LastIndex.reset();
 			return ReLine;
 		}
@@ -167,7 +167,7 @@ namespace UEBabyPram::LogFilter
 		{
 			Reg::DfaProcessor Pro;
 			Pro.SetObserverTable(TimeParsing());
-			std::wstring_view ite_time = time;
+			std::string_view ite_time = time;
 			std::array<std::size_t, 7> Buffer;
 			for (std::size_t I = 0; I < 7; ++I)
 			{
@@ -175,7 +175,7 @@ namespace UEBabyPram::LogFilter
 				auto Re = Reg::Process(Pro, ite_time);
 				if (Re)
 				{
-					std::wstring_view cur = Re[0].Slice(ite_time);
+					std::string_view cur = Re[0].Slice(ite_time);
 					std::size_t Index = 0;
 					Format::DirectScan(cur, Index);
 					Buffer[I] = Index;
