@@ -2,8 +2,8 @@ import UEBabyPramLogFilter;
 import std;
 import Potato;
 
-std::string_view Source = 
-R"(LogConfig: Setting CVar [[net.AllowAsyncLoading:1]]
+std::u8string_view Source = 
+u8R"(LogConfig: Setting CVar [[net.AllowAsyncLoading:1]]
 [2021.10.11-11.53.12:082][178]LogConfig: Setting CVar [[con.DebugEarlyDefault:1]]
 [2021.10.11-11.53.12:082][  0]LogConfig: Display: Setting CVar [[con.DebugEarlyDefault:1]]
 )";
@@ -26,17 +26,19 @@ int main()
 
 			std::string ptr;
 
+			/*
 			std::format_to(
 				std::back_inserter(ptr),
 				"{:%Y.%m.%d-%H:%M:%S}",
 				zone_t
 			);
+			*/
 
 			auto dif = std::chrono::duration_cast<std::chrono::years>(std::chrono::system_clock::now() - *time);
 		}
 	});
 
-	std::filesystem::path filter = R"(C:\Users\chips\Desktop\bat.txt)";
+	std::filesystem::path filter = u8R"(C:\Users\chips\Desktop\bat.txt)";
 
 	Potato::Document::BinaryStreamReader reader(filter);
 	if (reader)
@@ -48,7 +50,7 @@ int main()
 
 		Potato::Document::DocumentReader doc_reader(buffer);
 
-		std::string str;
+		std::u8string str;
 
 		doc_reader.Read(std::back_inserter(str));
 
@@ -79,7 +81,7 @@ int main()
 			std::format_to(std::back_inserter(output), "\r\nEOF {}", "EndOfFile");
 
 			Potato::Document::DocumentWriter doc_writer(Potato::Document::BomT::UTF8, true);
-			doc_writer.Write(std::string_view{ reinterpret_cast<char const*>(output.data()), output.size() });
+			doc_writer.Write(std::u8string_view{ reinterpret_cast<char8_t const*>(output.data()), output.size() });
 			doc_writer.FlushTo(writter);
 		}
 	}

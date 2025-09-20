@@ -23,7 +23,6 @@ if os.scriptdir() == os.projectdir() then
             set_kind("binary")
             add_files(file)
             add_deps("UEBabyPram")
-            add_cxxflags("/utf-8")
         target_end()
 
     end

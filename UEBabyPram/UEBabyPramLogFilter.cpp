@@ -15,7 +15,7 @@ namespace UEBabyPram::LogFilter
 	Reg::DfaBinaryTableWrapper FastParsing() {
 		static auto Buffer = Reg::CreateDfaBinaryTable(
 			Reg::Dfa::FormatE::HeadMatch,
-			LR"((?:\[([0-9\.\-:]+?)\]\[\s*?([0-9]+?)\])?([0-9a-zA-Z\-\_\z]+?)\: )"
+			u8R"((?:\[([0-9\.\-:]+?)\]\[\s*?([0-9]+?)\])?([0-9a-zA-Z\-\_\z]+?)\: )"
 		);
 		return Reg::DfaBinaryTableWrapper{std::span(Buffer)};
 	}
@@ -38,16 +38,16 @@ namespace UEBabyPram::LogFilter
 		return line_index;
 	}
 
-	constexpr std::string_view Levels[] = {
-		"Fatal: ",
-		"Error: ",
-		"Warning: ",
-		"Display: ",
-		"Verbose: ",
-		"VeryVerbose: "
+	constexpr std::u8string_view Levels[] = {
+		u8"Fatal: ",
+		u8"Error: ",
+		u8"Warning: ",
+		u8"Display: ",
+		u8"Verbose: ",
+		u8"VeryVerbose: "
 	};
 
-	std::optional<LogLine> LogLineProcessor::ConsumeLinedString(std::string_view lined_string)
+	std::optional<LogLine> LogLineProcessor::ConsumeLinedString(std::u8string_view lined_string)
 	{
 		processor.Clear();
 		auto re = Reg::Process(processor, lined_string);
@@ -60,11 +60,11 @@ namespace UEBabyPram::LogFilter
 
 				std::size_t LastLineCount = LastIndex->line.End();
 				LogLine ReLine;
-				ReLine.time = std::string_view{ LastIndex->time.Slice(std::string_view{finished_string}) };
-				ReLine.frame_count = std::string_view{ LastIndex->frame_count.Slice(std::string_view{finished_string}) };
-				ReLine.category = std::string_view{ LastIndex->category.Slice(std::string_view{finished_string}) };
-				ReLine.level = "Log";
-				ReLine.str = std::string_view{ finished_string }.substr(LastIndex->str_offset);
+				ReLine.time = std::u8string_view{ LastIndex->time.Slice(std::u8string_view{finished_string}) };
+				ReLine.frame_count = std::u8string_view{ LastIndex->frame_count.Slice(std::u8string_view{finished_string}) };
+				ReLine.category = std::u8string_view{ LastIndex->category.Slice(std::u8string_view{finished_string}) };
+				ReLine.level = u8"Log";
+				ReLine.str = std::u8string_view{ finished_string }.substr(LastIndex->str_offset);
 				for (auto ite : Levels)
 				{
 					if (ReLine.str.starts_with(ite))
@@ -75,7 +75,7 @@ namespace UEBabyPram::LogFilter
 					}
 				}
 				ReLine.line = LastIndex->line;
-				ReLine.total_str = std::string_view{ finished_string };
+				ReLine.total_str = std::u8string_view{ finished_string };
 				LastIndex = Translate(re, LastLineCount);
 				return ReLine;
 			}
@@ -111,10 +111,10 @@ namespace UEBabyPram::LogFilter
 
 			std::size_t LastLineCount = LastIndex->line.End();
 			LogLine ReLine;
-			ReLine.time = std::string_view{ LastIndex->time.Slice(std::string_view{finished_string}) };
-			ReLine.category = std::string_view{ LastIndex->category.Slice(std::string_view{finished_string}) };
-			ReLine.level = "Log";
-			ReLine.str = std::string_view{ finished_string.substr(LastIndex->str_offset) };
+			ReLine.time = std::u8string_view{ LastIndex->time.Slice(std::u8string_view{finished_string}) };
+			ReLine.category = std::u8string_view{ LastIndex->category.Slice(std::u8string_view{finished_string}) };
+			ReLine.level = u8"Log";
+			ReLine.str = std::u8string_view{ finished_string.substr(LastIndex->str_offset) };
 			for (auto ite : Levels)
 			{
 				if (ReLine.str.starts_with(ite))
@@ -125,7 +125,7 @@ namespace UEBabyPram::LogFilter
 				}
 			}
 			ReLine.line = LastIndex->line;
-			ReLine.total_str = std::string_view{ finished_string };
+			ReLine.total_str = std::u8string_view{ finished_string };
 			LastIndex.reset();
 			return ReLine;
 		}
@@ -167,7 +167,7 @@ namespace UEBabyPram::LogFilter
 		{
 			Reg::DfaProcessor Pro;
 			Pro.SetObserverTable(TimeParsing());
-			std::string_view ite_time = time;
+			std::u8string_view ite_time = time;
 			std::array<std::size_t, 7> Buffer;
 			for (std::size_t I = 0; I < 7; ++I)
 			{
@@ -175,7 +175,7 @@ namespace UEBabyPram::LogFilter
 				auto Re = Reg::Process(Pro, ite_time);
 				if (Re)
 				{
-					std::string_view cur = Re[0].Slice(ite_time);
+					std::u8string_view cur = Re[0].Slice(ite_time);
 					std::size_t Index = 0;
 					Format::DirectScan(cur, Index);
 					Buffer[I] = Index;
