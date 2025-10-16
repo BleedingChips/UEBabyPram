@@ -58,8 +58,10 @@ export namespace UEBabyPram::LogFilter
 		while (!ite.empty())
 		{
 			auto offset = ite.find(u8'\n');
-			if (offset != ite.size())
+			if (offset != decltype(ite)::npos)
 				offset += 1;
+			else
+				offset = ite.size();
 			auto line = processor.ConsumeLinedString(ite.substr(0, offset));
 			if (line)
 				fun(*line);
