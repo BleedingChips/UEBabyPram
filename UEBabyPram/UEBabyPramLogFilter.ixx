@@ -25,7 +25,8 @@ export namespace UEBabyPram::LogFilter
 		std::u8string_view total_str;
 		IndexSpan<> line;
 		std::optional<std::size_t> GetFrameCount() const;
-		std::optional<TimeT> GetTimePoint() const;
+		static std::optional<TimeT> GetSystemClockTimePoint(std::int32_t year, std::size_t month, std::size_t day, std::size_t hour, std::size_t min, std::size_t second, std::size_t milisecond);
+		std::optional<TimeT> GetSystemClockTimePoint() const;
 	};
 
 	struct LogLineProcessor

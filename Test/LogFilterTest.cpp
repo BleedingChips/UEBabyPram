@@ -14,28 +14,6 @@ int main()
 
 	UEBabyPram::LogFilter::ForeachLogLine(Source, [](UEBabyPram::LogFilter::LogLine line){
 		auto frame_count = line.GetFrameCount();
-		auto time = line.GetTimePoint();
-
-		if (time.has_value())
-		{
-
-			auto zone_t = std::chrono::zoned_time{
-				std::chrono::current_zone(),
-				*time
-			};
-
-			std::string ptr;
-
-			/*
-			std::format_to(
-				std::back_inserter(ptr),
-				"{:%Y.%m.%d-%H:%M:%S}",
-				zone_t
-			);
-			*/
-
-			auto dif = std::chrono::duration_cast<std::chrono::years>(std::chrono::system_clock::now() - *time);
-		}
 	});
 
 	std::filesystem::path filter = u8R"(C:\Users\chips\Desktop\bat.txt)";
@@ -61,23 +39,32 @@ int main()
 		{
 			std::string output;
 			
-			UEBabyPram::LogFilter::ForeachLogLine(str, [&](UEBabyPram::LogFilter::LogLine line) {
-				if (!line.time.empty())
+			UEBabyPram::LogFilter::ForeachLogLine(str, [&](UEBabyPram::LogFilter::LogLine line)
 				{
-					auto time = line.GetTimePoint();
-					volatile int i = 0;
-				}
+					if (!line.time.empty())
+					{
+						auto time = line.GetSystemClockTimePoint();
+						auto now = std::chrono::system_clock::now();
+						auto target_time_point = UEBabyPram::LogFilter::LogLine::GetSystemClockTimePoint(
+							2021, 11, 1, 23, 1, 1, 1
+						);
+						volatile int i = 0;
+					}
 
-				for (std::size_t i = 0; i < 10; ++i)
-				{
-					std::format_to(
-						std::back_inserter(output),
-						"Line-{}:{}",
-						line.line.Begin(),
-						line.total_str
-					);
+					for (std::size_t i = 0; i < 10; ++i)
+					{
+						std::format_to(
+							std::back_inserter(output),
+							"Line-{}:{}",
+							line.line.Begin(),
+							line.total_str
+						);
+					}
+
 				}
-				});
+			);
+
+			
 			std::format_to(std::back_inserter(output), "\r\nEOF {}", "EndOfFile");
 
 			Potato::Document::DocumentWriter doc_writer(Potato::Document::BomT::UTF8, true);

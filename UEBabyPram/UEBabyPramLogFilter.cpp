@@ -161,7 +161,38 @@ namespace UEBabyPram::LogFilter
 		return std::nullopt;
 	}
 
-	std::optional<LogLine::TimeT> LogLine::GetTimePoint() const
+	std::optional<LogLine::TimeT> LogLine::GetSystemClockTimePoint(std::int32_t year, std::size_t month, std::size_t day, std::size_t hour, std::size_t min, std::size_t second, std::size_t milisecond)
+	{
+		if (
+			year >= 1900
+			&& month > 1 && month <= 12
+			&& day > 0 && day <= 31
+			&& hour < 24
+			&& min < 60
+			&& second < 60
+			&& milisecond < 1000
+			)
+		{
+			std::tm time;
+			time.tm_year = year - 1900;
+			time.tm_mon = month - 1;
+			time.tm_mday = day;
+			time.tm_hour = hour;
+			time.tm_min = min;
+			time.tm_sec = second;
+			time.tm_wday = 0;
+			time.tm_isdst = -1;
+
+			std::time_t local_time_t = std::mktime(&time);
+
+			auto system_time_point = std::chrono::time_point_cast<std::chrono::milliseconds>(std::chrono::system_clock::from_time_t(local_time_t)) + std::chrono::milliseconds{ milisecond };
+			return system_time_point;
+		}
+		assert(false);
+		return std::nullopt;
+	}
+
+	std::optional<LogLine::TimeT> LogLine::GetSystemClockTimePoint() const
 	{
 		if (!time.empty())
 		{
@@ -186,21 +217,15 @@ namespace UEBabyPram::LogFilter
 				}
 			}
 
-			std::tm time;
-			time.tm_year = Buffer[0] - 1900;
-			time.tm_mon = Buffer[1] - 1;
-			time.tm_mday = Buffer[2] - 1;
-			time.tm_hour = Buffer[3];
-			time.tm_min = Buffer[4];
-			time.tm_sec = Buffer[5];
-			time.tm_wday = 0;
-			time.tm_isdst = -1;
-
-			std::time_t local_time_t = std::mktime(&time);
-
-			auto local_time_point = std::chrono::time_point_cast<std::chrono::milliseconds>(std::chrono::system_clock::from_time_t(local_time_t)) + std::chrono::milliseconds{ Buffer[6] };
-
-			return local_time_point;
+			return LogLine::GetSystemClockTimePoint(
+				static_cast<std::int32_t>(Buffer[0]),
+				Buffer[1],
+				Buffer[2],
+				Buffer[3],
+				Buffer[4],
+				Buffer[5],
+				Buffer[6]
+			);
 		}
 		return std::nullopt;
 	}
