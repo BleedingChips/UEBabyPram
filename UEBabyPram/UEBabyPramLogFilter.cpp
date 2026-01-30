@@ -165,7 +165,7 @@ namespace UEBabyPram::LogFilter
 	{
 		if (
 			year >= 1900
-			&& month > 1 && month <= 12
+			&& month >= 1 && month <= 12
 			&& day > 0 && day <= 31
 			&& hour < 24
 			&& min < 60
