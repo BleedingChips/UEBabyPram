@@ -54,30 +54,6 @@ export namespace UEBabyPram::LogFilter
 		Potato::Reg::DfaProcessor processor;
 	};
 
-	/*
-	struct LogLineProcessor
-	{
-		std::optional<LogLine> ConsumeLinedString(std::u8string_view lined_string);
-		std::optional<LogLine> End();
-		void Clear();
-		LogLineProcessor();
-	protected:
-		struct LogLineIndex
-		{
-			IndexSpan<> time;
-			IndexSpan<> frame_count;
-			IndexSpan<> category;
-			IndexSpan<> line;
-			std::size_t str_offset;
-		};
-		static LogLineIndex Translate(Potato::Reg::ProcessorAcceptRef const& Re, std::size_t LineOffset);
-		Potato::Reg::DfaProcessor processor;
-		std::u8string temporary_buffer;
-		std::u8string finished_string;
-		std::optional<LogLineIndex> LastIndex;
-	};
-	*/
-
 	template<typename Func>
 	void ForeachLogLine(std::u8string_view str, Func&& fun) requires(std::is_invocable_v<Func&&, LogLine>)
 	{
