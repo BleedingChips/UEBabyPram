@@ -20,19 +20,13 @@ namespace UEBabyPram::LogFilter
 		return Reg::DfaBinaryTableWrapper{std::span(Buffer)};
 	}
 
-
-	LogLineProcessor::LogLineProcessor() {
-		processor.SetObserverTable(FastParsing());
-		processor.Clear();
-	}
-
-	auto LogLineProcessor::Translate(Potato::Reg::ProcessorAcceptRef const& result, std::size_t line_offset)
+	auto LogLineConsumer::Translate(Potato::Reg::ProcessorAcceptRef const& result, std::size_t line_offset, std::size_t string_offset)
 		-> LogLineIndex
 	{
 		LogLineIndex line_index;
-		line_index.time = result[0];
-		line_index.frame_count = result[1];
-		line_index.category = result[2];
+		line_index.time = result[0].WholeOffset(string_offset);
+		line_index.frame_count = result[1].WholeOffset(string_offset);
+		line_index.category = result[2].WholeOffset(string_offset);
 		line_index.str_offset = result.MainCapture.End();
 		line_index.line = {line_offset, line_offset + 1};
 		return line_index;
@@ -47,74 +41,106 @@ namespace UEBabyPram::LogFilter
 		u8"VeryVerbose: "
 	};
 
-	std::optional<LogLine> LogLineProcessor::ConsumeLinedString(std::u8string_view lined_string)
+	void LogLineConsumer::Reset(std::u8string_view str, bool reset_context)
 	{
+		total_string = str;
+		total_string_index = {0, total_string.size()};
+		last_string_offset = 0;
+		last_index.reset();
 		processor.Clear();
-		auto re = Reg::Process(processor, lined_string);
-		if (re)
-		{
-			if (LastIndex.has_value())
-			{
-				finished_string = temporary_buffer;
-				temporary_buffer = lined_string;
-
-				std::size_t LastLineCount = LastIndex->line.End();
-				LogLine ReLine;
-				ReLine.time = std::u8string_view{ LastIndex->time.Slice(std::u8string_view{finished_string}) };
-				ReLine.frame_count = std::u8string_view{ LastIndex->frame_count.Slice(std::u8string_view{finished_string}) };
-				ReLine.category = std::u8string_view{ LastIndex->category.Slice(std::u8string_view{finished_string}) };
-				ReLine.level = u8"Log";
-				ReLine.str = std::u8string_view{ finished_string }.substr(LastIndex->str_offset);
-				for (auto ite : Levels)
-				{
-					if (ReLine.str.starts_with(ite))
-					{
-						ReLine.level = ReLine.str.substr(0, ite.size() - 2);
-						ReLine.str = ReLine.str.substr(ite.size());
-						break;
-					}
-				}
-				ReLine.line = LastIndex->line;
-				ReLine.total_str = std::u8string_view{ finished_string };
-				LastIndex = Translate(re, LastLineCount);
-				return ReLine;
-			}
-			else {
-				LastIndex = Translate(re, 1);
-				temporary_buffer = lined_string;
-			}
-		}
-		else {
-			if (LastIndex.has_value())
-			{
-				LastIndex->line.BackwardEnd(1);
-				temporary_buffer.append(lined_string);
-			}
-			else {
-				LastIndex = {
-					{0, 0},
-					{0, 0},
-					{1, 2}
-				};
-				temporary_buffer = lined_string;
-			}
-		}
-		return std::nullopt;
+		line_count = 1;
 	}
 
-	std::optional<LogLine> LogLineProcessor::End()
+	LogLineConsumer::LogLineConsumer(std::u8string_view total_str) 
 	{
-		if (LastIndex.has_value())
-		{
-			finished_string = temporary_buffer;
-			temporary_buffer.clear();
+		processor.SetObserverTable(FastParsing());
+		processor.Clear(); 
+		Reset(total_str);
+	}
 
-			std::size_t LastLineCount = LastIndex->line.End();
+	std::optional<LogLine> LogLineConsumer::GetLine()
+	{
+		while (total_string_index.Size() > 0)
+		{
+			auto current_str = total_string_index.Slice(total_string);
+			std::u8string_view lined_string = current_str;
+			auto fined_end = lined_string.find(u8'\n');
+			auto current_string_offset = total_string_index.Begin();
+			if (fined_end != decltype(lined_string)::npos)
+			{
+				lined_string = lined_string.substr(0, fined_end);
+				total_string_index = total_string_index.SubIndex(
+					lined_string.size() + 1
+				);
+			}
+			else {
+				total_string_index = total_string_index.SubIndex(
+					lined_string.size()
+				);
+			}
+			auto current_line = line_count++;
+			
+			processor.Clear();
+			auto re = Reg::Process(processor, lined_string);
+
+			if (re)
+			{
+				auto index_info = Translate(re, current_line, current_string_offset);
+				if (last_index.has_value())
+				{
+					std::size_t LastLineCount = last_index->line.End();
+					LogLine ReLine;
+					ReLine.time = last_index->time.Slice(total_string);
+					ReLine.frame_count = last_index->frame_count.Slice(total_string);
+					ReLine.category = last_index->category.Slice(total_string);
+					ReLine.level = u8"Log";
+					ReLine.str = Potato::Misc::IndexSpan<>{ last_string_offset + last_index->str_offset, current_string_offset - 1 }.Slice(total_string);
+					for (auto ite : Levels)
+					{
+						if (ReLine.str.starts_with(ite))
+						{
+							ReLine.level = ReLine.str.substr(0, ite.size() - 2);
+							ReLine.str = ReLine.str.substr(ite.size());
+							break;
+						}
+					}
+					ReLine.line = last_index->line;
+					ReLine.total_str = Potato::Misc::IndexSpan<>{ last_string_offset, current_string_offset - 1 }.Slice(total_string);
+					last_index = index_info;
+					last_string_offset = current_string_offset;
+					return ReLine;
+				}
+				else {
+					last_index = index_info;
+					last_string_offset = current_string_offset;
+					continue;
+				}
+			}
+			else {
+				if (last_index.has_value())
+				{
+					last_index->line.BackwardEnd(1);
+				}
+				else {
+					last_index = {
+						{0, 0},
+						{0, 0},
+						{1, 2}
+					};
+					last_string_offset = current_string_offset;
+				}
+			}
+		}
+
+		if (last_index.has_value())
+		{
+			std::size_t LastLineCount = last_index->line.End();
 			LogLine ReLine;
-			ReLine.time = std::u8string_view{ LastIndex->time.Slice(std::u8string_view{finished_string}) };
-			ReLine.category = std::u8string_view{ LastIndex->category.Slice(std::u8string_view{finished_string}) };
+			ReLine.time = last_index->time.Slice(total_string);
+			ReLine.frame_count = last_index->frame_count.Slice(total_string);
+			ReLine.category = last_index->category.Slice(total_string);
 			ReLine.level = u8"Log";
-			ReLine.str = std::u8string_view{ finished_string.substr(LastIndex->str_offset) };
+			ReLine.str = Potato::Misc::IndexSpan<>{ last_string_offset + last_index->str_offset, total_string_index.End() }.Slice(total_string);
 			for (auto ite : Levels)
 			{
 				if (ReLine.str.starts_with(ite))
@@ -124,20 +150,18 @@ namespace UEBabyPram::LogFilter
 					break;
 				}
 			}
-			ReLine.line = LastIndex->line;
-			ReLine.total_str = std::u8string_view{ finished_string };
-			LastIndex.reset();
+			ReLine.line = last_index->line;
+			ReLine.total_str = total_string.substr(last_string_offset);
+			if (!ReLine.str.empty() && *ReLine.str.rbegin() == u8'\n')
+			{
+				ReLine.str = ReLine.str.substr(0, ReLine.str.size() - 1);
+				ReLine.total_str = ReLine.total_str.substr(0, ReLine.total_str.size() - 1);
+			}
+			last_string_offset = total_string.size();
+			last_index.reset();
 			return ReLine;
 		}
 		return std::nullopt;
-	}
-
-	void LogLineProcessor::Clear()
-	{
-		processor.Clear();
-		temporary_buffer.clear();
-		finished_string.clear();
-		LastIndex.reset();
 	}
 
 	Reg::DfaBinaryTableWrapper TimeParsing() {

@@ -29,6 +29,32 @@ export namespace UEBabyPram::LogFilter
 		std::optional<TimeT> GetSystemClockTimePoint() const;
 	};
 
+
+	struct LogLineConsumer
+	{
+		std::optional<LogLine> GetLine();
+		LogLineConsumer(std::u8string_view total_str = {});
+		void Reset(std::u8string_view str = {}, bool reset_context = true);
+		operator bool() const { return total_string_index.Size() != 0 || last_index.has_value(); }
+	protected:
+		std::u8string_view total_string;
+		Potato::Misc::IndexSpan<> total_string_index;
+		std::size_t last_string_offset = 0;
+		struct LogLineIndex
+		{
+			IndexSpan<> time;
+			IndexSpan<> frame_count;
+			IndexSpan<> category;
+			IndexSpan<> line;
+			std::size_t str_offset;
+		};
+		std::optional<LogLineIndex> last_index;
+		std::size_t line_count = 1;
+		static LogLineIndex Translate(Potato::Reg::ProcessorAcceptRef const& Re, std::size_t LineOffset, std::size_t string_offset = 0);
+		Potato::Reg::DfaProcessor processor;
+	};
+
+	/*
 	struct LogLineProcessor
 	{
 		std::optional<LogLine> ConsumeLinedString(std::u8string_view lined_string);
@@ -50,26 +76,22 @@ export namespace UEBabyPram::LogFilter
 		std::u8string finished_string;
 		std::optional<LogLineIndex> LastIndex;
 	};
+	*/
 
 	template<typename Func>
 	void ForeachLogLine(std::u8string_view str, Func&& fun) requires(std::is_invocable_v<Func&&, LogLine>)
 	{
-		LogLineProcessor processor;
-		auto ite = str;
-		while (!ite.empty())
+		LogLineConsumer consumer{str};
+		while (true)
 		{
-			auto offset = ite.find(u8'\n');
-			if (offset != decltype(ite)::npos)
-				offset += 1;
-			else
-				offset = ite.size();
-			auto line = processor.ConsumeLinedString(ite.substr(0, offset));
-			if (line)
-				fun(*line);
-			ite = ite.substr(offset);
+			auto cur = consumer.GetLine();
+			if (cur)
+			{
+				fun(*cur);
+			}
+			else {
+				return;
+			}
 		}
-		auto line = processor.End();
-		if (line)
-			fun(*line);
 	}
 }
