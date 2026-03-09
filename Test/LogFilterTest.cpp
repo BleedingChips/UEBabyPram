@@ -60,7 +60,7 @@ int main()
 							std::back_inserter(output),
 							"Line-{}:{}",
 							line.line.Begin(),
-							line.total_str
+							Potato::Log::AddLogStringWrapper(line.total_str)
 						);
 					}
 
