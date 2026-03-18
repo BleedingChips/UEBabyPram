@@ -177,7 +177,7 @@ namespace UEBabyPram::LogFilter
 		if (!frame_count.empty())
 		{
 			std::size_t number = 0;
-			if (Format::DirectScan(frame_count, number))
+			if (Format::DirectDeformat(frame_count, number))
 			{
 				return number;
 			}
@@ -232,7 +232,7 @@ namespace UEBabyPram::LogFilter
 				{
 					std::u8string_view cur = Re[0].Slice(ite_time);
 					std::size_t Index = 0;
-					Format::DirectScan(cur, Index);
+					Format::DirectDeformat(cur, Index);
 					Buffer[I] = Index;
 					ite_time = ite_time.substr(Re.MainCapture.End());
 				}
