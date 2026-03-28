@@ -5,11 +5,14 @@ if os.scriptdir() == os.projectdir() then
     includes("../Potato/")
 end
 
+ add_requires("ctre")
+
 target("UEBabyPram")
     set_kind("static")
     add_files("UEBabyPram/*.cpp")
     add_files("UEBabyPram/*.ixx", {public=true})
     add_deps("Potato")
+    add_packages("ctre", {public=true})
 target_end()
 
 if os.scriptdir() == os.projectdir() then

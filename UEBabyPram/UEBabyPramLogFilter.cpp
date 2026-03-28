@@ -1,5 +1,7 @@
 module;
 
+#include <ctre.hpp>
+#include <ctre-unicode.hpp>
 #include <cassert>
 
 module UEBabyPramLogFilter;
@@ -252,5 +254,18 @@ namespace UEBabyPram::LogFilter
 			);
 		}
 		return std::nullopt;
+	}
+
+	struct LineProperty
+	{
+		std::u8string_view time;
+		std::u8string_view frame_count;
+		std::u8string_view category;
+		std::u8string_view level;
+	};
+
+	std::optional<LineProperty> GetLineProperty(std::u8string_view string)
+	{
+		auto match = ctre::starts_with<U"\[[0-9]{0,4}\\.[0-9]+\\.">
 	}
 }
