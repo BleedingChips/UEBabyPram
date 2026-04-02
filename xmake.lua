@@ -12,7 +12,7 @@ target("UEBabyPram")
     add_files("UEBabyPram/*.cpp")
     add_files("UEBabyPram/*.ixx", {public=true})
     add_deps("Potato")
-    add_packages("ctre", {public=true})
+    add_packages("ctre")
 target_end()
 
 if os.scriptdir() == os.projectdir() then

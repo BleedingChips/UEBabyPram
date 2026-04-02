@@ -256,16 +256,40 @@ namespace UEBabyPram::LogFilter
 		return std::nullopt;
 	}
 
-	struct LineProperty
+	LineProperty GetLineProperty(std::u8string_view string)
 	{
-		std::u8string_view time;
-		std::u8string_view frame_count;
-		std::u8string_view category;
-		std::u8string_view level;
-	};
-
-	std::optional<LineProperty> GetLineProperty(std::u8string_view string)
-	{
-		auto match = ctre::starts_with<U"\[[0-9]{0,4}\\.[0-9]+\\.">
+		LineProperty property;
+		auto match = ctre::starts_with<U"\\[[0-9]{0,4}\\.([0-9]+)\\.">(string);
+		if (match)
+		{
+			
+		}
+		auto match2 = ctre::starts_with<U"[a-zA-Z][a-zA-Z0-9]*?: ">(string);
+		if (match2)
+		{
+			property.category = *match2.to_optional_view();
+			property.offset += property.category.size();
+			property.category = property.category.substr(0, property.category.size() - 2);
+			string = string.substr();
+		}
+		if (property.offset != 0)
+		{
+			string = string.substr(property.offset);
+			for (auto& ite : Levels)
+			{
+				if (string.starts_with(ite))
+				{
+					property.level = ite.substr(0, ite.size() - 2);
+					property.offset += ite.size();
+					break;
+				}
+			}
+			if (property.level.empty())
+			{
+				property.level = u8"Log";
+			}
+			volatile int i = 0;
+		}
+		return property;
 	}
 }

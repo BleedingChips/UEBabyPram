@@ -15,6 +15,13 @@ s	skdjaskldjasdkljklj
 int main()
 {
 
+	auto property = UEBabyPram::LogFilter::GetLineProperty(Source);
+	Source = Source.substr(property.offset);
+
+	return 0;
+
+
+
 	UEBabyPram::LogFilter::ForeachLogLine(Source, [](UEBabyPram::LogFilter::LogLine line){
 		auto frame_count = line.GetFrameCount();
 	});

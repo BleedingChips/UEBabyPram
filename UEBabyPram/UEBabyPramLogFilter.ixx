@@ -14,17 +14,29 @@ export namespace UEBabyPram::LogFilter
 	template<typename Type = std::size_t>
 	using IndexSpan = Potato::Misc::IndexSpan<Type>;
 
+	struct TimeStringView
+	{
+		std::u8string_view year;
+		std::u8string_view month;
+		std::u8string_view day;
+		std::u8string_view hour;
+		std::u8string_view minth;
+		std::u8string_view second;
+		std::u8string_view minsecond;
+		std::u8string_view time_string;
+	};
+
 	struct LineProperty
 	{
-		std::u8string_view time;
+		TimeStringView time;
 		std::u8string_view frame_count;
 		std::u8string_view category;
 		std::u8string_view level;
+		std::size_t offset = 0;
+		operator bool() const { return offset == 0; }
 	};
 
-	std::optional<LineProperty> GetLineProperty(std::u8string_view string);
-
-
+	LineProperty GetLineProperty(std::u8string_view string);
 
 
 	struct LogLine
