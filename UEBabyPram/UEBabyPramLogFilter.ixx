@@ -20,10 +20,9 @@ export namespace UEBabyPram::LogFilter
 		std::u8string_view month;
 		std::u8string_view day;
 		std::u8string_view hour;
-		std::u8string_view minth;
+		std::u8string_view minute;
 		std::u8string_view second;
-		std::u8string_view minsecond;
-		std::u8string_view time_string;
+		std::u8string_view millisecond;
 	};
 
 	struct LineProperty
@@ -32,20 +31,21 @@ export namespace UEBabyPram::LogFilter
 		std::u8string_view frame_count;
 		std::u8string_view category;
 		std::u8string_view level;
+	};
+
+	struct LinePropertyResult
+	{
+		LineProperty property;
 		std::size_t offset = 0;
 		operator bool() const { return offset == 0; }
 	};
 
-	LineProperty GetLineProperty(std::u8string_view string);
-
+	LinePropertyResult GetLineProperty(std::u8string_view string);
 
 	struct LogLine
 	{
 		using TimeT = std::chrono::system_clock::time_point;
-		std::u8string_view time;
-		std::u8string_view frame_count;
-		std::u8string_view category;
-		std::u8string_view level;
+		LineProperty property;
 		std::u8string_view str;
 		std::u8string_view total_str;
 		IndexSpan<> line;
@@ -54,45 +54,48 @@ export namespace UEBabyPram::LogFilter
 		std::optional<TimeT> GetSystemClockTimePoint() const;
 	};
 
-
-	struct LogLineConsumer
+	struct LineContext
 	{
-		std::optional<LogLine> GetLine();
-		LogLineConsumer(std::u8string_view total_str = {});
-		void Reset(std::u8string_view str = {}, bool reset_context = true);
-		operator bool() const { return total_string_index.Size() != 0 || last_index.has_value(); }
-	protected:
-		std::u8string_view total_string;
-		Potato::Misc::IndexSpan<> total_string_index;
-		std::size_t last_string_offset = 0;
-		struct LogLineIndex
-		{
-			IndexSpan<> time;
-			IndexSpan<> frame_count;
-			IndexSpan<> category;
-			IndexSpan<> line;
-			std::size_t str_offset;
-		};
-		std::optional<LogLineIndex> last_index;
-		std::size_t line_count = 1;
-		static LogLineIndex Translate(Potato::Reg::ProcessorAcceptRef const& Re, std::size_t LineOffset, std::size_t string_offset = 0);
-		Potato::Reg::DfaProcessor processor;
+		Potato::Misc::IndexSpan<> current_line_index;
+		std::optional<LineProperty> next_property;
+		std::size_t offset = 0;
 	};
 
+	std::optional<LogLine> GetLogLine(std::u8string_view log, LineContext& context);
+
 	template<typename Func>
-	void ForeachLogLine(std::u8string_view str, Func&& fun) requires(std::is_invocable_v<Func&&, LogLine>)
+	std::u8string_view ForeachLogLine(std::u8string_view str, Func&& fun) requires(std::is_invocable_r_v<void, Func&&, LogLine>)
 	{
-		LogLineConsumer consumer{str};
+		LineContext context;
 		while (true)
 		{
-			auto cur = consumer.GetLine();
-			if (cur)
+			auto log_line = GetLogLine(str, context);
+			if (log_line.has_value())
 			{
-				fun(*cur);
+				fun(*log_line);
 			}
 			else {
-				return;
+				return str.substr(context.offset);
 			}
 		}
+		return {};
+	}
+
+	template<typename Func>
+	std::u8string_view ForeachLogLine(std::u8string_view str, Func&& fun) requires(std::is_invocable_r_v<bool, Func&&, LogLine>)
+	{
+		LineContext context;
+		while (true)
+		{
+			auto log_line = GetLogLine(str.substr(context.offset), context);
+			if (log_line.has_value() && fun(*log_line))
+			{
+				continue;
+			}
+			else {
+				return str.substr(context.offset);
+			}
+		}
+		return {};
 	}
 }

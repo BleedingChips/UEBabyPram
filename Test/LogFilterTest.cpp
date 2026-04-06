@@ -15,6 +15,27 @@ s	skdjaskldjasdkljklj
 int main()
 {
 
+	{
+		auto ite = Source;
+		while (!ite.empty())
+		{
+			auto property = UEBabyPram::LogFilter::GetLineProperty(ite);
+			Source = Source.substr(property.offset);
+			auto finded = ite.find(u8"\n");
+			if (finded != decltype(ite)::npos)
+			{
+				ite = ite.substr(finded + 1);
+			}
+			else {
+				ite = ite.substr(ite.size());
+			}
+		}
+	}
+	
+
+	
+
+
 	auto property = UEBabyPram::LogFilter::GetLineProperty(Source);
 	Source = Source.substr(property.offset);
 
@@ -51,9 +72,8 @@ int main()
 			
 			UEBabyPram::LogFilter::ForeachLogLine(str, [&](UEBabyPram::LogFilter::LogLine line)
 				{
-					if (!line.time.empty())
+					if (auto time = line.GetSystemClockTimePoint(); time.has_value())
 					{
-						auto time = line.GetSystemClockTimePoint();
 						auto now = std::chrono::system_clock::now();
 						auto target_time_point = UEBabyPram::LogFilter::LogLine::GetSystemClockTimePoint(
 							2021, 11, 1, 23, 1, 1, 1

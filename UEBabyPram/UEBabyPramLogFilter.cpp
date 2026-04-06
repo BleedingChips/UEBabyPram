@@ -1,38 +1,13 @@
 module;
-
-#include <ctre.hpp>
 #include <ctre-unicode.hpp>
 #include <cassert>
 
 module UEBabyPramLogFilter;
 
-import std;
-import PotatoFormat;
-
 namespace UEBabyPram::LogFilter
 {
 
 	using namespace Potato;
-
-	Reg::DfaBinaryTableWrapper FastParsing() {
-		static auto Buffer = Reg::CreateDfaBinaryTable(
-			Reg::Dfa::FormatE::HeadMatch,
-			u8R"((?:\[([0-9\.\-:]+?)\]\[\s*?([0-9]+?)\])?([0-9a-zA-Z\-\_\z]+?)\: )"
-		);
-		return Reg::DfaBinaryTableWrapper{std::span(Buffer)};
-	}
-
-	auto LogLineConsumer::Translate(Potato::Reg::ProcessorAcceptRef const& result, std::size_t line_offset, std::size_t string_offset)
-		-> LogLineIndex
-	{
-		LogLineIndex line_index;
-		line_index.time = result[0].WholeOffset(string_offset);
-		line_index.frame_count = result[1].WholeOffset(string_offset);
-		line_index.category = result[2].WholeOffset(string_offset);
-		line_index.str_offset = result.MainCapture.End();
-		line_index.line = {line_offset, line_offset + 1};
-		return line_index;
-	}
 
 	constexpr std::u8string_view Levels[] = {
 		u8"Fatal: ",
@@ -43,143 +18,14 @@ namespace UEBabyPram::LogFilter
 		u8"VeryVerbose: "
 	};
 
-	void LogLineConsumer::Reset(std::u8string_view str, bool reset_context)
-	{
-		total_string = str;
-		total_string_index = {0, total_string.size()};
-		last_string_offset = 0;
-		last_index.reset();
-		processor.Clear();
-		line_count = 1;
-	}
-
-	LogLineConsumer::LogLineConsumer(std::u8string_view total_str) 
-	{
-		processor.SetObserverTable(FastParsing());
-		processor.Clear(); 
-		Reset(total_str);
-	}
-
-	std::optional<LogLine> LogLineConsumer::GetLine()
-	{
-		while (total_string_index.Size() > 0)
-		{
-			auto current_str = total_string_index.Slice(total_string);
-			std::u8string_view lined_string = current_str;
-			auto fined_end = lined_string.find(u8'\n');
-			auto current_string_offset = total_string_index.Begin();
-			if (fined_end != decltype(lined_string)::npos)
-			{
-				lined_string = lined_string.substr(0, fined_end);
-				total_string_index = total_string_index.SubIndex(
-					lined_string.size() + 1
-				);
-			}
-			else {
-				total_string_index = total_string_index.SubIndex(
-					lined_string.size()
-				);
-			}
-			auto current_line = line_count++;
-			
-			processor.Clear();
-			auto re = Reg::Process(processor, lined_string);
-
-			if (re)
-			{
-				auto index_info = Translate(re, current_line, current_string_offset);
-				if (last_index.has_value())
-				{
-					std::size_t LastLineCount = last_index->line.End();
-					LogLine ReLine;
-					ReLine.time = last_index->time.Slice(total_string);
-					ReLine.frame_count = last_index->frame_count.Slice(total_string);
-					ReLine.category = last_index->category.Slice(total_string);
-					ReLine.level = u8"Log";
-					ReLine.str = Potato::Misc::IndexSpan<>{ last_string_offset + last_index->str_offset, current_string_offset - 1 }.Slice(total_string);
-					for (auto ite : Levels)
-					{
-						if (ReLine.str.starts_with(ite))
-						{
-							ReLine.level = ReLine.str.substr(0, ite.size() - 2);
-							ReLine.str = ReLine.str.substr(ite.size());
-							break;
-						}
-					}
-					ReLine.line = last_index->line;
-					ReLine.total_str = Potato::Misc::IndexSpan<>{ last_string_offset, current_string_offset - 1 }.Slice(total_string);
-					last_index = index_info;
-					last_string_offset = current_string_offset;
-					return ReLine;
-				}
-				else {
-					last_index = index_info;
-					last_string_offset = current_string_offset;
-					continue;
-				}
-			}
-			else {
-				if (last_index.has_value())
-				{
-					last_index->line.BackwardEnd(1);
-				}
-				else {
-					last_index = {
-						{0, 0},
-						{0, 0},
-						{1, 2}
-					};
-					last_string_offset = current_string_offset;
-				}
-			}
-		}
-
-		if (last_index.has_value())
-		{
-			std::size_t LastLineCount = last_index->line.End();
-			LogLine ReLine;
-			ReLine.time = last_index->time.Slice(total_string);
-			ReLine.frame_count = last_index->frame_count.Slice(total_string);
-			ReLine.category = last_index->category.Slice(total_string);
-			ReLine.level = u8"Log";
-			ReLine.str = Potato::Misc::IndexSpan<>{ last_string_offset + last_index->str_offset, total_string_index.End() }.Slice(total_string);
-			for (auto ite : Levels)
-			{
-				if (ReLine.str.starts_with(ite))
-				{
-					ReLine.level = ReLine.str.substr(0, ite.size() - 2);
-					ReLine.str = ReLine.str.substr(ite.size());
-					break;
-				}
-			}
-			ReLine.line = last_index->line;
-			ReLine.total_str = total_string.substr(last_string_offset);
-			if (!ReLine.str.empty() && *ReLine.str.rbegin() == u8'\n')
-			{
-				ReLine.str = ReLine.str.substr(0, ReLine.str.size() - 1);
-				ReLine.total_str = ReLine.total_str.substr(0, ReLine.total_str.size() - 1);
-			}
-			last_string_offset = total_string.size();
-			last_index.reset();
-			return ReLine;
-		}
-		return std::nullopt;
-	}
-
-	Reg::DfaBinaryTableWrapper TimeParsing() {
-		static auto Buffer = Reg::CreateDfaBinaryTable(
-			Reg::Dfa::FormatE::HeadMatch,
-			LR"(.*?([0-9]+))"
-		);
-		return Reg::DfaBinaryTableWrapper{std::span(Buffer)};
-	}
+	
 
 	std::optional<std::size_t> LogLine::GetFrameCount() const
 	{
-		if (!frame_count.empty())
+		if (!property.frame_count.empty())
 		{
 			std::size_t number = 0;
-			if (Format::DirectDeformat(frame_count, number))
+			if (Format::DirectDeformat(property.frame_count, number))
 			{
 				return number;
 			}
@@ -199,6 +45,8 @@ namespace UEBabyPram::LogFilter
 			&& milisecond < 1000
 			)
 		{
+			//return std::nullopt;
+
 			std::tm time;
 			time.tm_year = year - 1900;
 			time.tm_mon = month - 1;
@@ -220,28 +68,16 @@ namespace UEBabyPram::LogFilter
 
 	std::optional<LogLine::TimeT> LogLine::GetSystemClockTimePoint() const
 	{
-		if (!time.empty())
+		if (!property.time.year.empty())
 		{
-			Reg::DfaProcessor Pro;
-			Pro.SetObserverTable(TimeParsing());
-			std::u8string_view ite_time = time;
 			std::array<std::size_t, 7> Buffer;
-			for (std::size_t I = 0; I < 7; ++I)
-			{
-				Pro.Clear();
-				auto Re = Reg::Process(Pro, ite_time);
-				if (Re)
-				{
-					std::u8string_view cur = Re[0].Slice(ite_time);
-					std::size_t Index = 0;
-					Format::DirectDeformat(cur, Index);
-					Buffer[I] = Index;
-					ite_time = ite_time.substr(Re.MainCapture.End());
-				}
-				else {
-					return std::nullopt;;
-				}
-			}
+			Potato::Format::DirectDeformat(property.time.year, Buffer[0]);
+			Potato::Format::DirectDeformat(property.time.month, Buffer[1]);
+			Potato::Format::DirectDeformat(property.time.day, Buffer[2]);
+			Potato::Format::DirectDeformat(property.time.hour, Buffer[3]);
+			Potato::Format::DirectDeformat(property.time.minute, Buffer[4]);
+			Potato::Format::DirectDeformat(property.time.second, Buffer[5]);
+			Potato::Format::DirectDeformat(property.time.millisecond, Buffer[6]);
 
 			return LogLine::GetSystemClockTimePoint(
 				static_cast<std::int32_t>(Buffer[0]),
@@ -256,31 +92,41 @@ namespace UEBabyPram::LogFilter
 		return std::nullopt;
 	}
 
-	LineProperty GetLineProperty(std::u8string_view string)
+	LinePropertyResult GetLineProperty(std::u8string_view string)
 	{
 		LineProperty property;
-		auto match = ctre::starts_with<U"\\[[0-9]{0,4}\\.([0-9]+)\\.">(string);
+		std::size_t offset = 0;
+		auto match = ctre::starts_with<UR"(\[([0-9]{0,4})\.([0-9]{1,2})\.([0-9]{1,2})-([0-9]{1,2})\.([0-9]{1,2})\.([0-9]{1,2}):([0-9]{1,3})\]\[\s{0,3}([0-9]{1,3})\])">(string.substr(offset));
 		if (match)
 		{
-			
+			property.time.year = *match.get<1>().to_optional_view();
+			property.time.month = *match.get<2>().to_optional_view();
+			property.time.day = *match.get<3>().to_optional_view();
+			property.time.hour = *match.get<4>().to_optional_view();
+			property.time.minute = *match.get<5>().to_optional_view();
+			property.time.second = *match.get<6>().to_optional_view();
+			property.time.millisecond = *match.get<7>().to_optional_view();
+			property.frame_count = *match.get<8>().to_optional_view();
+			offset = (match.end() - string.data());
+			string = string.substr(offset);
 		}
-		auto match2 = ctre::starts_with<U"[a-zA-Z][a-zA-Z0-9]*?: ">(string);
+		auto match2 = ctre::starts_with<U"[a-zA-Z][a-zA-Z0-9]*?: ">(string.substr(offset));
 		if (match2)
 		{
-			property.category = *match2.to_optional_view();
-			property.offset += property.category.size();
-			property.category = property.category.substr(0, property.category.size() - 2);
-			string = string.substr();
+			auto category = *match2.to_optional_view();
+			property.category = category;
+			offset += category.size();
+			property.category = category.substr(0, property.category.size() - 2);
 		}
-		if (property.offset != 0)
+		if (offset != 0)
 		{
-			string = string.substr(property.offset);
+			auto iter_string = string.substr(offset);
 			for (auto& ite : Levels)
 			{
 				if (string.starts_with(ite))
 				{
 					property.level = ite.substr(0, ite.size() - 2);
-					property.offset += ite.size();
+					offset += ite.size();
 					break;
 				}
 			}
@@ -288,8 +134,24 @@ namespace UEBabyPram::LogFilter
 			{
 				property.level = u8"Log";
 			}
-			volatile int i = 0;
 		}
-		return property;
+		return { property, offset };
+	}
+
+	std::optional<LogLine> GetLogLine(std::u8string_view log, LineContext& context)
+	{
+		std::size_t old_offset = 0;
+		while (context.offset < log.size())
+		{
+			auto log_property_result = GetLineProperty(log.substr(context.offset));
+			if (log_property_result)
+			{
+
+			}
+		}
+		if (context.next_property.has_value())
+		{
+
+		}
 	}
 }

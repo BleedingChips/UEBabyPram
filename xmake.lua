@@ -1,11 +1,11 @@
-add_rules("mode.debug", "mode.release")
+add_rules("mode.debug", "mode.release", "mode.releasedbg", "mode.profile")
 set_languages("cxxlatest")
+
+add_requires("ctre")
 
 if os.scriptdir() == os.projectdir() then
     includes("../Potato/")
 end
-
- add_requires("ctre")
 
 target("UEBabyPram")
     set_kind("static")
@@ -25,7 +25,7 @@ if os.scriptdir() == os.projectdir() then
         target(name)
             set_kind("binary")
             add_files(file)
-            add_deps("UEBabyPram")
+            add_deps("UEBabyPram") 
         target_end()
 
     end
