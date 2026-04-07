@@ -3,7 +3,8 @@ import std;
 import Potato;
 
 std::u8string_view Source = 
-u8R"(LogConfig: Setting CVar [[net.AllowAsyncLoading:1]]
+u8R"(aaa
+LogConfig: Setting CVar [[net.AllowAsyncLoading:1]]
 [2021.10.11-11.53.12:082][178]LogConfig: Setting CVar [[con.DebugEarlyDefault:1]]
 [2021.10.11-11.53.12:082][  0]LogConfig: Display: Setting CVar [[con.DebugEarlyDefault:1]]
 	sdasdasd
@@ -14,34 +15,6 @@ s	skdjaskldjasdkljklj
 
 int main()
 {
-
-	{
-		auto ite = Source;
-		while (!ite.empty())
-		{
-			auto property = UEBabyPram::LogFilter::GetLineProperty(ite);
-			Source = Source.substr(property.offset);
-			auto finded = ite.find(u8"\n");
-			if (finded != decltype(ite)::npos)
-			{
-				ite = ite.substr(finded + 1);
-			}
-			else {
-				ite = ite.substr(ite.size());
-			}
-		}
-	}
-	
-
-	
-
-
-	auto property = UEBabyPram::LogFilter::GetLineProperty(Source);
-	Source = Source.substr(property.offset);
-
-	return 0;
-
-
 
 	UEBabyPram::LogFilter::ForeachLogLine(Source, [](UEBabyPram::LogFilter::LogLine line){
 		auto frame_count = line.GetFrameCount();

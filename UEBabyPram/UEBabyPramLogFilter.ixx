@@ -37,7 +37,7 @@ export namespace UEBabyPram::LogFilter
 	{
 		LineProperty property;
 		std::size_t offset = 0;
-		operator bool() const { return offset == 0; }
+		operator bool() const { return offset != 0; }
 	};
 
 	LinePropertyResult GetLineProperty(std::u8string_view string);
@@ -56,15 +56,18 @@ export namespace UEBabyPram::LogFilter
 
 	struct LineContext
 	{
-		Potato::Misc::IndexSpan<> current_line_index;
-		std::optional<LineProperty> next_property;
-		std::size_t offset = 0;
+		std::optional<LinePropertyResult> property;
+		std::size_t property_line = 0;
+		std::size_t property_line_offset = 0;
+
+		std::size_t total_line = 0;
+		std::size_t next_line_offset = 0;
 	};
 
 	std::optional<LogLine> GetLogLine(std::u8string_view log, LineContext& context);
 
 	template<typename Func>
-	std::u8string_view ForeachLogLine(std::u8string_view str, Func&& fun) requires(std::is_invocable_r_v<void, Func&&, LogLine>)
+	void ForeachLogLine(std::u8string_view str, Func&& fun) requires(std::is_invocable_r_v<void, Func&&, LogLine>)
 	{
 		LineContext context;
 		while (true)
@@ -75,10 +78,10 @@ export namespace UEBabyPram::LogFilter
 				fun(*log_line);
 			}
 			else {
-				return str.substr(context.offset);
+				return;
 			}
 		}
-		return {};
+		return;
 	}
 
 	template<typename Func>
@@ -87,15 +90,15 @@ export namespace UEBabyPram::LogFilter
 		LineContext context;
 		while (true)
 		{
-			auto log_line = GetLogLine(str.substr(context.offset), context);
+			auto log_line = GetLogLine(str, context);
 			if (log_line.has_value() && fun(*log_line))
 			{
 				continue;
 			}
 			else {
-				return str.substr(context.offset);
+				return;
 			}
 		}
-		return {};
+		return;
 	}
 }

@@ -108,7 +108,6 @@ namespace UEBabyPram::LogFilter
 			property.time.millisecond = *match.get<7>().to_optional_view();
 			property.frame_count = *match.get<8>().to_optional_view();
 			offset = (match.end() - string.data());
-			string = string.substr(offset);
 		}
 		auto match2 = ctre::starts_with<U"[a-zA-Z][a-zA-Z0-9]*?: ">(string.substr(offset));
 		if (match2)
@@ -140,18 +139,111 @@ namespace UEBabyPram::LogFilter
 
 	std::optional<LogLine> GetLogLine(std::u8string_view log, LineContext& context)
 	{
-		std::size_t old_offset = 0;
-		while (context.offset < log.size())
+		while (context.next_line_offset < log.size())
 		{
-			auto log_property_result = GetLineProperty(log.substr(context.offset));
-			if (log_property_result)
+			auto last_log = log.substr(context.next_line_offset);
+			auto log_property_result = GetLineProperty(last_log);
+			last_log = last_log.substr(log_property_result.offset);
+			auto find = last_log.find(u8'\n');
+			std::size_t line_end = 0;
+
+			if (find == decltype(last_log)::npos)
 			{
-
+				line_end = last_log.size();
 			}
-		}
-		if (context.next_property.has_value())
-		{
+			else {
+				line_end = find + 1;
+			}
 
+			context.total_line += 1;
+			line_end += context.next_line_offset + log_property_result.offset;
+
+			if (!log_property_result)
+			{
+				if (!context.property.has_value())
+				{
+					LogLine line;
+					line.line = Potato::Misc::IndexSpan<>{
+						context.property_line,
+						context.total_line
+					}.WholeOffset(1);
+
+					line.total_str = Misc::IndexSpan<>{
+						context.property_line_offset,
+						line_end
+					}.Slice(log);
+
+					if (line.total_str.ends_with(u8"\r\n"))
+						line.total_str = line.total_str.substr(0, line.total_str.size() - 2);
+					else if(line.total_str.ends_with(u8"\n"))
+						line.total_str = line.total_str.substr(0, line.total_str.size() - 1);
+
+					line.str = line.total_str;
+
+					context.property_line_offset = line_end;
+					context.property_line = context.total_line;
+					context.property.reset();
+					context.next_line_offset = line_end;
+
+					return line;
+				}
+			}
+			else {
+				if (context.property.has_value())
+				{
+					LogLine line;
+					line.property = context.property->property;
+					line.line = Potato::Misc::IndexSpan<>{
+						context.property_line,
+						context.total_line - 1
+					}.WholeOffset(1);
+					line.total_str = Potato::Misc::IndexSpan<>{
+						context.property_line_offset,
+						context.next_line_offset
+					}.Slice(log);
+					
+					if (line.total_str.ends_with(u8"\r\n"))
+						line.total_str = line.total_str.substr(0, line.total_str.size() - 2);
+					else if (line.total_str.ends_with(u8"\n"))
+						line.total_str = line.total_str.substr(0, line.total_str.size() - 1);
+					line.str = line.total_str.substr(context.property->offset);
+
+					context.property = log_property_result;
+					context.property_line = context.total_line - 1;
+					context.property_line_offset = context.next_line_offset;
+
+					context.next_line_offset = line_end;
+
+					return line;
+				}
+				else {
+					context.property = log_property_result;
+				}
+			}
+
+			context.next_line_offset = line_end;
 		}
+		if (context.property.has_value())
+		{
+			LogLine line;
+			line.property = context.property->property;
+			line.line = Potato::Misc::IndexSpan<>{
+				context.property_line,
+				context.total_line
+			}.WholeOffset(1);
+			line.total_str = Potato::Misc::IndexSpan<>{
+				context.property_line_offset,
+				context.next_line_offset
+			}.Slice(log);
+
+			if (line.total_str.ends_with(u8"\r\n"))
+				line.total_str = line.total_str.substr(0, line.total_str.size() - 2);
+			else if (line.total_str.ends_with(u8"\n"))
+				line.total_str = line.total_str.substr(0, line.total_str.size() - 1);
+			line.str = line.total_str.substr(context.property->offset);
+			context.property.reset();
+			return line;
+		}
+		return std::nullopt;
 	}
 }
