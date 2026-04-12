@@ -2,9 +2,9 @@ module;
 #include <ctre-unicode.hpp>
 #include <cassert>
 
-module UEBabyPramLogFilter;
+module UEBabyPramLogParser;
 
-namespace UEBabyPram::LogFilter
+namespace UEBabyPram::LogParser
 {
 
 	using namespace Potato;

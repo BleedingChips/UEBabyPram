@@ -1,2 +1,2 @@
 export module UEBabyPram;
-export import UEBabyPramLogFilter;
+export import UEBabyPramLogParser;

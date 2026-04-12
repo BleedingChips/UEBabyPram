@@ -2,13 +2,13 @@ module;
 
 #include <cassert>
 
-export module UEBabyPramLogFilter;
+export module UEBabyPramLogParser;
 
 import std;
 import Potato;
 
 
-export namespace UEBabyPram::LogFilter
+export namespace UEBabyPram::LogParser
 {
 
 	template<typename Type = std::size_t>

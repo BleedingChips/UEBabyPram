@@ -15,6 +15,14 @@ target("UEBabyPram")
     add_packages("ctre")
 target_end()
 
+target("UEBabyPramLogFilter")
+    set_kind("binary")
+    add_files("UEBabyPram/LogFilter/*.cpp")
+    add_files("UEBabyPram/LogFilter/*.ixx", {public=true})
+    add_deps("Potato")
+    add_deps("UEBabyPram")
+target_end()
+
 if os.scriptdir() == os.projectdir() then
     set_project("UEBabyPram")
 
