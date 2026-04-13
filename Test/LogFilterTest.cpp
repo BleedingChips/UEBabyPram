@@ -1,4 +1,4 @@
-import UEBabyPramLogFilter;
+import UEBabyPramLogParser;
 import std;
 import Potato;
 
@@ -16,65 +16,9 @@ s	skdjaskldjasdkljklj
 int main()
 {
 
-	UEBabyPram::LogFilter::ForeachLogLine(Source, [](UEBabyPram::LogFilter::LogLine line){
+	UEBabyPram::LogParser::ForeachLogLine(Source, [](UEBabyPram::LogParser::LogLine line){
 		auto frame_count = line.GetFrameCount();
 	});
-
-	std::filesystem::path filter = u8R"(C:\Users\chips\Desktop\bat.txt)";
-
-	Potato::Document::BinaryStreamReader reader(filter);
-	if (reader)
-	{
-		auto total_size = reader.GetStreamSize();
-		std::vector<std::byte> buffer;
-		buffer.resize(total_size);
-		reader.Read(std::span(buffer));
-
-		Potato::Document::DocumentReader doc_reader(buffer);
-
-		std::u8string str;
-
-		doc_reader.Read(std::back_inserter(str));
-
-		auto new_file = filter;
-		new_file.replace_extension("output");
-		Potato::Document::BinaryStreamWriter writter(new_file, Potato::Document::BinaryStreamWriter::OpenMode::CREATE_OR_EMPTY);
-		if (writter)
-		{
-			std::string output;
-			
-			UEBabyPram::LogFilter::ForeachLogLine(str, [&](UEBabyPram::LogFilter::LogLine line)
-				{
-					if (auto time = line.GetSystemClockTimePoint(); time.has_value())
-					{
-						auto now = std::chrono::system_clock::now();
-						auto target_time_point = UEBabyPram::LogFilter::LogLine::GetSystemClockTimePoint(
-							2021, 11, 1, 23, 1, 1, 1
-						);
-						volatile int i = 0;
-					}
-
-					for (std::size_t i = 0; i < 10; ++i)
-					{
-						std::format_to(
-							std::back_inserter(output),
-							"Line-{}:{}",
-							line.line.Begin(),
-							Potato::Log::AddLogStringWrapper(line.total_str)
-						);
-					}
-
-				}
-			);
-
-			
-			std::format_to(std::back_inserter(output), "\r\nEOF {}", "EndOfFile");
-
-			Potato::Document::DocumentWriter doc_writer(Potato::Document::BomT::UTF8, true);
-			doc_writer.Write(std::u8string_view{ reinterpret_cast<char8_t const*>(output.data()), output.size() });
-			doc_writer.FlushTo(writter);
-		}
-	}
 
 	return 0;
 }
