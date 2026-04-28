@@ -5,7 +5,7 @@ import Potato;
 
 static constexpr std::u8string_view ebnf_string = u8R"(
 $:='\s+';
-INT:='[1-9][0-9]+' : [1];
+INT:='[1-9][0-9]*' : [1];
 STR:='\^.*?[^\\]\^' : [2];
 STR:='@\^.?[^\\]\^' : [3];
 COMPARE:='<' : [4];
@@ -28,7 +28,7 @@ $:=<Exp>;
 <STAT>:='$Level' COMPARE LOGLEVEL : [2];
 <STAT>:='$Line' COMPARE INT : [2];
 <STAT>:='$Log' COMPARE STR : [2];
-<STAT>:='$Category' '==' STR : [2];
+<STAT>:='$Category' COMPARE STR : [2];
 <STAT>:= '(' <STAT> ')' : [4];
 <STAT>:= <STAT> '&&' <STAT>  : [4];
 <STAT>:= <STAT> '||' <STAT>  : [4];
@@ -57,7 +57,7 @@ namespace UEBabyPram::LogFilter
 		Potato::Reg::Dfa dfa(Potato::Reg::Dfa::FormatE::GreedyHeadMatch, u8R"(\^.*?[^\\]\^)");
 		Potato::Reg::DfaProcessor processer;
 		processer.SetObserverTable(dfa);
-		auto re3 = Potato::Reg::Process(processer, u8"^S1asas\\^^");
+		auto re3 = processer.Process(u8"^S1asas\\^^");
 		std::int32_t i = 0;
 
 		std::array<Potato::Encode::Unicode::CodePointT, 1024> code;
