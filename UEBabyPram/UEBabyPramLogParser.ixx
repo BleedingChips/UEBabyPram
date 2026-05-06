@@ -40,7 +40,53 @@ export namespace UEBabyPram::LogParser
 		operator bool() const { return offset != 0; }
 	};
 
+	struct TimeStringViewIndex
+	{
+		Potato::Misc::IndexSpan<> year;
+		Potato::Misc::IndexSpan<> month;
+		Potato::Misc::IndexSpan<> day;
+		Potato::Misc::IndexSpan<> hour;
+		Potato::Misc::IndexSpan<> minute;
+		Potato::Misc::IndexSpan<> second;
+		Potato::Misc::IndexSpan<> millisecond;
+		TimeStringView Slice(std::u8string_view str) const {
+			return {
+				year.Slice(str),
+				month.Slice(str),
+				day.Slice(str),
+				hour.Slice(str),
+				minute.Slice(str),
+				second.Slice(str),
+				millisecond.Slice(str)
+			};
+		}
+	};
+
+	struct LinePropertyIndex
+	{
+		TimeStringViewIndex time;
+		Potato::Misc::IndexSpan<> frame_count;
+		Potato::Misc::IndexSpan<> category;
+		std::u8string_view level;
+		LineProperty Slice(std::u8string_view str) const {
+			return {
+				time.Slice(str),
+				frame_count.Slice(str),
+				category.Slice(str),
+				level
+			};
+		}
+	};
+
+	struct LinePropertyIndexResult
+	{
+		LinePropertyIndex property;
+		std::size_t offset = 0;
+		operator bool() const { return offset != 0; }
+	};
+
 	LinePropertyResult GetLineProperty(std::u8string_view string);
+	LinePropertyIndexResult GetLinePropertyIndex(std::u8string_view string);
 
 	struct LogLine
 	{
@@ -85,7 +131,7 @@ export namespace UEBabyPram::LogParser
 	}
 
 	template<typename Func>
-	std::u8string_view ForeachLogLine(std::u8string_view str, Func&& fun) requires(std::is_invocable_r_v<bool, Func&&, LogLine>)
+	void ForeachLogLine(std::u8string_view str, Func&& fun) requires(std::is_invocable_r_v<bool, Func&&, LogLine>)
 	{
 		LineContext context;
 		while (true)
@@ -98,6 +144,47 @@ export namespace UEBabyPram::LogParser
 			else {
 				return;
 			}
+		}
+		return;
+	}
+
+	struct LineProcessor
+	{
+		LineProcessor(std::pmr::memory_resource* resource = std::pmr::get_default_resource())
+			: current_line(resource), cache_line(resource) {
+		}
+		std::optional<LogLine> ReadLine(Potato::Document::PlainTextReader& reader);
+		std::optional<LogLine> GetLogLine() const;
+	protected:
+		std::pmr::u8string current_line;
+		std::optional<LinePropertyIndexResult> current_line_property;
+		std::pmr::u8string cache_line;
+		std::optional<LinePropertyIndexResult> cache_line_property;
+		Potato::Misc::IndexSpan<> line_record = { 1, 1 };
+		std::size_t line = 0;
+	};
+
+	template<typename Func>
+	void ForeachLogLine(Potato::Document::PlainTextReader& reader, Func&& fun, std::pmr::memory_resource* resource = std::pmr::get_default_resource()) requires(std::is_invocable_r_v<bool, Func&&, LogLine>)
+	{
+		LineProcessor processor;
+		while (true)
+		{
+			auto log_line = processor.ReadLine(reader); 
+			if (log_line.has_value())
+			{
+				if (!fun(*log_line))
+					return;
+			}
+			else {
+				break;
+			}
+		}
+		auto log_line = processor.GetLogLine();
+		if (log_line.has_value())
+		{
+			if (!fun(*log_line))
+				return;
 		}
 		return;
 	}

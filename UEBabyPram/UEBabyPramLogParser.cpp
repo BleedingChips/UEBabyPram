@@ -137,6 +137,55 @@ namespace UEBabyPram::LogParser
 		return { property, offset };
 	}
 
+	LinePropertyIndexResult GetLinePropertyIndex(std::u8string_view string)
+	{
+		LinePropertyIndex property;
+		std::size_t offset = 0;
+		auto match = ctre::starts_with<UR"(\[([0-9]{0,4})\.([0-9]{1,2})\.([0-9]{1,2})-([0-9]{1,2})\.([0-9]{1,2})\.([0-9]{1,2}):([0-9]{1,3})\]\[\s{0,3}([0-9]{1,3})\])">(string.substr(offset));
+		
+		auto GetIndex = [](auto const& math, std::u8string_view str) ->Potato::Misc::IndexSpan<> {
+			return { static_cast<std::size_t>(math.begin() - str.data()), static_cast<std::size_t>(math.end() - str.data()) };
+		};
+		
+		if (match)
+		{
+			property.time.year = GetIndex(match.get<1>(), string);
+			property.time.month = GetIndex(match.get<2>(), string);
+			property.time.day = GetIndex(match.get<3>(), string);
+			property.time.hour = GetIndex(match.get<4>(), string);
+			property.time.minute = GetIndex(match.get<5>(), string);
+			property.time.second = GetIndex(match.get<6>(), string);
+			property.time.millisecond = GetIndex(match.get<7>(), string);
+			property.frame_count = GetIndex(match.get<8>(), string);
+			offset = (match.end() - string.data());
+		}
+		auto match2 = ctre::starts_with<U"[a-zA-Z][a-zA-Z0-9]*?: ">(string.substr(offset));
+		if (match2)
+		{
+			auto category = *match2.to_optional_view();
+			property.category = { offset, offset + category.size() - 2};
+			offset += category.size();
+		}
+		if (offset != 0)
+		{
+			auto iter_string = string.substr(offset);
+			for (auto& ite : Levels)
+			{
+				if (string.starts_with(ite))
+				{
+					property.level = ite.substr(0, ite.size() - 2);
+					offset += ite.size();
+					break;
+				}
+			}
+			if (property.level.empty())
+			{
+				property.level = u8"Log";
+			}
+		}
+		return { property, offset };
+	}
+
 	std::optional<LogLine> GetLogLine(std::u8string_view log, LineContext& context)
 	{
 		while (context.next_line_offset < log.size())
@@ -243,6 +292,70 @@ namespace UEBabyPram::LogParser
 			line.str = line.total_str.substr(context.property->offset);
 			context.property.reset();
 			return line;
+		}
+		return std::nullopt;
+	}
+
+	std::optional<LogLine> LineProcessor::ReadLine(Potato::Document::PlainTextReader& reader)
+	{
+		Potato::Document::PlainTextReader::CutoffSetting cutoff;
+		cutoff.cutoff_character = U'\n';
+		if (current_line_property.has_value())
+		{
+			cache_line = current_line;
+			cache_line_property = current_line_property;
+			line_record = { line , line + 1 };
+			current_line.clear();
+			current_line_property.reset();
+		}
+		while (true)
+		{
+			auto info = reader.ReadPlainText(std::back_inserter(current_line), cutoff);
+			if (info)
+			{
+				line += 1;
+				auto line_property = GetLinePropertyIndex(current_line);
+				if (line_property)
+				{
+					current_line_property = line_property;
+					auto log_line = GetLogLine();
+					if (log_line.has_value())
+					{
+						return log_line;
+					}
+					cache_line = current_line;
+					cache_line_property = current_line_property;
+					line_record = { line , line + 1 };
+					current_line.clear();
+					current_line_property.reset();
+				}
+				else {
+					cache_line.append(current_line);
+					current_line.clear();
+					line_record.BackwardEnd(1);
+					if (!cache_line_property.has_value())
+					{
+						cache_line_property = LinePropertyIndexResult{};
+					}
+				}
+			}
+			else {
+				return std::nullopt;
+			}
+		}
+		return std::nullopt;
+	}
+
+	std::optional<LogLine> LineProcessor::GetLogLine() const
+	{
+		if (cache_line_property.has_value())
+		{
+			LogLine current_line;
+			current_line.property = cache_line_property->property.Slice(cache_line);
+			current_line.total_str = std::u8string_view{ cache_line };
+			current_line.str = current_line.total_str.substr(cache_line_property->offset);
+			current_line.line = line_record;
+			return current_line;
 		}
 		return std::nullopt;
 	}
