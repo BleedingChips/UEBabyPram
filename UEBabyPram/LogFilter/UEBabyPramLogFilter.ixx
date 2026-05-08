@@ -38,4 +38,48 @@ export namespace UEBabyPram::LogFilter
 	};
 
 	void Test();
+
+	enum class PropertyType
+	{
+		Time,
+		Level,
+		Line,
+		Log,
+		Category,
+		StatementAnd,
+		StatementOr
+	};
+
+	enum class CompareType
+	{
+		Smaller,
+		SmallerEqual,
+		Equal,
+		BiggerEqual,
+		Bigger,
+	};
+
+	struct ConditionStatement
+	{
+		PropertyType property;
+		CompareType compare;
+		std::variant<std::monostate, std::size_t, LogParser::LogLine::TimeT, Potato::Reg::Dfa, std::u8string> value;
+
+		std::optional<bool> Detect(LogParser::LogLine const& log, Potato::Reg::DfaProcessor& processor) const;
+		static std::optional<bool> Detect(std::span<ConditionStatement const> statemenets, LogParser::LogLine const& log, Potato::Reg::DfaProcessor& processor);
+	};
+
+	struct LogFilterProcessor
+	{
+		LogFilterProcessor();
+		void Init(std::u8string_view statement);
+		std::optional<bool> Detect(LogParser::LogLine const& log) { 
+			return ConditionStatement::Detect(std::span(statement.data(), statement.size()), log, dfa_processor);
+		}
+	protected:
+		std::pmr::vector<ConditionStatement> statement;
+		Potato::Reg::DfaProcessor dfa_processor;
+	};
+
+
 }
