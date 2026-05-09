@@ -9,6 +9,7 @@ namespace UEBabyPram::LogFilter
 		$:='\s+';
 		INT:='[1-9][0-9]*' : [1];
 		STR:='\^.*?[^\\]\^' : [2];
+		STR:='R\^.*?[^\\]\^' : [3];
 		COMPARE:='<' : [4];
 		COMPARE:='<=' : [5];
 		COMPARE:='==' : [6];
@@ -104,85 +105,78 @@ namespace UEBabyPram::LogFilter
 		return std::nullopt;
 	}
 
-	std::optional<bool> ConditionStatement::Detect(std::span<ConditionStatement const> statemenets, LogParser::LogLine const& log, Potato::Reg::DfaProcessor& processor)
+	std::optional<bool> OperatorStatement::Detect(LogParser::LogLine const& log, Potato::Reg::DfaProcessor& processor) const
 	{
-		std::vector<std::size_t> condition_index;
-
-		for (std::size_t i = 0; i < statemenets.size(); ++i)
+		auto s1 = statement_1->Detect(log, processor);
+		if (s1.has_value())
 		{
-			auto& cur = statemenets[i];
-			switch (cur.property)
+			if (is_or && *s1 || !is_or && !*s1)
 			{
-			case PropertyType::StatementOr:
-				if (condition_index.size() >= 2)
-				{
-					auto s2 = *condition_index.rbegin();
-					condition_index.pop_back();
-					auto s1 = *condition_index.rbegin();
-					condition_index.pop_back();
-					if (
-						s1 == std::numeric_limits<std::size_t>::max()
-						|| s2 == std::numeric_limits<std::size_t>::max()
-						)
-					{
-						condition_index.emplace_back(std::numeric_limits<std::size_t>::max());
-					}
-					else {
-						if (s1 < std::numeric_limits<std::size_t>::max() - 1)
-						{
-							auto re = statemenets[s1].Detect(log, processor);
-							if (re)
-							{
-
-							}
-						}
-					}
-				}
-				break;
+				return *s1;
+			}
+			auto s2 = statement_2->Detect(log, processor);
+			if (s2.has_value())
+			{
+				return *s2;
 			}
 		}
-
 		return std::nullopt;
+	}
+
+	std::unique_ptr<StatementInterface> LogFilterProcessor::ComplierStatement(std::u8string_view statement)
+	{
+		Potato::EBNF::EbnfProcessor pro;
+		pro.SetObserverTable(GetEbnf(), [&](Potato::EBNF::SymbolInfo syminfo, std::size_t mask)->std::any {
+			if (mask == 1)
+			{
+				std::size_t value = 0;
+				Potato::Format::DirectDeformat(syminfo.TokenIndex.Slice(statement), value);
+				return value;
+			}
+			else if (mask == 2)
+			{
+				std::u8string value{ syminfo.TokenIndex.Slice(statement) };
+				return value;
+			}
+			else if (mask == 3)
+			{
+				Potato::Reg::Dfa dfa(Potato::Reg::Dfa::FormatE::HeadMatch, syminfo.TokenIndex.Slice(statement));
+				return dfa;
+			}
+			else if (mask >= 4 && mask <= 8)
+			{
+				return static_cast<CompareType>(mask - 4);
+			}else if(mask >= 10 && mask <= 16)
+			{
+				std::u8string value{ syminfo.TokenIndex.Slice(statement) };
+				return value;
+			}
+			return std::any{};
+			},
+			[](Potato::EBNF::SymbolInfo Symbol, Potato::EBNF::ReduceProduction Production) -> std::any {
+				volatile int i = 0;
+				return std::any{};
+			}
+		);
+		if (Potato::EBNF::Process(pro, statement))
+		{
+			return {};
+		}
+		return {};
+	}
+
+	void LogFilterProcessor::AddStatement(std::u8string_view statement)
+	{
+		auto node = ComplierStatement(statement);
+		this->statement = std::move(node);
 	}
 
 
 	void Test()
 	{
-		static Potato::EBNF::Ebnf ebnf(ebnf_string);
-		auto binary_table = Potato::EBNF::CreateEbnfBinaryTable(ebnf);
-		Potato::EBNF::EbnfBinaryTableWrapper wrapper({ binary_table.data(), binary_table.size()});
-		std::pmr::vector<std::u8string_view> all_mask;
-		Potato::EBNF::EbnfProcessor pro;
-		pro.SetObserverTable(wrapper, [&](Potato::EBNF::SymbolInfo syminfo, std::size_t mask)->std::any {
-			all_mask.emplace_back(
-				syminfo.SymbolName
-			);
-			return std::any{};
-			});
-		bool re = Potato::EBNF::Process(pro, std::u8string_view{ u8"$Level==Log && ($Line >= 1 || $Line <= 124);" });
-		
-		Potato::Reg::Dfa dfa(Potato::Reg::Dfa::FormatE::GreedyHeadMatch, u8R"(\^.*?[^\\]\^)");
-		Potato::Reg::DfaProcessor processer;
-		processer.SetObserverTable(dfa);
-		auto re3 = processer.Process(u8"^S1asas\\^^");
-		std::int32_t i = 0;
-
-		std::array<Potato::Encode::Unicode::CodePointT, 1024> code;
-		std::array<std::size_t, 1024> index;
-		auto info = Potato::Encode::UnicodeEncoder<char8_t, Potato::Encode::Unicode::CodePointT>
-			::EncodeTo(u8"$Level==Log && ($Line >= 1 || $Line <= 124);", code, {}, index);
-
-		auto span = std::span(code).subspan(0, info.target_space);
-		auto index_span = std::span(index).subspan(0, info.source_space);
-
-		Potato::EBNF::LexicalProcessor processor;
-		processor.SetObserverTable(ebnf);
-
-		std::array<Potato::EBNF::LexicalSymbol, 1024> out_symbol;
-		//processor.Comsumed(span, index_span);
-
-
-
-		volatile int i233 = 0;
+		std::u8string_view statement = std::u8string_view{ u8"$Level==Log && ($Line >= 1 || $Line <= 124);" };
+		LogFilterProcessor processor;
+		processor.AddStatement(statement);
+		volatile int i = 0;
 	}
 }

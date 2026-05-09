@@ -46,8 +46,6 @@ export namespace UEBabyPram::LogFilter
 		Line,
 		Log,
 		Category,
-		StatementAnd,
-		StatementOr
 	};
 
 	enum class CompareType
@@ -59,25 +57,44 @@ export namespace UEBabyPram::LogFilter
 		Bigger,
 	};
 
-	struct ConditionStatement
+	struct StatementInterface
+	{
+		virtual std::optional<bool> Detect(LogParser::LogLine const& log, Potato::Reg::DfaProcessor& processor) const = 0;
+	};
+
+	struct ConditionStatement : StatementInterface
 	{
 		PropertyType property;
 		CompareType compare;
 		std::variant<std::monostate, std::size_t, LogParser::LogLine::TimeT, Potato::Reg::Dfa, std::u8string> value;
 
-		std::optional<bool> Detect(LogParser::LogLine const& log, Potato::Reg::DfaProcessor& processor) const;
-		static std::optional<bool> Detect(std::span<ConditionStatement const> statemenets, LogParser::LogLine const& log, Potato::Reg::DfaProcessor& processor);
+		virtual std::optional<bool> Detect(LogParser::LogLine const& log, Potato::Reg::DfaProcessor& processor) const override;
 	};
+
+	struct OperatorStatement : StatementInterface
+	{
+		bool is_or = false;
+		Potato::Pointer::UniquePtr<StatementInterface> statement_1;
+		Potato::Pointer::UniquePtr<StatementInterface> statement_2;
+		virtual std::optional<bool> Detect(LogParser::LogLine const& log, Potato::Reg::DfaProcessor& processor) const override;
+	};
+
+	
 
 	struct LogFilterProcessor
 	{
-		LogFilterProcessor();
-		void Init(std::u8string_view statement);
+		LogFilterProcessor() {}
+		void AddStatement(std::u8string_view statement);
 		std::optional<bool> Detect(LogParser::LogLine const& log) { 
-			return ConditionStatement::Detect(std::span(statement.data(), statement.size()), log, dfa_processor);
+			if (statement)
+			{
+				return statement->Detect(log, dfa_processor);
+			}
+			return std::nullopt;
 		}
+		static std::unique_ptr<StatementInterface> ComplierStatement(std::u8string_view statement);
 	protected:
-		std::pmr::vector<ConditionStatement> statement;
+		std::unique_ptr<StatementInterface> statement;
 		Potato::Reg::DfaProcessor dfa_processor;
 	};
 
