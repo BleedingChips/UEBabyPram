@@ -74,8 +74,8 @@ export namespace UEBabyPram::LogFilter
 	struct OperatorStatement : StatementInterface
 	{
 		bool is_or = false;
-		Potato::Pointer::UniquePtr<StatementInterface> statement_1;
-		Potato::Pointer::UniquePtr<StatementInterface> statement_2;
+		std::shared_ptr<StatementInterface> statement_1;
+		std::shared_ptr<StatementInterface> statement_2;
 		virtual std::optional<bool> Detect(LogParser::LogLine const& log, Potato::Reg::DfaProcessor& processor) const override;
 	};
 
@@ -92,9 +92,9 @@ export namespace UEBabyPram::LogFilter
 			}
 			return std::nullopt;
 		}
-		static std::unique_ptr<StatementInterface> ComplierStatement(std::u8string_view statement);
+		static std::shared_ptr<StatementInterface> ComplierStatement(std::u8string_view statement);
 	protected:
-		std::unique_ptr<StatementInterface> statement;
+		std::shared_ptr<StatementInterface> statement;
 		Potato::Reg::DfaProcessor dfa_processor;
 	};
 

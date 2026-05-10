@@ -24,22 +24,26 @@ namespace UEBabyPram::LogFilter
 		LOGLEVEL:='VeryVerbose':[16];
 		%%%%
 		$:=<Exp>;
-		<TIME>:=INT '.' INT '.' INT ':' INT : [2];
+		<TIME>:=INT '.' INT '.' INT ':' INT '.' INT '.' INT : [1];
 			:=INT '.' INT '.' INT : [2];
-		<STAT>:='$Time' COMPARE <TIME> : [2];
-			:='$Level' COMPARE LOGLEVEL : [2];
-			:='$Line' COMPARE INT : [2];
-			:='$Log' COMPARE STR : [2];
-			:='$Category' COMPARE STR : [2];
-			:= '(' <STAT> ')' : [4];
-			:= <STAT> '&&' <STAT>  : [4];
-			:= <STAT> '||' <STAT>  : [4];
-		<Exp>:=<STAT> ';' :[4];
+		<STAT>:='$Time' COMPARE <TIME> : [10];
+			:='$Level' COMPARE LOGLEVEL : [11];
+			:='$Line' COMPARE INT : [12];
+			:='$Log' COMPARE STR : [13];
+			:='$Category' COMPARE STR : [14];
+			:= '(' <STAT> ')' : [20];
+			:= <STAT> '&&' <STAT>  : [21];
+			:= <STAT> '||' <STAT>  : [22];
+		<Exp>:=<STAT> ';' :[99];
 			:=;
 		%%%%
 		+('&&');
 		+('||');
 	)";
+
+	static std::array<std::u8string_view, 7> log_level_array = {
+		u8"Fatal", u8"Error", u8"Warning", u8"Display", u8"Log", u8"Verbose", u8"VeryVerbose"
+	};
 
 	Potato::EBNF::Ebnf const& GetEbnf()
 	{
@@ -85,7 +89,6 @@ namespace UEBabyPram::LogFilter
 				case CompareType::SmallerEqual:
 					return log.str.ends_with(string_view);
 				}
-				return std::nullopt;
 			}
 			else if (std::holds_alternative<Potato::Reg::Dfa>(value))
 			{
@@ -97,7 +100,33 @@ namespace UEBabyPram::LogFilter
 			}
 			break;
 		case PropertyType::Category:
-
+		{
+			std::size_t level = std::get<std::size_t>(value);
+			std::size_t index = 0;
+			for (; index < log_level_array.size(); ++index)
+			{
+				if (log.property.category == log_level_array[index])
+				{
+					break;
+				}
+			}
+			if (index < log_level_array.size())
+			{
+				switch (compare)
+				{
+				case CompareType::Bigger:
+					return level < index;
+				case CompareType::BiggerEqual:
+					return level <= index;
+				case CompareType::Equal:
+					return level == index;
+				case CompareType::Smaller:
+					return level > index;
+				case CompareType::SmallerEqual:
+					return level >= index;
+				}
+			}
+		}
 			break;
 		case PropertyType::Time:
 			break;
@@ -123,7 +152,7 @@ namespace UEBabyPram::LogFilter
 		return std::nullopt;
 	}
 
-	std::unique_ptr<StatementInterface> LogFilterProcessor::ComplierStatement(std::u8string_view statement)
+	std::shared_ptr<StatementInterface> LogFilterProcessor::ComplierStatement(std::u8string_view statement)
 	{
 		Potato::EBNF::EbnfProcessor pro;
 		pro.SetObserverTable(GetEbnf(), [&](Potato::EBNF::SymbolInfo syminfo, std::size_t mask)->std::any {
@@ -148,19 +177,95 @@ namespace UEBabyPram::LogFilter
 				return static_cast<CompareType>(mask - 4);
 			}else if(mask >= 10 && mask <= 16)
 			{
-				std::u8string value{ syminfo.TokenIndex.Slice(statement) };
-				return value;
+				auto view = syminfo.TokenIndex.Slice(statement);
+				std::size_t index = 0;
+				for (; index < log_level_array.size(); ++index)
+				{
+					if (log_level_array[index] == view)
+					{
+						return std::size_t{ index };
+					}
+				}
+				return log_level_array.size();
 			}
 			return std::any{};
 			},
-			[](Potato::EBNF::SymbolInfo Symbol, Potato::EBNF::ReduceProduction Production) -> std::any {
-				volatile int i = 0;
-				return std::any{};
+			[](Potato::EBNF::SymbolInfo symbol, Potato::EBNF::ReduceProduction production) -> std::any {
+				
+				if (production.UserMask >= 10 && production.UserMask <= 14)
+				{
+					auto state = std::make_shared<ConditionStatement>();
+					state->compare = *production[1].TryConsume<CompareType>();
+
+					switch (production.UserMask)
+					{
+					case 10:
+						state->property = PropertyType::Time;
+						state->value = *production[2].TryConsume<LogParser::LogLine::TimeT>();
+						break;
+					case 11:
+						state->property = PropertyType::Level;
+						state->value = *production[2].TryConsume<std::size_t>();
+						break;
+					case 12:
+						state->property = PropertyType::Line;
+						state->value = *production[2].TryConsume<std::size_t>();
+						break;
+					case 13:
+					{
+						state->property = PropertyType::Log;
+						auto string = production[2].TryConsume<std::u8string>();
+						if (string.has_value())
+						{
+							state->value = *string;
+						}
+						else {
+							auto dfa = production[2].TryConsume<Potato::Reg::Dfa>();
+							state->value = std::move(*dfa);
+						}
+					}
+						break;
+					case 14:
+					{
+						state->property = PropertyType::Category;
+						auto string = production[2].TryConsume<std::u8string>();
+						if (string.has_value())
+						{
+							state->value = *string;
+						}
+						else {
+							auto dfa = production[2].TryConsume<Potato::Reg::Dfa>();
+							state->value = std::move(*dfa);
+						}
+					}
+						break;
+					}
+					return std::shared_ptr<StatementInterface>(state);
+				}
+				else {
+					switch (production.UserMask)
+					{
+					case 20:
+						return production[1].Consume();
+					case 21:
+					case 22:
+					{
+						auto state = std::make_shared<OperatorStatement>();
+						state->statement_1 = *production[0].TryConsume<std::shared_ptr<StatementInterface>>();
+						state->statement_2 = *production[2].TryConsume<std::shared_ptr<StatementInterface>>();
+						state->is_or = (production.UserMask == 22);
+						return std::shared_ptr<StatementInterface>(state);
+					}
+					case 99:
+						return production[0].Consume();
+					}
+				}
+				return {};
 			}
 		);
 		if (Potato::EBNF::Process(pro, statement))
 		{
-			return {};
+			return pro.GetData<std::shared_ptr<StatementInterface>>();
 		}
 		return {};
 	}
