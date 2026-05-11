@@ -97,6 +97,10 @@ export namespace UEBabyPram::LogParser
 		IndexSpan<> line;
 		std::optional<std::size_t> GetFrameCount() const;
 		static std::optional<TimeT> GetSystemClockTimePoint(std::int32_t year, std::size_t month, std::size_t day, std::size_t hour, std::size_t min, std::size_t second, std::size_t milisecond);
+		static std::optional<TimeT> GetSystemClockTimePoint(std::size_t hour, std::size_t min, std::size_t second, std::size_t milisecond)
+		{
+			return GetSystemClockTimePoint(1900, 1, 1, hour, min, second, milisecond);
+		}
 		std::optional<TimeT> GetSystemClockTimePoint() const;
 	};
 

@@ -6,7 +6,7 @@ export module UEBabyPramLogFilter;
 
 import std;
 import Potato;
-import UEBabyPram;
+import UEBabyPramLogParser;
 
 
 export namespace UEBabyPram::LogFilter
@@ -84,7 +84,12 @@ export namespace UEBabyPram::LogFilter
 	struct LogFilterProcessor
 	{
 		LogFilterProcessor() {}
-		void AddStatement(std::u8string_view statement);
+		bool AddStatement(std::u8string_view statement, std::pmr::u8string& error_message);
+		bool AddStatement(std::u8string_view statement)
+		{
+			std::pmr::u8string error_message;
+			return AddStatement(statement, error_message);
+		}
 		std::optional<bool> Detect(LogParser::LogLine const& log) { 
 			if (statement)
 			{
@@ -92,11 +97,19 @@ export namespace UEBabyPram::LogFilter
 			}
 			return std::nullopt;
 		}
-		static std::shared_ptr<StatementInterface> ComplierStatement(std::u8string_view statement);
+		static std::shared_ptr<StatementInterface> ComplierStatement(std::u8string_view statement, std::pmr::u8string& error_message);
 	protected:
 		std::shared_ptr<StatementInterface> statement;
 		Potato::Reg::DfaProcessor dfa_processor;
 	};
 
+	struct UnsupportReg
+	{
+		std::pmr::u8string error_message;
+	};
 
+	struct UnsupportTime
+	{
+		std::pmr::u8string error_message;
+	};
 }

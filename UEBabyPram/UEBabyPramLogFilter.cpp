@@ -8,13 +8,13 @@ namespace UEBabyPram::LogFilter
 	static constexpr std::u8string_view ebnf_string = u8R"(
 		$:='\s+';
 		INT:='[1-9][0-9]*' : [1];
-		STR:='\^.*?[^\\]\^' : [2];
-		STR:='R\^.*?[^\\]\^' : [3];
+		STR:='\^(.*?[^\\])\^' : [2];
+		STR:='R\^(.*?[^\\])\^' : [3];
 		COMPARE:='<' : [4];
 		COMPARE:='<=' : [5];
 		COMPARE:='==' : [6];
-		COMPARE:='>' : [7];
-		COMPARE:='>=':[8];
+		COMPARE:='>' : [8];
+		COMPARE:='>=':[7];
 		LOGLEVEL:='Fatal':[10];
 		LOGLEVEL:='Error':[11];
 		LOGLEVEL:='Warning':[12];
@@ -24,8 +24,10 @@ namespace UEBabyPram::LogFilter
 		LOGLEVEL:='VeryVerbose':[16];
 		%%%%
 		$:=<Exp>;
-		<TIME>:=INT '.' INT '.' INT ':' INT '.' INT '.' INT : [1];
-			:=INT '.' INT '.' INT : [2];
+		<TIME>:=INT '.' INT '.' INT ':' INT '.' INT '.' INT ':' INT : [1];
+			:=INT '.' INT '.' INT ':' INT '.' INT '.' INT  : [1];
+			:=INT '.' INT '.' INT  ':' INT : [1];
+			:=INT '.' INT '.' INT : [1];
 		<STAT>:='$Time' COMPARE <TIME> : [10];
 			:='$Level' COMPARE LOGLEVEL : [11];
 			:='$Line' COMPARE INT : [12];
@@ -129,6 +131,26 @@ namespace UEBabyPram::LogFilter
 		}
 			break;
 		case PropertyType::Time:
+		{
+			auto log_time = log.GetSystemClockTimePoint();
+			if (!log_time.has_value())
+			{
+				return false;
+			}
+			auto value_time = std::get<LogFilter::LogLine::TimeT>(value);
+			switch (compare)
+			{
+			case CompareType::Bigger:
+			case CompareType::BiggerEqual:
+				return log.str.starts_with(string_view);
+			case CompareType::Equal:
+				return log.str.contains(string_view);
+			case CompareType::Smaller:
+			case CompareType::SmallerEqual:
+				return log.str.ends_with(string_view);
+			}
+		}
+			
 			break;
 		}
 		return std::nullopt;
@@ -152,7 +174,7 @@ namespace UEBabyPram::LogFilter
 		return std::nullopt;
 	}
 
-	std::shared_ptr<StatementInterface> LogFilterProcessor::ComplierStatement(std::u8string_view statement)
+	std::shared_ptr<StatementInterface> LogFilterProcessor::ComplierStatement(std::u8string_view statement, std::pmr::u8string& error_message)
 	{
 		Potato::EBNF::EbnfProcessor pro;
 		pro.SetObserverTable(GetEbnf(), [&](Potato::EBNF::SymbolInfo syminfo, std::size_t mask)->std::any {
@@ -169,8 +191,16 @@ namespace UEBabyPram::LogFilter
 			}
 			else if (mask == 3)
 			{
-				Potato::Reg::Dfa dfa(Potato::Reg::Dfa::FormatE::HeadMatch, syminfo.TokenIndex.Slice(statement));
-				return dfa;
+				try {
+					Potato::Reg::Dfa dfa(Potato::Reg::Dfa::FormatE::HeadMatch, syminfo.TokenIndex.Slice(statement));
+					return dfa;
+				}
+				catch (Potato::Reg::Exception::Interface const& inter)
+				{
+					std::pmr::u8string error{ syminfo.TokenIndex.Slice(statement) };
+					throw UnsupportReg{ error };
+				}
+				
 			}
 			else if (mask >= 4 && mask <= 8)
 			{
@@ -190,7 +220,7 @@ namespace UEBabyPram::LogFilter
 			}
 			return std::any{};
 			},
-			[](Potato::EBNF::SymbolInfo symbol, Potato::EBNF::ReduceProduction production) -> std::any {
+			[&](Potato::EBNF::SymbolInfo symbol, Potato::EBNF::ReduceProduction production) -> std::any {
 				
 				if (production.UserMask >= 10 && production.UserMask <= 14)
 				{
@@ -256,6 +286,65 @@ namespace UEBabyPram::LogFilter
 						state->is_or = (production.UserMask == 22);
 						return std::shared_ptr<StatementInterface>(state);
 					}
+					case 1:
+					{
+						std::optional<LogParser::LogLine::TimeT> time;
+						if (production.Size() == 13)
+						{
+							time = LogParser::LogLine::GetSystemClockTimePoint(
+								*production[0].TryConsume<std::size_t>(),
+								*production[2].TryConsume<std::size_t>(),
+								*production[4].TryConsume<std::size_t>(),
+								*production[6].TryConsume<std::size_t>(),
+								*production[8].TryConsume<std::size_t>(),
+								*production[10].TryConsume<std::size_t>(),
+								*production[12].TryConsume<std::size_t>()
+							);
+						}
+						else if (production.Size() == 11)
+						{
+							time = LogParser::LogLine::GetSystemClockTimePoint(
+								*production[0].TryConsume<std::size_t>(),
+								*production[2].TryConsume<std::size_t>(),
+								*production[4].TryConsume<std::size_t>(),
+								*production[6].TryConsume<std::size_t>(),
+								*production[8].TryConsume<std::size_t>(),
+								*production[10].TryConsume<std::size_t>(),
+								0
+							);
+						}
+						else if (production.Size() == 7)
+						{
+							time = LogParser::LogLine::GetSystemClockTimePoint(
+								*production[0].TryConsume<std::size_t>(),
+								*production[2].TryConsume<std::size_t>(),
+								*production[4].TryConsume<std::size_t>(),
+								*production[6].TryConsume<std::size_t>()
+							);
+						}
+						else if (production.Size() == 5)
+						{
+							time = LogParser::LogLine::GetSystemClockTimePoint(
+								*production[0].TryConsume<std::size_t>(),
+								*production[2].TryConsume<std::size_t>(),
+								*production[4].TryConsume<std::size_t>(),
+								0
+							);
+						}
+						if (!time.has_value())
+						{
+							Potato::Misc::IndexSpan<> index{
+								production[0].TokenIndex.Begin(),
+								production[production.Size() - 1].TokenIndex.End()
+							};
+							std::pmr::u8string error_message{ index.Slice(statement) };
+							throw UnsupportTime{ error_message };
+						}
+						else {
+							return *time;
+						}
+					}
+						break;
 					case 99:
 						return production[0].Consume();
 					}
@@ -263,23 +352,51 @@ namespace UEBabyPram::LogFilter
 				return {};
 			}
 		);
-		if (Potato::EBNF::Process(pro, statement))
-		{
-			return pro.GetData<std::shared_ptr<StatementInterface>>();
+		try {
+			if (Potato::EBNF::Process(pro, statement))
+			{
+				return pro.GetData<std::shared_ptr<StatementInterface>>();
+			}
 		}
+		catch (UnsupportReg const& reg)
+		{
+			error_message = u8"Error: Unsupport Reg :";
+			error_message.append(reg.error_message);
+		}
+		catch (UnsupportTime const& tim)
+		{
+			error_message = u8"Error: Unsupport time :";
+			error_message.append(tim.error_message);
+		}
+		
 		return {};
 	}
 
-	void LogFilterProcessor::AddStatement(std::u8string_view statement)
+	bool LogFilterProcessor::AddStatement(std::u8string_view statement, std::pmr::u8string& error_message)
 	{
-		auto node = ComplierStatement(statement);
-		this->statement = std::move(node);
+		auto node = ComplierStatement(statement, error_message);
+		if (node)
+		{
+			if (this->statement)
+			{
+				auto state = std::make_shared<OperatorStatement>();
+				state->statement_1 = this->statement;
+				state->statement_2 = node;
+				state->is_or = true;
+				this->statement = state;
+			}
+			else {
+				this->statement = std::move(node);
+			}
+			return true;
+		}
+		return false;
 	}
 
 
 	void Test()
 	{
-		std::u8string_view statement = std::u8string_view{ u8"$Level==Log && ($Line >= 1 || $Line <= 124);" };
+		std::u8string_view statement = std::u8string_view{ u8"$Level==Log && ($Line >= 1 || $Line <= 124) && $Time > 10.13.12;" };
 		LogFilterProcessor processor;
 		processor.AddStatement(statement);
 		volatile int i = 0;
