@@ -37,6 +37,7 @@ namespace UEBabyPram::LogFilter
 			:= <STAT> '&&' <STAT>  : [21];
 			:= <STAT> '||' <STAT>  : [22];
 		<Exp>:=<STAT> ';' :[99];
+			:=<STAT> :[99];
 			:=;
 		%%%%
 		+('&&');
@@ -137,17 +138,26 @@ namespace UEBabyPram::LogFilter
 			{
 				return false;
 			}
-			auto value_time = std::get<LogFilter::LogLine::TimeT>(value);
+			auto value_time = std::get<LogParser::LogLine::TimeT>(value);
+			auto bound_value = *UEBabyPram::LogParser::LogLine::GetSystemClockTimePoint(
+				1970, 1, 2, 0, 0, 0, 0
+			);
+			if (bound_value > value_time)
+			{
+				log_time = *log_time - std::chrono::floor<std::chrono::days>(*log_time) + std::chrono::system_clock::time_point{};
+			}
 			switch (compare)
 			{
 			case CompareType::Bigger:
+				return *log_time > value_time;
 			case CompareType::BiggerEqual:
-				return log.str.starts_with(string_view);
+				return *log_time >= value_time;
 			case CompareType::Equal:
-				return log.str.contains(string_view);
+				return *log_time == value_time;
 			case CompareType::Smaller:
+				return *log_time < value_time;
 			case CompareType::SmallerEqual:
-				return log.str.ends_with(string_view);
+				return *log_time <= value_time;
 			}
 		}
 			
@@ -391,14 +401,5 @@ namespace UEBabyPram::LogFilter
 			return true;
 		}
 		return false;
-	}
-
-
-	void Test()
-	{
-		std::u8string_view statement = std::u8string_view{ u8"$Level==Log && ($Line >= 1 || $Line <= 124) && $Time > 10.13.12;" };
-		LogFilterProcessor processor;
-		processor.AddStatement(statement);
-		volatile int i = 0;
 	}
 }

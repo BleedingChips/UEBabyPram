@@ -37,8 +37,6 @@ export namespace UEBabyPram::LogFilter
 		std::size_t max_cache_size = 1024 * 1204 * 1024 * max_cache_size_gb;
 	};
 
-	void Test();
-
 	enum class PropertyType
 	{
 		Time,
@@ -78,8 +76,6 @@ export namespace UEBabyPram::LogFilter
 		std::shared_ptr<StatementInterface> statement_2;
 		virtual std::optional<bool> Detect(LogParser::LogLine const& log, Potato::Reg::DfaProcessor& processor) const override;
 	};
-
-	
 
 	struct LogFilterProcessor
 	{

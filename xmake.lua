@@ -20,6 +20,7 @@ if os.scriptdir() == os.projectdir() then
     target("UEBabyPramLogFilter")
         set_kind("binary")
         add_files("UEBabyPramLogFilter/*.cpp")
+        add_files("UEBabyPramLogFilter/*.ixx")
         add_deps("Potato")
         add_deps("UEBabyPram")
     target_end()

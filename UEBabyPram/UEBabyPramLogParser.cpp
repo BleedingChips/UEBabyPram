@@ -36,9 +36,9 @@ namespace UEBabyPram::LogParser
 	std::optional<LogLine::TimeT> LogLine::GetSystemClockTimePoint(std::int32_t year, std::size_t month, std::size_t day, std::size_t hour, std::size_t min, std::size_t second, std::size_t milisecond)
 	{
 		if (
-			year >= 1900
+			year >= 1970
 			&& month >= 1 && month <= 12
-			&& day > 0 && day <= 31
+			&& day >= 1 && day <= 31
 			&& hour < 24
 			&& min < 60
 			&& second < 60
