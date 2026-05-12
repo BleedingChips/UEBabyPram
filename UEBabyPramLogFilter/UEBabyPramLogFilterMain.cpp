@@ -39,6 +39,7 @@ int main(int argc, char* argv[])
 {
 	
 	UEBabyPram::LogFilter::FilterSetting setting;
+	UEBabyPram::LogFilter::LogFilterProcessor processor;
 
 	for (std::size_t i = 0; i < argc; ++i)
 	{
@@ -46,13 +47,40 @@ int main(int argc, char* argv[])
 		{
 			if (i + 1 < argc)
 			{
-
+				setting.input_files.emplace_back(argv[i+1]);
 			}
 			else {
-				
+				return -1;
+			}
+		}
+		else if (argv[i] == "-p" || argv[i] == "-path")
+		{
+			if (i + 1 < argc)
+			{
+				setting.input_paths.emplace_back(argv[i + 1]);
+			}
+			else {
+				return -1;
+			}
+		}
+		else if (argv[i] == "-c" || argv[i] == "--condition")
+		{
+			if (i + 1 < argc)
+			{
+				std::u8string error_message;
+				std::string_view str = argv[i + 1];
+				if (!processor.AddStatement({ reinterpret_cast<char8_t const*>(str.data()), str.size() }))
+				{
+					return -1;
+				}
+			}
+			else {
+				return -1;
 			}
 		}
 	}
-	Log::Log<log_filter, Log::LogLevel::Log, u8"Start Runing LogFilter">();
+
+
+
 	return 0;
 }
