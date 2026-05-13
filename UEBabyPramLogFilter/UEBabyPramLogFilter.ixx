@@ -35,6 +35,8 @@ export namespace UEBabyPram::LogFilter
 		OutputTarget target = OutputTarget::FILE;
 		OutputMode mode = OutputMode::FILTER;
 		std::size_t max_cache_size = 1024 * 1204 * 1024 * max_cache_size_gb;
+		bool output_with_line = false;
+		bool output_with_separate_frame = false;
 	};
 
 	enum class PropertyType
@@ -80,6 +82,7 @@ export namespace UEBabyPram::LogFilter
 	struct LogFilterProcessor
 	{
 		LogFilterProcessor() {}
+		LogFilterProcessor(LogFilterProcessor const&) = default;
 		bool AddStatement(std::u8string_view statement, std::pmr::u8string& error_message);
 		bool AddStatement(std::u8string_view statement)
 		{
@@ -94,6 +97,7 @@ export namespace UEBabyPram::LogFilter
 			return std::nullopt;
 		}
 		static std::shared_ptr<StatementInterface> ComplierStatement(std::u8string_view statement, std::pmr::u8string& error_message);
+		operator bool() const { return statement.operator bool(); }
 	protected:
 		std::shared_ptr<StatementInterface> statement;
 		Potato::Reg::DfaProcessor dfa_processor;
