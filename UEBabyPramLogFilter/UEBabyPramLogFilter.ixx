@@ -20,21 +20,19 @@ export namespace UEBabyPram::LogFilter
 	enum class OutputMode
 	{
 		FILTER,
-		FILTER_WITH_FRAME_SPERATE,
-		CUSTOM,
+		FINDER
 	};
 
-	constexpr std::size_t max_cache_size_gb = 1;
+	constexpr std::size_t max_cache_size_gb = 20;
 
 	struct FilterSetting
 	{
-		std::vector<std::filesystem::path> input_files;
-		std::vector<std::filesystem::path> input_paths;
-		std::filesystem::path output_paths;
+		std::filesystem::path input_file;
+		std::filesystem::path output_file;
 		std::filesystem::path output_expand;
 		OutputTarget target = OutputTarget::FILE;
 		OutputMode mode = OutputMode::FILTER;
-		std::size_t max_cache_size = 1024 * 1204 * 1024 * max_cache_size_gb;
+		std::size_t max_cache_size = 1024 * 1204 * max_cache_size_gb;
 		bool output_with_line = false;
 		bool output_with_separate_frame = false;
 	};
