@@ -109,6 +109,12 @@ int main(int argc, char* argv[])
 		}
 	}
 
+	if (setting.input_file.empty())
+	{
+		Log::Log<log_filter, Log::LogLevel::Error, L"Require an target file with -f or --file, see -h or --help for more infomation">();
+		return -1;
+	}
+
 	Potato::Log::Log<log_filter, Potato::Log::LogLevel::Log, u8"Start Filter file:<{}>">(setting.input_file.generic_u8string());
 	Potato::Document::DocumentReader reader(setting.input_file);
 	if (!reader)
@@ -127,10 +133,24 @@ int main(int argc, char* argv[])
 
 	if (reader)
 	{
+
+		std::filesystem::path out_path = setting.output_file;
+		if (out_path.empty())
+		{
+			out_path = setting.input_file;
+			if (!setting.output_expand.empty())
+			{
+				out_path += setting.output_expand;
+			}
+			else {
+				out_path += L".filterout";
+			}
+		}
+
 		Potato::Document::PlainTextReader::Config config;
 		config.cache_buffer_size = std::min(static_cast<std::size_t>(1024) * 1024 * 20, reader.GetStreamSize());
 		Potato::Document::PlainTextReader plain_reader(reader, config);
-		Potato::Document::DocumentWriter writter(new_context->output_path, Potato::Document::DocumentWriter::OpenMode::CREATE_OR_EMPTY);
+		Potato::Document::DocumentWriter writter(out_path, Potato::Document::DocumentWriter::OpenMode::CREATE_OR_EMPTY);
 		Potato::Document::PlainTextWritter::Config writer_config;
 		config.bom = Potato::Document::BomT::UTF8;
 		Potato::Document::PlainTextWritter plain_writer(writter, writer_config);
@@ -138,15 +158,14 @@ int main(int argc, char* argv[])
 		UEBabyPram::LogParser::LogLine::TimeT last_frame_time;
 		std::optional<std::size_t> last_frame_count;
 		std::string temp_output;
+		std::chrono::system_clock::time_point last_log_time = std::chrono::system_clock::now();
 		UEBabyPram::LogParser::ForeachLogLine(plain_reader, [&](UEBabyPram::LogParser::LogLine log_line) -> bool {
 
-			if (
-				(log_line.line.Begin() % 100) == 0
-				|| log_line.line.Begin() / 100 != log_line.line.End() / 100
-				)
+			auto now = std::chrono::system_clock::now();
+			if (now - last_frame_time > std::chrono::seconds{ 5 })
 			{
-				std::lock_guard lg(new_context->mutex);
-				new_context->line_count = log_line.line.Begin();
+				last_frame_time = now;
+				Log::Log<log_filter, Log::LogLevel::Log, u"Filtering log line: {}">(log_line.line.Begin());
 			}
 
 			if (processor)
@@ -201,89 +220,15 @@ int main(int argc, char* argv[])
 			}
 
 			return true;
-			});
-		{
-			std::lock_guard lg(new_context->mutex);
-			new_context->done = true;
-		}
-	}
-
-	std::size_t index = 0;
-	for (auto& file_ite : files)
-	{
-		auto new_context = std::make_shared<FilterTaskContext>();
-		new_context->path = file_ite;
-		new_context->index = index++;
-		new_context->output_path = file_ite;
-		if (setting.output_expand.empty())
-		{
-			new_context->output_path += u8".filter_out";
-		}
-		else {
-			new_context->output_path += setting.output_expand;
-		}
-		context.emplace_back(new_context);
-		Potato::Log::Log<log_filter, Potato::Log::LogLevel::Log, u8"Start Filter file:<{}>">(file_ite.generic_u8string());
-		task_context.Commit([new_context, file_ite, &setting, processor](Potato::Task::Context&, Potato::Task::Node::Parameter&, Potato::Task::Node&) mutable {
-			Potato::Document::DocumentReader reader(file_ite);
-			if (!reader)
-			{
-				if (std::filesystem::exists(file_ite))
-				{
-					auto temporary_path = std::filesystem::temp_directory_path();
-					temporary_path += file_ite.filename();
-					std::filesystem::copy_file(
-						file_ite,
-						temporary_path
-					);
-					reader.Open(temporary_path);
-				}
-			}
-			
 		});
+
+		Potato::Log::Log<log_filter, Potato::Log::LogLevel::Log, u8"Finish filte <{}>">(out_path.generic_u16string());
+	}
+	else {
+		Potato::Log::Log<log_filter, Potato::Log::LogLevel::Log, u8"Unable to filte file <{}>">(setting.input_file.generic_u16string());
 	}
 
-	bool all_finish = false;
-	std::size_t log_count = 0;
-	while (!all_finish)
-	{
-		log_count++;
-		all_finish = true;
-		bool has_print_log = false;
-		for (auto& ite : context)
-		{
-			std::size_t line_count;
-			bool done = false;
-			{
-				std::lock_guard lg(ite->mutex);
-				if (!ite->done)
-				{
-					all_finish = false;
-				}
-				line_count = ite->line_count;
-				done = ite->done;
-			}
-
-			if (!done && (log_count % 100) == 0)
-			{
-				Potato::Log::Log<log_filter, Potato::Log::LogLevel::Log, u8"Filter State {}:<{}>">(ite->path.generic_u8string(), line_count);
-				has_print_log = true;
-			}
-		}
-		if (has_print_log)
-		{
-			Potato::Log::Log<log_filter, Potato::Log::LogLevel::Log, u8"====\t\t====\t\t====">();
-		}
-		std::this_thread::sleep_for(std::chrono::milliseconds{10});
-	}
-	task_context.ExecuteContextThreadUntilNoExistTask();
-
-	for (auto& ite : context)
-	{
-		Potato::Log::Log<log_filter, Potato::Log::LogLevel::Log, u8"Finish Filter <{}> From <{}>">(ite->output_path.generic_u8string(), ite->path.generic_u8string());
-	}
-
-	Potato::Log::Log<log_filter, Potato::Log::LogLevel::Log, u8"All Done">();
+	
 
 	return 0;
 }
