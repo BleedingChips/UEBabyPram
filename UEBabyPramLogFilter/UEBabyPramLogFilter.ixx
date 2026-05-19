@@ -27,7 +27,7 @@ export namespace UEBabyPram::LogFilter
 
 	struct FilterSetting
 	{
-		std::filesystem::path input_file;
+		std::pmr::vector<std::filesystem::path> input_file;
 		std::filesystem::path output_file;
 		std::filesystem::path output_expand;
 		OutputTarget target = OutputTarget::FILE;

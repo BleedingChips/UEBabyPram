@@ -60,7 +60,7 @@ int main(int argc, char* argv[])
 
 				if (std::filesystem::exists(sub_argv) && std::filesystem::is_regular_file(sub_argv) && sub_argv.extension() == u8".log")
 				{
-					setting.input_file = std::move(sub_argv);
+					setting.input_file.emplace_back(std::move(sub_argv));
 				}
 				else {
 					Log::Log<log_filter, Log::LogLevel::Error, L"File <{}> is not a acceptable file">(sub_argv.generic_wstring());
@@ -84,6 +84,26 @@ int main(int argc, char* argv[])
 				}
 			}
 			else {
+				Log::Log<log_filter, Log::LogLevel::Error, L"Unsupport command -c --condition, see -h or --help for more infomation">();
+				return -1;
+			}
+		}
+		else if (argv_string == "-p" || argv_string == "--path")
+		{
+			if (i + 1 < argc)
+			{
+				std::string_view str = argv[i + 1];
+
+				for (auto& path_ite : std::filesystem::directory_iterator{ str })
+				{
+					if (std::filesystem::exists(path_ite) && std::filesystem::is_regular_file(path_ite) && path_ite.path().extension() == ".log")
+					{
+						setting.input_file.emplace_back(path_ite);
+					}
+				}
+			}
+			else {
+				Log::Log<log_filter, Log::LogLevel::Error, L"Unsupport command -p --path, see -h or --help for more infomation">();
 				return -1;
 			}
 		}
@@ -115,119 +135,131 @@ int main(int argc, char* argv[])
 		return -1;
 	}
 
-	Potato::Log::Log<log_filter, Potato::Log::LogLevel::Log, u8"Start Filter file:<{}>">(setting.input_file.generic_u8string());
-	Potato::Document::DocumentReader reader(setting.input_file);
-	if (!reader)
+	Potato::Task::Context context;
+
+	for (auto& file_path : setting.input_file)
 	{
-		if (std::filesystem::exists(setting.input_file))
-		{
-			auto temporary_path = std::filesystem::temp_directory_path();
-			temporary_path += setting.input_file.filename();
-			std::filesystem::copy_file(
-				setting.input_file,
-				temporary_path
-			);
-			reader.Open(temporary_path);
-		}
-	}
-
-	if (reader)
-	{
-
-		std::filesystem::path out_path = setting.output_file;
-		if (out_path.empty())
-		{
-			out_path = setting.input_file;
-			if (!setting.output_expand.empty())
-			{
-				out_path += setting.output_expand;
-			}
-			else {
-				out_path += L".filterout";
-			}
-		}
-
-		Potato::Document::PlainTextReader::Config config;
-		config.cache_buffer_size = std::min(static_cast<std::size_t>(1024) * 1024 * 20, reader.GetStreamSize());
-		Potato::Document::PlainTextReader plain_reader(reader, config);
-		Potato::Document::DocumentWriter writter(out_path, Potato::Document::DocumentWriter::OpenMode::CREATE_OR_EMPTY);
-		Potato::Document::PlainTextWritter::Config writer_config;
-		config.bom = Potato::Document::BomT::UTF8;
-		Potato::Document::PlainTextWritter plain_writer(writter, writer_config);
-
-		UEBabyPram::LogParser::LogLine::TimeT last_frame_time;
-		std::optional<std::size_t> last_frame_count;
-		std::string temp_output;
-		std::chrono::system_clock::time_point last_log_time = std::chrono::system_clock::now();
-		UEBabyPram::LogParser::ForeachLogLine(plain_reader, [&](UEBabyPram::LogParser::LogLine log_line) -> bool {
-
-			auto now = std::chrono::system_clock::now();
-			if (now - last_frame_time > std::chrono::seconds{ 5 })
-			{
-				last_frame_time = now;
-				Log::Log<log_filter, Log::LogLevel::Log, u"Filtering log line: {}">(log_line.line.Begin());
-			}
-
-			if (processor)
-			{
-				auto re = processor.Detect(log_line);
-
-				if (!re.has_value() || !*re)
-					return true;
-			}
-
-
-			if (setting.output_with_separate_frame)
-			{
-				auto fc = log_line.GetFrameCount();
-				auto time = log_line.GetSystemClockTimePoint();
-
-				if (fc.has_value())
+		context.Commit(
+			[&, file_path](Potato::Task::Context&, Potato::Task::Node::Parameter&, Potato::Task::Node&) {
+				Potato::Log::Log<log_filter, Potato::Log::LogLevel::Log, u8"Start Filter file:<{}>">(file_path.generic_u8string());
+				Potato::Document::DocumentReader reader(file_path);
+				if (!reader)
 				{
-					if (last_frame_count.has_value())
+					if (std::filesystem::exists(file_path))
 					{
-						if (*fc != *last_frame_count)
-						{
-							std::int64_t count = static_cast<std::int64_t>(*fc) - static_cast<std::int64_t>(*last_frame_count);
-							auto dur = std::chrono::duration_cast<std::chrono::milliseconds>(*time - last_frame_time);
-							plain_writer.Write(u8"\r\n");
-							temp_output.clear();
-							std::format_to(std::back_insert_iterator(temp_output), "\t\t\t\t=====[{}]Frame  [{}]ms=====\t\t\t\t", count, dur.count());
-							for (std::size_t i = 0; i < 10; ++i)
-							{
-								plain_writer.Write(temp_output);
-							}
-							plain_writer.Write(u8"\r\n");
-							last_frame_count = *fc;
-							last_frame_time = *time;
-						}
-					}
-					else {
-						last_frame_count = fc;
-						last_frame_time = *time;
+						auto temporary_path = std::filesystem::temp_directory_path();
+						temporary_path += file_path.filename();
+						std::filesystem::copy_file(
+							file_path,
+							temporary_path
+						);
+						reader.Open(temporary_path);
 					}
 				}
-			}
 
-			if (setting.output_with_line)
-			{
-				temp_output.clear();
-				std::format_to(std::back_insert_iterator(temp_output), "Line-{}:{}", log_line.line.Begin(), Potato::Log::AddLogStringWrapper(log_line.total_str));
-				plain_writer.Write(temp_output);
-			}
-			else {
-				plain_writer.Write(log_line.total_str);
-			}
+				if (reader)
+				{
 
-			return true;
-		});
+					std::filesystem::path out_path = setting.output_file;
+					if (out_path.empty())
+					{
+						out_path = file_path;
+						if (!setting.output_expand.empty())
+						{
+							out_path += setting.output_expand;
+						}
+						else {
+							out_path += L".filterout";
+						}
+					}
 
-		Potato::Log::Log<log_filter, Potato::Log::LogLevel::Log, u8"Finish filte <{}>">(out_path.generic_u16string());
+					Potato::Document::PlainTextReader::Config config;
+					config.cache_buffer_size = std::min(static_cast<std::size_t>(1024) * 1024 * 20, reader.GetStreamSize());
+					Potato::Document::PlainTextReader plain_reader(reader, config);
+					Potato::Document::DocumentWriter writter(out_path, Potato::Document::DocumentWriter::OpenMode::CREATE_OR_EMPTY);
+					Potato::Document::PlainTextWritter::Config writer_config;
+					config.bom = Potato::Document::BomT::UTF8;
+					Potato::Document::PlainTextWritter plain_writer(writter, writer_config);
+
+					UEBabyPram::LogParser::LogLine::TimeT last_frame_time;
+					std::optional<std::size_t> last_frame_count;
+					std::string temp_output;
+					std::chrono::system_clock::time_point last_log_time = std::chrono::system_clock::now();
+					UEBabyPram::LogParser::ForeachLogLine(plain_reader, [&](UEBabyPram::LogParser::LogLine log_line) -> bool {
+
+						auto now = std::chrono::system_clock::now();
+						auto dur = std::chrono::duration_cast<std::chrono::seconds>(now - last_log_time);
+						if (dur > std::chrono::seconds{ 5 })
+						{
+							last_log_time = now;
+							Log::Log<log_filter, Log::LogLevel::Log, u"Filtering log line: {}">(log_line.line.Begin());
+						}
+
+						if (processor)
+						{
+							auto re = processor.Detect(log_line);
+
+							if (!re.has_value() || !*re)
+								return true;
+						}
+
+
+						if (setting.output_with_separate_frame)
+						{
+							auto fc = log_line.GetFrameCount();
+							auto time = log_line.GetSystemClockTimePoint();
+
+							if (fc.has_value())
+							{
+								if (last_frame_count.has_value())
+								{
+									if (*fc != *last_frame_count)
+									{
+										std::int64_t count = static_cast<std::int64_t>(*fc) - static_cast<std::int64_t>(*last_frame_count);
+										auto dur = std::chrono::duration_cast<std::chrono::milliseconds>(*time - last_frame_time);
+										plain_writer.Write(u8"\r\n");
+										temp_output.clear();
+										std::format_to(std::back_insert_iterator(temp_output), "\t\t\t\t=====[{}]Frame  [{}]ms=====\t\t\t\t", count, dur.count());
+										for (std::size_t i = 0; i < 10; ++i)
+										{
+											plain_writer.Write(temp_output);
+										}
+										plain_writer.Write(u8"\r\n");
+										last_frame_count = *fc;
+										last_frame_time = *time;
+									}
+								}
+								else {
+									last_frame_count = fc;
+									last_frame_time = *time;
+								}
+							}
+						}
+
+						if (setting.output_with_line)
+						{
+							temp_output.clear();
+							std::format_to(std::back_insert_iterator(temp_output), "Line-{}:{}", log_line.line.Begin(), Potato::Log::AddLogStringWrapper(log_line.total_str));
+							plain_writer.Write(temp_output);
+						}
+						else {
+							plain_writer.Write(log_line.total_str);
+						}
+
+						return true;
+						});
+					Potato::Log::Log<log_filter, Potato::Log::LogLevel::Log, u8"Finish filte <{}>">(out_path.generic_u16string());
+				}
+				else {
+					Potato::Log::Log<log_filter, Potato::Log::LogLevel::Log, u8"Unable to filte file <{}>">(file_path.generic_u16string());
+				}
+			}
+		);
 	}
-	else {
-		Potato::Log::Log<log_filter, Potato::Log::LogLevel::Log, u8"Unable to filte file <{}>">(setting.input_file.generic_u16string());
-	}
+	context.CreateThreads(context.GetSuggestThreadCount());
+	context.ExecuteContextThreadUntilNoExistTask();
 
+	Potato::Log::Log<log_filter, Potato::Log::LogLevel::Log, u8"All Done">();
 	
 
 	return 0;
