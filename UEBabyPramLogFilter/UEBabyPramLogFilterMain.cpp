@@ -39,6 +39,26 @@ namespace Potato::Log
 	};
 }
 
+static bool forbid_log = false;
+
+namespace Potato::Log
+{
+	template<>
+	struct LogCategoryProperty<log_filter>
+	{
+		static bool IsLogEnable(LogLevel level) 
+		{
+			if (forbid_log)
+			{
+				return level > LogLevel::Log;
+			}
+			else {
+				return true;
+			}
+		}
+	};
+}
+
 
 using namespace UEBabyPram;
 using namespace Potato;
@@ -66,6 +86,7 @@ int main(int argc, char* argv[])
 					Log::Log<log_filter, Log::LogLevel::Error, L"File <{}> is not a acceptable file">(sub_argv.generic_wstring());
 					return -1;
 				}
+				++i;
 			}
 			else {
 				Log::Log<log_filter, Log::LogLevel::Error, L"Unsupport command -f --file, see -h or --help for more infomation">();
@@ -82,6 +103,7 @@ int main(int argc, char* argv[])
 				{
 					return -1;
 				}
+				++i;
 			}
 			else {
 				Log::Log<log_filter, Log::LogLevel::Error, L"Unsupport command -c --condition, see -h or --help for more infomation">();
@@ -101,6 +123,7 @@ int main(int argc, char* argv[])
 						setting.input_file.emplace_back(path_ite);
 					}
 				}
+				++i;
 			}
 			else {
 				Log::Log<log_filter, Log::LogLevel::Error, L"Unsupport command -p --path, see -h or --help for more infomation">();
@@ -126,6 +149,33 @@ int main(int argc, char* argv[])
 				Log::Log<log_filter, Log::LogLevel::Error, L"Unsupport command -e --extension, see -h or --help for more infomation">();
 				return -1;
 			}
+			++i;
+		}
+		else if (argv_string == "-fmf" || argv_string == "--find_mode_first")
+		{
+			setting.find_mode = UEBabyPram::LogFilter::FindMode::First;
+		}
+		else if (argv_string == "-fml" || argv_string == "--find_mode_last")
+		{
+			setting.find_mode = UEBabyPram::LogFilter::FindMode::Last;
+		}
+		else if (argv_string == "-fmc" || argv_string == "--find_mode_count")
+		{
+			if (i + 1 < argc)
+			{
+				std::string_view sub_argv = argv[i + 1];
+				auto info = Potato::Format::DirectDeformat(sub_argv, setting.find_count);
+				if(!info)
+				{
+					Log::Log<log_filter, Log::LogLevel::Error, L"-fml --find_mode_last require a number">(sub_argv);
+					return -1;
+				}
+			}
+			else {
+				Log::Log<log_filter, Log::LogLevel::Error, L"Unsupport command -fml --find_mode_last, see -h or --help for more infomation">();
+				return -1;
+			}
+			++i;
 		}
 	}
 
@@ -133,6 +183,11 @@ int main(int argc, char* argv[])
 	{
 		Log::Log<log_filter, Log::LogLevel::Error, L"Require an target file with -f or --file, see -h or --help for more infomation">();
 		return -1;
+	}
+
+	if (setting.find_mode != UEBabyPram::LogFilter::FindMode::None)
+	{
+		forbid_log = true;
 	}
 
 	Potato::Task::Context context;
@@ -176,7 +231,11 @@ int main(int argc, char* argv[])
 					Potato::Document::PlainTextReader::Config config;
 					config.cache_buffer_size = std::min(static_cast<std::size_t>(1024) * 1024 * 20, reader.GetStreamSize());
 					Potato::Document::PlainTextReader plain_reader(reader, config);
-					Potato::Document::DocumentWriter writter(out_path, Potato::Document::DocumentWriter::OpenMode::CREATE_OR_EMPTY);
+					Potato::Document::DocumentWriter writter;
+					if (setting.find_mode == UEBabyPram::LogFilter::FindMode::None)
+					{
+						writter.Open(out_path, Potato::Document::DocumentWriter::OpenMode::CREATE_OR_EMPTY);
+					}
 					Potato::Document::PlainTextWritter::Config writer_config;
 					config.bom = Potato::Document::BomT::UTF8;
 					Potato::Document::PlainTextWritter plain_writer(writter, writer_config);
@@ -185,6 +244,12 @@ int main(int argc, char* argv[])
 					std::optional<std::size_t> last_frame_count;
 					std::string temp_output;
 					std::chrono::system_clock::time_point last_log_time = std::chrono::system_clock::now();
+					Potato::Reg::DfaProcessor dfa_processor;
+					struct LineCount
+					{
+						std::string string;
+					};
+					std::pmr::deque<LineCount> line_record;
 					UEBabyPram::LogParser::ForeachLogLine(plain_reader, [&](UEBabyPram::LogParser::LogLine log_line) -> bool {
 
 						auto now = std::chrono::system_clock::now();
@@ -197,12 +262,39 @@ int main(int argc, char* argv[])
 
 						if (processor)
 						{
-							auto re = processor.Detect(log_line);
+							auto re = processor.Detect(log_line, dfa_processor);
 
 							if (!re.has_value() || !*re)
 								return true;
 						}
 
+						if (setting.find_mode != UEBabyPram::LogFilter::FindMode::None)
+						{
+							std::string string;
+							std::format_to(
+								std::back_insert_iterator(string),
+								"[Time:({}.{}.{}:{}.{}.{}:{}) Line:({})]",
+								Potato::Log::AddLogStringWrapper(log_line.property.time.year),
+								Potato::Log::AddLogStringWrapper(log_line.property.time.month),
+								Potato::Log::AddLogStringWrapper(log_line.property.time.day),
+								Potato::Log::AddLogStringWrapper(log_line.property.time.hour),
+								Potato::Log::AddLogStringWrapper(log_line.property.time.minute),
+								Potato::Log::AddLogStringWrapper(log_line.property.time.second),
+								Potato::Log::AddLogStringWrapper(log_line.property.time.millisecond),
+								log_line.line.Begin()
+							);
+							line_record.emplace_back(std::move(string));
+
+							if (line_record.size() >= setting.find_count)
+							{
+								if (setting.find_mode == UEBabyPram::LogFilter::FindMode::First)
+									return false;
+								else
+									line_record.pop_front();
+							}
+
+							return true;
+						}
 
 						if (setting.output_with_separate_frame)
 						{
@@ -248,6 +340,31 @@ int main(int argc, char* argv[])
 
 						return true;
 						});
+					
+					if (setting.find_mode != UEBabyPram::LogFilter::FindMode::None)
+					{
+						std::string out_buffer;
+						std::format_to(
+							std::back_insert_iterator(out_buffer),
+							"FileName:<{}> : ",
+							file_path.generic_string()
+						);
+						for (auto& ite : line_record)
+						{
+							std::format_to(
+								std::back_insert_iterator(out_buffer),
+								"{},",
+								ite.string
+							);
+						}
+						std::format_to(
+							std::back_insert_iterator(out_buffer),
+							"]",
+							file_path.generic_string()
+						);
+						Log::Log<log_filter, Log::LogLevel::Display, "{}">(out_buffer);
+					}
+					
 					Potato::Log::Log<log_filter, Potato::Log::LogLevel::Log, u8"Finish filte <{}>">(out_path.generic_u16string());
 				}
 				else {

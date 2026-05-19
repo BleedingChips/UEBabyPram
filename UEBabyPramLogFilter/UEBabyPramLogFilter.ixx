@@ -23,6 +23,13 @@ export namespace UEBabyPram::LogFilter
 		FINDER
 	};
 
+	enum class FindMode
+	{
+		None,
+		First,
+		Last
+	};
+
 	constexpr std::size_t max_cache_size_gb = 20;
 
 	struct FilterSetting
@@ -35,6 +42,8 @@ export namespace UEBabyPram::LogFilter
 		std::size_t max_cache_size = 1024 * 1204 * max_cache_size_gb;
 		bool output_with_line = false;
 		bool output_with_separate_frame = false;
+		FindMode find_mode = FindMode::None;
+		std::size_t find_count = 40;
 	};
 
 	enum class PropertyType
@@ -87,7 +96,7 @@ export namespace UEBabyPram::LogFilter
 			std::pmr::u8string error_message;
 			return AddStatement(statement, error_message);
 		}
-		std::optional<bool> Detect(LogParser::LogLine const& log) { 
+		std::optional<bool> Detect(LogParser::LogLine const& log, Potato::Reg::DfaProcessor& dfa_processor) {
 			if (statement)
 			{
 				return statement->Detect(log, dfa_processor);
@@ -98,7 +107,6 @@ export namespace UEBabyPram::LogFilter
 		operator bool() const { return statement.operator bool(); }
 	protected:
 		std::shared_ptr<StatementInterface> statement;
-		Potato::Reg::DfaProcessor dfa_processor;
 	};
 
 	struct UnsupportReg

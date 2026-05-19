@@ -9,12 +9,16 @@ namespace UEBabyPram::LogFilter
 		$:='\s+';
 		INT:='[1-9][0-9]*' : [1];
 		STR:='\^(.*?[^\\])\^' : [2];
-		STR:='R\^(.*?[^\\])\^' : [3];
 		COMPARE:='<' : [4];
 		COMPARE:='<=' : [5];
 		COMPARE:='==' : [6];
-		COMPARE:='>' : [8];
 		COMPARE:='>=':[7];
+		COMPARE:='>' : [8];
+		STRING_COMPARE:='StartWith' : [20];
+		STRING_COMPARE:='EndWith' : [21];
+		STRING_COMPARE:='Equal' : [22];
+		STRING_COMPARE:='Contains' : [23];
+		STRING_COMPARE:='HeadMatchs' : [24];
 		LOGLEVEL:='Fatal':[10];
 		LOGLEVEL:='Error':[11];
 		LOGLEVEL:='Warning':[12];
@@ -31,8 +35,8 @@ namespace UEBabyPram::LogFilter
 		<STAT>:='$Time' COMPARE <TIME> : [10];
 			:='$Level' COMPARE LOGLEVEL : [11];
 			:='$Line' COMPARE INT : [12];
-			:='$Log' COMPARE STR : [13];
-			:='$Category' COMPARE STR : [14];
+			:='$Log' '.'  STRING_COMPARE  '(' STR ')': [13];
+			:='$Category' '.'  STRING_COMPARE  '(' STR ')' : [14];
 			:= '(' <STAT> ')' : [20];
 			:= <STAT> '&&' <STAT>  : [21];
 			:= <STAT> '||' <STAT>  : [22];
@@ -78,22 +82,17 @@ namespace UEBabyPram::LogFilter
 			}
 			break;
 		case PropertyType::Log:
-			if (std::holds_alternative<std::u8string>(value))
+			switch (compare)
 			{
-				std::u8string_view string_view = std::get<std::u8string>(value);
-				switch (compare)
-				{
-				case CompareType::Bigger:
-				case CompareType::BiggerEqual:
-					return log.str.starts_with(string_view);
-				case CompareType::Equal:
-					return log.str.contains(string_view);
-				case CompareType::Smaller:
-				case CompareType::SmallerEqual:
-					return log.str.ends_with(string_view);
-				}
-			}
-			else if (std::holds_alternative<Potato::Reg::Dfa>(value))
+			case CompareType::Smaller:
+				return log.str.starts_with(std::u8string_view{ std::get<std::u8string>(value) });
+			case CompareType::SmallerEqual:
+				return log.str.ends_with(std::u8string_view{ std::get<std::u8string>(value) });
+			case CompareType::Equal:
+				return log.str == std::u8string_view{ std::get<std::u8string>(value) };
+			case CompareType::BiggerEqual:
+				return log.str.contains(std::u8string_view{ std::get<std::u8string>(value) });
+			case CompareType::Bigger:
 			{
 				Potato::Reg::Dfa const& reference = std::get<Potato::Reg::Dfa>(value);
 				processor.Clear();
@@ -101,8 +100,30 @@ namespace UEBabyPram::LogFilter
 				auto accept = processor.Process(log.str);
 				return accept;
 			}
+			}
 			break;
 		case PropertyType::Category:
+			switch (compare)
+			{
+			case CompareType::Smaller:
+				return log.property.category.starts_with(std::u8string_view{ std::get<std::u8string>(value) });
+			case CompareType::SmallerEqual:
+				return log.property.category.ends_with(std::u8string_view{ std::get<std::u8string>(value) });
+			case CompareType::Equal:
+				return log.property.category == std::u8string_view{ std::get<std::u8string>(value) };
+			case CompareType::BiggerEqual:
+				return log.property.category.contains(std::u8string_view{ std::get<std::u8string>(value) });
+			case CompareType::Bigger:
+			{
+				Potato::Reg::Dfa const& reference = std::get<Potato::Reg::Dfa>(value);
+				processor.Clear();
+				processor.SetObserverTable(reference);
+				auto accept = processor.Process(log.property.category);
+				return accept;
+			}
+			}
+			break;
+		case PropertyType::Level:
 		{
 			std::size_t level = std::get<std::size_t>(value);
 			std::size_t index = 0;
@@ -199,19 +220,6 @@ namespace UEBabyPram::LogFilter
 				std::u8string value{ syminfo.TokenIndex.Slice(statement) };
 				return value;
 			}
-			else if (mask == 3)
-			{
-				try {
-					Potato::Reg::Dfa dfa(Potato::Reg::Dfa::FormatE::HeadMatch, syminfo.TokenIndex.Slice(statement));
-					return dfa;
-				}
-				catch (Potato::Reg::Exception::Interface const& inter)
-				{
-					std::pmr::u8string error{ syminfo.TokenIndex.Slice(statement) };
-					throw UnsupportReg{ error };
-				}
-				
-			}
 			else if (mask >= 4 && mask <= 8)
 			{
 				return static_cast<CompareType>(mask - 4);
@@ -228,11 +236,15 @@ namespace UEBabyPram::LogFilter
 				}
 				return log_level_array.size();
 			}
+			else if (mask >= 20 && mask <= 24)
+			{
+				return static_cast<CompareType>(mask - 20);
+			}
 			return std::any{};
 			},
 			[&](Potato::EBNF::SymbolInfo symbol, Potato::EBNF::ReduceProduction production) -> std::any {
 				
-				if (production.UserMask >= 10 && production.UserMask <= 14)
+				if (production.UserMask >= 10 && production.UserMask <= 12)
 				{
 					auto state = std::make_shared<ConditionStatement>();
 					state->compare = *production[1].TryConsume<CompareType>();
@@ -251,34 +263,29 @@ namespace UEBabyPram::LogFilter
 						state->property = PropertyType::Line;
 						state->value = *production[2].TryConsume<std::size_t>();
 						break;
-					case 13:
+					}
+					return std::shared_ptr<StatementInterface>(state);
+				}
+				else if (production.UserMask == 13 || production.UserMask == 14)
+				{
+					auto state = std::make_shared<ConditionStatement>();
+					state->property = (production.UserMask == 13 ? PropertyType::Log : PropertyType::Category);
+					state->compare = *production[2].TryConsume<CompareType>();
+					auto string = *production[4].TryConsume<std::u8string>();
+					if (state->compare == CompareType::Bigger)
 					{
-						state->property = PropertyType::Log;
-						auto string = production[2].TryConsume<std::u8string>();
-						if (string.has_value())
-						{
-							state->value = *string;
+						try {
+							Potato::Reg::Dfa dfa(Potato::Reg::Dfa::FormatE::HeadMatch, std::u8string_view{ string });
+							state->value = std::move(dfa);
 						}
-						else {
-							auto dfa = production[2].TryConsume<Potato::Reg::Dfa>();
-							state->value = std::move(*dfa);
+						catch (Potato::Reg::Exception::Interface const& inter)
+						{
+							std::pmr::u8string error{ string };
+							throw UnsupportReg{ std::move(error) };
 						}
 					}
-						break;
-					case 14:
-					{
-						state->property = PropertyType::Category;
-						auto string = production[2].TryConsume<std::u8string>();
-						if (string.has_value())
-						{
-							state->value = *string;
-						}
-						else {
-							auto dfa = production[2].TryConsume<Potato::Reg::Dfa>();
-							state->value = std::move(*dfa);
-						}
-					}
-						break;
+					else {
+						state->value = std::move(string);
 					}
 					return std::shared_ptr<StatementInterface>(state);
 				}
