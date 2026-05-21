@@ -16,13 +16,16 @@ target("UEBabyPram")
 target_end()
 
 if os.scriptdir() == os.projectdir() then
-
+    
+    add_requires("re2")
+    
     target("UEBabyPramLogFilter")
         set_kind("binary")
         add_files("UEBabyPramLogFilter/*.cpp")
         add_files("UEBabyPramLogFilter/*.ixx")
         add_deps("Potato")
         add_deps("UEBabyPram")
+        add_packages("re2")
     target_end()
 
 end

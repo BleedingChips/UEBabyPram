@@ -35,8 +35,8 @@ export namespace UEBabyPram::LogFilter
 	struct FilterSetting
 	{
 		std::pmr::vector<std::filesystem::path> input_file;
-		std::filesystem::path output_file;
-		std::filesystem::path output_expand;
+		std::filesystem::path output_path;
+		std::filesystem::path output_expand = ".filterout";
 		OutputTarget target = OutputTarget::FILE;
 		OutputMode mode = OutputMode::FILTER;
 		std::size_t max_cache_size = 1024 * 1204 * max_cache_size_gb;
@@ -118,4 +118,6 @@ export namespace UEBabyPram::LogFilter
 	{
 		std::pmr::u8string error_message;
 	};
+
+	std::u8string_view GetEbnfString();
 }

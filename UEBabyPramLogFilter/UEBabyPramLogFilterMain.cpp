@@ -1,5 +1,6 @@
 import UEBabyPram;
 import UEBabyPramLogFilter;
+import UEBabyPramLogCLI;
 import Potato;
 import std;
 
@@ -46,7 +47,7 @@ namespace Potato::Log
 	template<>
 	struct LogCategoryProperty<log_filter>
 	{
-		static bool IsLogEnable(LogLevel level) 
+		static bool IsLogEnable(LogLevel level)
 		{
 			if (forbid_log)
 			{
@@ -63,126 +64,39 @@ namespace Potato::Log
 using namespace UEBabyPram;
 using namespace Potato;
 
+std::filesystem::path GetTemporaryPath(std::filesystem::path const& reference_path)
+{
+	auto temporary_path = std::filesystem::temp_directory_path();
+	temporary_path += reference_path.filename();
+	std::string time_file_name;
+	std::format_to(std::back_insert_iterator(time_file_name), "_{}.temp", std::chrono::system_clock::now().time_since_epoch().count());
+	temporary_path += time_file_name;
+	return temporary_path;
+}
+
 int main(int argc, char* argv[])
 {
-	
+
 	UEBabyPram::LogFilter::FilterSetting setting;
 	UEBabyPram::LogFilter::LogFilterProcessor processor;
 
-	for (std::size_t i = 0; i < argc; ++i)
-	{
-		std::string_view argv_string = argv[i];
-		if (argv_string == "-f" || argv_string == "--file")
-		{
-			if (i + 1 < argc)
-			{
-				std::filesystem::path sub_argv = argv[i + 1];
-
-				if (std::filesystem::exists(sub_argv) && std::filesystem::is_regular_file(sub_argv) && sub_argv.extension() == u8".log")
-				{
-					setting.input_file.emplace_back(std::move(sub_argv));
-				}
-				else {
-					Log::Log<log_filter, Log::LogLevel::Error, L"File <{}> is not a acceptable file">(sub_argv.generic_wstring());
-					return -1;
-				}
-				++i;
-			}
-			else {
-				Log::Log<log_filter, Log::LogLevel::Error, L"Unsupport command -f --file, see -h or --help for more infomation">();
-				return -1;
-			}
-		}
-		else if (argv_string == "-c" || argv_string == "--condition")
-		{
-			if (i + 1 < argc)
-			{
-				std::u8string error_message;
-				std::string_view str = argv[i + 1];
-				if (!processor.AddStatement({ reinterpret_cast<char8_t const*>(str.data()), str.size() }))
-				{
-					return -1;
-				}
-				++i;
-			}
-			else {
-				Log::Log<log_filter, Log::LogLevel::Error, L"Unsupport command -c --condition, see -h or --help for more infomation">();
-				return -1;
-			}
-		}
-		else if (argv_string == "-p" || argv_string == "--path")
-		{
-			if (i + 1 < argc)
-			{
-				std::string_view str = argv[i + 1];
-
-				for (auto& path_ite : std::filesystem::directory_iterator{ str })
-				{
-					if (std::filesystem::exists(path_ite) && std::filesystem::is_regular_file(path_ite) && path_ite.path().extension() == ".log")
-					{
-						setting.input_file.emplace_back(path_ite);
-					}
-				}
-				++i;
-			}
-			else {
-				Log::Log<log_filter, Log::LogLevel::Error, L"Unsupport command -p --path, see -h or --help for more infomation">();
-				return -1;
-			}
-		}
-		else if (argv_string == "-oml" || argv_string == "--output_mode_line")
-		{
-			setting.output_with_line = true;
-		}
-		else if (argv_string == "-omsf" || argv_string == "--output_mode_separate_frame")
-		{
-			setting.output_with_separate_frame = true;
-		}
-		else if (argv_string == "-e" || argv_string == "--extension")
-		{
-			if (i + 1 < argc)
-			{
-				std::filesystem::path sub_argv = argv[i + 1];
-				setting.output_expand = sub_argv;
-			}
-			else {
-				Log::Log<log_filter, Log::LogLevel::Error, L"Unsupport command -e --extension, see -h or --help for more infomation">();
-				return -1;
-			}
-			++i;
-		}
-		else if (argv_string == "-fmf" || argv_string == "--find_mode_first")
-		{
-			setting.find_mode = UEBabyPram::LogFilter::FindMode::First;
-		}
-		else if (argv_string == "-fml" || argv_string == "--find_mode_last")
-		{
-			setting.find_mode = UEBabyPram::LogFilter::FindMode::Last;
-		}
-		else if (argv_string == "-fmc" || argv_string == "--find_mode_count")
-		{
-			if (i + 1 < argc)
-			{
-				std::string_view sub_argv = argv[i + 1];
-				auto info = Potato::Format::DirectDeformat(sub_argv, setting.find_count);
-				if(!info)
-				{
-					Log::Log<log_filter, Log::LogLevel::Error, L"-fml --find_mode_last require a number">(sub_argv);
-					return -1;
-				}
-			}
-			else {
-				Log::Log<log_filter, Log::LogLevel::Error, L"Unsupport command -fml --find_mode_last, see -h or --help for more infomation">();
-				return -1;
-			}
-			++i;
-		}
-	}
+	UEBabyPram::LogFilter::HandleComment(argc, argv, setting, processor);
 
 	if (setting.input_file.empty())
 	{
 		Log::Log<log_filter, Log::LogLevel::Error, L"Require an target file with -f or --file, see -h or --help for more infomation">();
 		return -1;
+	}
+
+	std::pmr::vector<std::filesystem::path> paths = std::move(setting.input_file);
+
+	for (auto& ite : paths)
+	{
+		auto find = std::find(setting.input_file.begin(), setting.input_file.end(), ite);
+		if (find == setting.input_file.end())
+		{
+			setting.input_file.emplace_back(std::move(ite));
+		}
 	}
 
 	if (setting.find_mode != UEBabyPram::LogFilter::FindMode::None)
@@ -202,11 +116,11 @@ int main(int argc, char* argv[])
 				{
 					if (std::filesystem::exists(file_path))
 					{
-						auto temporary_path = std::filesystem::temp_directory_path();
-						temporary_path += file_path.filename();
+						auto temporary_path = GetTemporaryPath(file_path);
 						std::filesystem::copy_file(
 							file_path,
-							temporary_path
+							temporary_path,
+							std::filesystem::copy_options::overwrite_existing
 						);
 						reader.Open(temporary_path);
 					}
@@ -214,18 +128,20 @@ int main(int argc, char* argv[])
 
 				if (reader)
 				{
-
-					std::filesystem::path out_path = setting.output_file;
+					auto temporary_output_path = GetTemporaryPath(file_path);
+					temporary_output_path += ".output";
+					std::filesystem::path out_path = setting.output_path;
 					if (out_path.empty())
 					{
 						out_path = file_path;
-						if (!setting.output_expand.empty())
-						{
-							out_path += setting.output_expand;
-						}
-						else {
-							out_path += L".filterout";
-						}
+					}
+					else {
+						out_path += file_path.filename();
+					}
+
+					if (!setting.output_expand.empty())
+					{
+						out_path += setting.output_expand;
 					}
 
 					Potato::Document::PlainTextReader::Config config;
@@ -234,7 +150,7 @@ int main(int argc, char* argv[])
 					Potato::Document::DocumentWriter writter;
 					if (setting.find_mode == UEBabyPram::LogFilter::FindMode::None)
 					{
-						writter.Open(out_path, Potato::Document::DocumentWriter::OpenMode::CREATE_OR_EMPTY);
+						writter.Open(temporary_output_path, Potato::Document::DocumentWriter::OpenMode::CREATE_OR_EMPTY);
 					}
 					Potato::Document::PlainTextWritter::Config writer_config;
 					config.bom = Potato::Document::BomT::UTF8;
@@ -340,31 +256,53 @@ int main(int argc, char* argv[])
 
 						return true;
 						});
-					
+
 					if (setting.find_mode != UEBabyPram::LogFilter::FindMode::None)
 					{
 						std::string out_buffer;
 						std::format_to(
 							std::back_insert_iterator(out_buffer),
-							"FileName:<{}> : ",
+							"File:<{}> : ",
 							file_path.generic_string()
 						);
-						for (auto& ite : line_record)
+						for (std::size_t index = 0; index < line_record.size(); ++index)
 						{
-							std::format_to(
-								std::back_insert_iterator(out_buffer),
-								"{},",
-								ite.string
-							);
+							auto& ite = line_record[index];
+							if (index + 1 < line_record.size())
+							{
+								std::format_to(
+									std::back_insert_iterator(out_buffer),
+									"{},",
+									ite.string
+								);
+							}
+							else {
+								std::format_to(
+									std::back_insert_iterator(out_buffer),
+									"{}",
+									ite.string
+								);
+							}
 						}
-						std::format_to(
-							std::back_insert_iterator(out_buffer),
-							"]",
-							file_path.generic_string()
-						);
-						Log::Log<log_filter, Log::LogLevel::Display, "{}">(out_buffer);
+						Log::Log<log_filter, Log::LogLevel::Display, "{};">(out_buffer);
 					}
-					
+
+					reader.Close();
+					plain_writer.Flush();
+					writter.Close();
+
+					if (setting.find_mode == UEBabyPram::LogFilter::FindMode::None)
+					{
+						if (std::filesystem::exists(out_path))
+						{
+							std::filesystem::remove(out_path);
+						}
+						std::filesystem::rename(
+							temporary_output_path,
+							out_path
+						);
+						writter.Open(temporary_output_path, Potato::Document::DocumentWriter::OpenMode::CREATE_OR_EMPTY);
+					}
 					Potato::Log::Log<log_filter, Potato::Log::LogLevel::Log, u8"Finish filte <{}>">(out_path.generic_u16string());
 				}
 				else {
@@ -377,7 +315,7 @@ int main(int argc, char* argv[])
 	context.ExecuteContextThreadUntilNoExistTask();
 
 	Potato::Log::Log<log_filter, Potato::Log::LogLevel::Log, u8"All Done">();
-	
+
 
 	return 0;
 }
