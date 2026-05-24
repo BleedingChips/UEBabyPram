@@ -1,6 +1,7 @@
 module;
 
 #include <cassert>
+#include <re2/re2.h>
 
 export module UEBabyPramLogFilter;
 
@@ -11,40 +12,6 @@ import UEBabyPramLogParser;
 
 export namespace UEBabyPram::LogFilter
 {
-	enum class OutputTarget
-	{
-		FILE,
-		STD,
-	};
-
-	enum class OutputMode
-	{
-		FILTER,
-		FINDER
-	};
-
-	enum class FindMode
-	{
-		None,
-		First,
-		Last
-	};
-
-	constexpr std::size_t max_cache_size_gb = 20;
-
-	struct FilterSetting
-	{
-		std::pmr::vector<std::filesystem::path> input_file;
-		std::filesystem::path output_path;
-		std::filesystem::path output_expand = ".filterout";
-		OutputTarget target = OutputTarget::FILE;
-		OutputMode mode = OutputMode::FILTER;
-		std::size_t max_cache_size = 1024 * 1204 * max_cache_size_gb;
-		bool output_with_line = false;
-		bool output_with_separate_frame = false;
-		FindMode find_mode = FindMode::None;
-		std::size_t find_count = 40;
-	};
 
 	enum class PropertyType
 	{
@@ -73,7 +40,7 @@ export namespace UEBabyPram::LogFilter
 	{
 		PropertyType property;
 		CompareType compare;
-		std::variant<std::monostate, std::size_t, LogParser::LogLine::TimeT, Potato::Reg::Dfa, std::u8string> value;
+		std::variant<std::monostate, std::size_t, LogParser::LogLine::TimeT, std::shared_ptr<re2::RE2>, std::u8string> value;
 
 		virtual std::optional<bool> Detect(LogParser::LogLine const& log, Potato::Reg::DfaProcessor& processor) const override;
 	};

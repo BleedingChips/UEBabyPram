@@ -320,7 +320,11 @@ Potato::Log::AddLogStringWrapper(UEBabyPram::LogFilter::GetEbnfString())
 			}
 			else if (argv_string == "-oml" || argv_string == "--output_mode_line")
 			{
-				setting.output_with_line = true;
+				setting.mode = OutputMode::NORMAL_WITH_LINE;
+			}
+			else if (argv_string == "-omtl" || argv_string == "--output_mode_only_time_and_line")
+			{
+				setting.mode = OutputMode::ONLY_TIME_AND_LINE;
 			}
 			else if (argv_string == "-omsf" || argv_string == "--output_mode_separate_frame")
 			{
@@ -339,28 +343,20 @@ Potato::Log::AddLogStringWrapper(UEBabyPram::LogFilter::GetEbnfString())
 				}
 				++i;
 			}
-			else if (argv_string == "-fmf" || argv_string == "--find_mode_first")
-			{
-				setting.find_mode = UEBabyPram::LogFilter::FindMode::First;
-			}
-			else if (argv_string == "-fml" || argv_string == "--find_mode_last")
-			{
-				setting.find_mode = UEBabyPram::LogFilter::FindMode::Last;
-			}
-			else if (argv_string == "-fmc" || argv_string == "--find_mode_count")
+			else if (argv_string == "-omc" || argv_string == "--output_mode_count")
 			{
 				if (i + 1 < argc)
 				{
 					std::string_view sub_argv = argv[i + 1];
-					auto info = Potato::Format::DirectDeformat(sub_argv, setting.find_count);
+					auto info = Potato::Format::DirectDeformat(sub_argv, setting.max_output_count);
 					if (!info)
 					{
-						Log::Log<comment_log, Log::LogLevel::Error, L"-fml --find_mode_last require a number">(sub_argv);
+						Log::Log<comment_log, Log::LogLevel::Error, L"-omc or --output_mode_count require a number">(sub_argv);
 						return -1;
 					}
 				}
 				else {
-					Log::Log<comment_log, Log::LogLevel::Error, L"Unsupport command -fml --find_mode_last, see -h or --help for more infomation">();
+					Log::Log<comment_log, Log::LogLevel::Error, L"Unsupport command -omc --output_mode_count, see -h or --help for more infomation">();
 					return -1;
 				}
 				++i;
@@ -388,5 +384,6 @@ Potato::Log::AddLogStringWrapper(UEBabyPram::LogFilter::GetEbnfString())
 
 			}
 		}
+		return 0;
 	}
 }

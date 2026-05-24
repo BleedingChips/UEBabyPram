@@ -18,7 +18,7 @@ namespace UEBabyPram::LogFilter
 		STRING_COMPARE:='EndWith' : [21];
 		STRING_COMPARE:='Equal' : [22];
 		STRING_COMPARE:='Contains' : [23];
-		STRING_COMPARE:='HeadMatchs' : [24];
+		STRING_COMPARE:='Match' : [24];
 
 		LOGLEVEL:='VeryVerbose':[10];
 		LOGLEVEL:='Verbose':[11];
@@ -100,11 +100,19 @@ namespace UEBabyPram::LogFilter
 				return log.str.contains(std::u8string_view{ std::get<std::u8string>(value) });
 			case CompareType::Bigger:
 			{
-				Potato::Reg::Dfa const& reference = std::get<Potato::Reg::Dfa>(value);
-				processor.Clear();
-				processor.SetObserverTable(reference);
-				auto accept = processor.Process(log.str);
-				return accept;
+				std::shared_ptr<re2::RE2> re2_ref = std::get<std::shared_ptr<re2::RE2>>(value);
+				if (re2_ref->Match(
+					std::string_view(reinterpret_cast<char const*>(log.str.data()), log.str.size()),
+					0,
+					log.str.size(),
+					re2::RE2::Anchor::UNANCHORED,
+					nullptr,
+					0
+				))
+				{
+					return true;
+				}
+				return false;
 			}
 			}
 			break;
@@ -121,11 +129,19 @@ namespace UEBabyPram::LogFilter
 				return log.property.category.contains(std::u8string_view{ std::get<std::u8string>(value) });
 			case CompareType::Bigger:
 			{
-				Potato::Reg::Dfa const& reference = std::get<Potato::Reg::Dfa>(value);
-				processor.Clear();
-				processor.SetObserverTable(reference);
-				auto accept = processor.Process(log.property.category);
-				return accept;
+				std::shared_ptr<re2::RE2> re2_ref = std::get<std::shared_ptr<re2::RE2>>(value);
+				if (re2_ref->Match(
+					std::string_view(reinterpret_cast<char const*>(log.property.category.data()), log.property.category.size()),
+					0,
+					log.str.size(),
+					re2::RE2::Anchor::UNANCHORED,
+					nullptr,
+					0
+				))
+				{
+					return true;
+				}
+				return false;
 			}
 			}
 			break;
@@ -287,15 +303,15 @@ namespace UEBabyPram::LogFilter
 				auto string = *production[4].TryConsume<std::u8string>();
 				if (state->compare == CompareType::Bigger)
 				{
-					try {
-						Potato::Reg::Dfa dfa(Potato::Reg::Dfa::FormatE::HeadMatch, std::u8string_view{ string });
-						state->value = std::move(dfa);
-					}
-					catch (Potato::Reg::Exception::Interface const& inter)
+					auto ptr = std::make_shared<re2::RE2>(
+						std::string_view(reinterpret_cast<char const*>(string.data()), string.size())
+					);
+					if (!ptr->ok())
 					{
 						std::pmr::u8string error{ string };
 						throw UnsupportReg{ std::move(error) };
 					}
+					state->value = ptr;
 				}
 				else {
 					state->value = std::move(string);
