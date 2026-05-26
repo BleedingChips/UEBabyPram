@@ -156,6 +156,7 @@ namespace UEBabyPram::LogParser
 			property.time.minute = GetIndex(match.get<5>(), string);
 			property.time.second = GetIndex(match.get<6>(), string);
 			property.time.millisecond = GetIndex(match.get<7>(), string);
+			property.time.total = GetIndex(match.get<0>(), string);
 			property.frame_count = GetIndex(match.get<8>(), string);
 			offset = (match.end() - string.data());
 		}

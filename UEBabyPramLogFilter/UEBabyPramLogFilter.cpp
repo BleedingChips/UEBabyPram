@@ -1,5 +1,5 @@
 module;
-
+#include <absl/strings/string_view.h>
 module UEBabyPramLogFilter;
 import Potato;
 
@@ -53,8 +53,12 @@ namespace UEBabyPram::LogFilter
 		String:='[^\{\}]+' : [1];
 		String:='\{\{' : [2];
 		String:='\}\}' : [3];
-		String:='\{.*?[^\{\}]\}' : [4];
-		String:='\{\}' : [5];
+		String:='\{[0-9]\}' : [4];
+		String:='\{Time\}' : [5];
+		String:='\{Level\}' : [6];
+		String:='\{Line\}' : [7];
+		String:='\{Log\}' : [8];
+		String:='\{Category\}' : [9];
 		%%%%
 		$:=<Exp>;
 		<Exp> := : [1];
@@ -461,7 +465,7 @@ namespace UEBabyPram::LogFilter
 		return false;
 	}
 
-	bool LogFilterFormatter::AddStatement(std::string_view regstatement, std::string_view filter_type, std::u8string& error_message)
+	bool LogFilterFormatter::AddStatement(std::u8string_view regstatement, std::u8string_view filter_type, std::u8string& error_message)
 	{
 		auto str = std::make_shared<re2::RE2>(
 			std::string_view(reinterpret_cast<char const*>(regstatement.data()), regstatement.size())
@@ -472,7 +476,7 @@ namespace UEBabyPram::LogFilter
 			std::format_to(
 				std::back_insert_iterator(error),
 				"Unsupport Reg : <{}>",
-				regstatement
+				Potato::Log::AddLogStringWrapper(regstatement)
 			);
 			Potato::Encode::UnicodeEncoder<char, char8_t>::EncodeTo(
 				error,
@@ -482,13 +486,53 @@ namespace UEBabyPram::LogFilter
 		}
 		Potato::EBNF::EbnfProcessor pro;
 		
-		auto symbol = [](Potato::EBNF::SymbolInfo syminfo, std::size_t mask) -> std::any {
-			volatile int i = 0;
+		auto symbol = [=](Potato::EBNF::SymbolInfo syminfo, std::size_t mask) -> std::any {
+			switch (mask)
+			{
+			case 1:
+			{
+				auto str = syminfo.TokenIndex.Slice(filter_type);
+				std::u8string string(reinterpret_cast<char8_t const*>(str.data()), str.size());
+				return Filter::ElementType{string};
+			}
+			case 2:
+			{
+				std::u8string string(u8"{");
+				return Filter::ElementType{ string };
+			}
+			case 3:
+			{
+				std::u8string string(u8"}");
+				return Filter::ElementType{ string };
+			}
+			case 4:
+			{
+				std::size_t index = 0;
+				auto str = syminfo.TokenIndex.SubIndex(1, syminfo.TokenIndex.Size() - 2).Slice(filter_type);
+				Potato::Format::DirectDeformat(str, index);
+				return Filter::ElementType{ index };
+			}
+			default:
+				if (mask >= 5 && mask <= 9)
+				{
+					return Filter::ElementType{static_cast<PropertyType>(mask - 5)};
+				}
+			}
 			return {};
 			};
 
-		auto reduce = [](Potato::EBNF::SymbolInfo symbol, Potato::EBNF::ReduceProduction production) -> std::any {
-			volatile int i = 0;
+		auto reduce = [=](Potato::EBNF::SymbolInfo symbol, Potato::EBNF::ReduceProduction production) -> std::any {
+			if (production.UserMask == 1)
+			{
+				std::pmr::vector<Filter::ElementType> values;
+				return values;
+			}
+			else if (production.UserMask == 2)
+			{
+				auto values = *production[0].TryConsume<std::pmr::vector<Filter::ElementType>>();
+				values.push_back(*production[1].TryConsume<Filter::ElementType>());
+				return values;
+			}
 			return {};
 			};
 		
@@ -498,10 +542,11 @@ namespace UEBabyPram::LogFilter
 			reduce
 		);
 
-		if (Potato::EBNF::Process(pro, regstatement))
+		if (Potato::EBNF::Process(pro, filter_type))
 		{
 			Filter filter;
 			filter.matched_regex = str;
+			filter.value = pro.GetData<std::pmr::vector<Filter::ElementType>>();
 			filters.push_back(std::move(filter));
 			return true;
 		}
@@ -510,7 +555,7 @@ namespace UEBabyPram::LogFilter
 			std::format_to(
 				std::back_insert_iterator(error),
 				"Unsupport Formatter : <{}>",
-				filter_type
+				Potato::Log::AddLogStringWrapper(filter_type)
 			);
 			Potato::Encode::UnicodeEncoder<char, char8_t>::EncodeTo(
 				error,
@@ -518,5 +563,92 @@ namespace UEBabyPram::LogFilter
 			);
 			return false;
 		}
+	}
+
+	std::optional<std::u8string> LogFilterFormatter::Format(UEBabyPram::LogParser::LogLine const& line)
+	{
+		std::u8string target;
+		bool modify = false;
+		for (auto& ite : filters)
+		{
+			std::array<absl::string_view, 20> string;
+			if (ite.matched_regex->Match(
+				std::string_view(reinterpret_cast<char const*>(line.str.data()), line.str.size()),
+				0,
+				line.str.size(),
+				re2::RE2::Anchor::UNANCHORED,
+				string.data(),
+				string.size()
+			))
+			{
+				modify = true;
+				for (auto& ite_filer : ite.value)
+				{
+					if (std::holds_alternative<std::size_t>(ite_filer))
+					{
+						auto index = std::get<std::size_t>(ite_filer);
+						if (index < string.size())
+						{
+							target += std::u8string_view{
+								reinterpret_cast<char8_t const*>(string[index].data()),
+								string[index].size()
+							};
+						}
+						else {
+							target += u8"[OutOfRange]";
+						}
+					}
+					else if (std::holds_alternative<std::u8string>(ite_filer))
+					{
+						target += std::get<std::u8string>(ite_filer);
+					}
+					else if (std::holds_alternative<PropertyType>(ite_filer))
+					{
+						auto property = std::get<PropertyType>(ite_filer);
+						switch (property)
+						{
+						case PropertyType::Category:
+							target += line.property.category;
+							break;
+						case PropertyType::Level:
+							target += line.property.level;
+							break;
+						case PropertyType::Line:
+						{
+							std::string str;
+							std::format_to(
+								std::back_insert_iterator(str),
+								"{}",
+								line.line.Begin()
+							);
+							target += std::u8string_view{
+								reinterpret_cast<char8_t const*>(str.data()),
+								str.size()
+							};
+						}
+							break;
+						case PropertyType::Log:
+						{
+							target += line.str;
+						}
+						case PropertyType::Time:
+							if (!line.property.time.total.empty())
+							{
+								target += line.property.time.year;
+							}
+							else {
+								target += u8"---";
+							}
+							break;
+						}
+					}
+				}
+			}
+		}
+		if (modify)
+		{
+			return target;
+		}
+		return std::nullopt;
 	}
 }

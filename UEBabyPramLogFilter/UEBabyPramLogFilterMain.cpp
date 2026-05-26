@@ -169,6 +169,8 @@ int main(int argc, char* argv[])
 					};
 					std::pmr::deque<LineCount> line_record;
 					std::size_t count = 0;
+					std::optional<std::size_t> min_line;
+					std::size_t max_line = 0;
 					UEBabyPram::LogParser::ForeachLogLine(plain_reader, [&](UEBabyPram::LogParser::LogLine log_line) -> bool {
 
 						if (processor)
@@ -177,6 +179,15 @@ int main(int argc, char* argv[])
 
 							if (!re.has_value() || !*re)
 								return true;
+						}
+
+						if (!min_line.has_value())
+						{
+							min_line = log_line.line.Begin();
+							max_line = *min_line + 1;
+						}
+						else {
+							max_line = log_line.line.Begin() + 1;
 						}
 
 						count += 1;
@@ -252,6 +263,26 @@ int main(int argc, char* argv[])
 								plain_writer.Write(temp_output);
 							}
 						}
+						else if (setting.mode == UEBabyPram::LogFilter::OutputMode::CUSTOM)
+						{
+							auto string = formatter.Format(log_line);
+							if (string.has_value())
+							{
+								if (setting.target == UEBabyPram::LogFilter::OutputTarget::FILE)
+								{
+									temp_output.clear();
+								}
+								std::format_to(
+									std::back_insert_iterator(temp_output),
+									"{}\r\n",
+									Potato::Log::AddLogStringWrapper(*string)
+								);
+								if (setting.target == UEBabyPram::LogFilter::OutputTarget::FILE)
+								{
+									plain_writer.Write(temp_output);
+								}
+							}
+						}
 
 						if (setting.output_with_separate_frame)
 						{
@@ -307,6 +338,15 @@ int main(int argc, char* argv[])
 							file_path.generic_string(),
 							count
 						);
+						if (min_line.has_value())
+						{
+							std::format_to(
+								std::back_insert_iterator(out_buffer),
+								" LineRange :[{}, {}]",
+								*min_line,
+								max_line
+							);
+						}
 						Log::Log<log_filter, Log::LogLevel::Display, "{} : {};">(out_buffer, temp_output);
 					}
 
@@ -325,7 +365,18 @@ int main(int argc, char* argv[])
 							out_path
 						);
 					}
-					Potato::Log::Log<log_filter, Potato::Log::LogLevel::Log, u8"Finish filte<{}>, Mathed LogLine Count:<{}>">(out_path.generic_u16string(), count);
+					if (min_line.has_value())
+					{
+						Potato::Log::Log<log_filter, Potato::Log::LogLevel::Log, u8"Finish filte<{}>, Mathed LogLine Count:<{}> LineRange :[{}, {}]">(
+							out_path.generic_u16string(), count, *min_line, max_line
+						);
+					}
+					else {
+						Potato::Log::Log<log_filter, Potato::Log::LogLevel::Log, u8"Finish filte<{}>, Mathed LogLine Count:<{}>">(
+							out_path.generic_u16string(), count
+						);
+					}
+					
 				}
 				else {
 					Potato::Log::Log<log_filter, Potato::Log::LogLevel::Log, u8"Unable to filte file <{}>">(file_path.generic_u16string());

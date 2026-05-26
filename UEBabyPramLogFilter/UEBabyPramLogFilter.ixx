@@ -78,18 +78,18 @@ export namespace UEBabyPram::LogFilter
 
 	struct Filter
 	{
-		bool Format(UEBabyPram::LogParser::LogLine const& line, std::pmr::string& output_target);
 		std::shared_ptr<re2::RE2> matched_regex;
-		std::pmr::vector<std::variant<std::u8string, PropertyType, std::size_t>> value;
+		using ElementType = std::variant<std::u8string, PropertyType, std::size_t>;
+		std::pmr::vector<ElementType> value;
 	};
 
 	struct LogFilterFormatter
 	{
 		LogFilterFormatter() {}
 		
-		bool AddStatement(std::string_view regstatement, std::string_view filter_type, std::u8string& error_message);
+		bool AddStatement(std::u8string_view regstatement, std::u8string_view filter_type, std::u8string& error_message);
 
-		bool Format(UEBabyPram::LogParser::LogLine const& line, std::pmr::string& output_target);
+		std::optional<std::u8string> Format(UEBabyPram::LogParser::LogLine const& line);
 		std::pmr::vector<Filter> filters;
 	};
 

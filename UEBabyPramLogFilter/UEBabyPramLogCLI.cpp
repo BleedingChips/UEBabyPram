@@ -392,7 +392,9 @@ Potato::Log::AddLogStringWrapper(UEBabyPram::LogFilter::GetEbnfString())
 					std::u8string error_message;
 					std::string_view reg_format = argv[i + 1];
 					std::string_view format_format = argv[i + 2];
-					if (!fomatter.AddStatement(reg_format, format_format, error_message))
+					std::u8string_view reg_format_u8{ reinterpret_cast<char8_t const*>(reg_format.data()), reg_format.size() };
+					std::u8string_view format_format_u8{ reinterpret_cast<char8_t const*>(format_format.data()), format_format.size() };
+					if (!fomatter.AddStatement(reg_format_u8, format_format_u8, error_message))
 					{
 						Log::Log<comment_log, Log::LogLevel::Error, L"Unsupport command -omc --output_mode_custom, see -h or --help for more infomation. : <{}>">(error_message);
 						return -1;

@@ -23,6 +23,7 @@ export namespace UEBabyPram::LogParser
 		std::u8string_view minute;
 		std::u8string_view second;
 		std::u8string_view millisecond;
+		std::u8string_view total;
 	};
 
 	struct LineProperty
@@ -49,6 +50,7 @@ export namespace UEBabyPram::LogParser
 		Potato::Misc::IndexSpan<> minute;
 		Potato::Misc::IndexSpan<> second;
 		Potato::Misc::IndexSpan<> millisecond;
+		Potato::Misc::IndexSpan<> total;
 		TimeStringView Slice(std::u8string_view str) const {
 			return {
 				year.Slice(str),
@@ -57,7 +59,8 @@ export namespace UEBabyPram::LogParser
 				hour.Slice(str),
 				minute.Slice(str),
 				second.Slice(str),
-				millisecond.Slice(str)
+				millisecond.Slice(str),
+				total.Slice(str)
 			};
 		}
 	};
