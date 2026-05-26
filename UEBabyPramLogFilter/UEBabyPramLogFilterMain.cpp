@@ -79,8 +79,9 @@ int main(int argc, char* argv[])
 
 	UEBabyPram::LogFilter::FilterSetting setting;
 	UEBabyPram::LogFilter::LogFilterProcessor processor;
+	UEBabyPram::LogFilter::LogFilterFormatter formatter;
 
-	auto resulr = UEBabyPram::LogFilter::HandleComment(argc, argv, setting, processor);
+	auto resulr = UEBabyPram::LogFilter::HandleComment(argc, argv, setting, processor, formatter);
 	if (resulr != 0)
 		return resulr;
 
@@ -162,7 +163,6 @@ int main(int argc, char* argv[])
 					std::optional<std::size_t> last_frame_count;
 					std::string temp_output;
 					std::chrono::system_clock::time_point last_log_time = std::chrono::system_clock::now();
-					Potato::Reg::DfaProcessor dfa_processor;
 					struct LineCount
 					{
 						std::string string;
@@ -173,7 +173,7 @@ int main(int argc, char* argv[])
 
 						if (processor)
 						{
-							auto re = processor.Detect(log_line, dfa_processor);
+							auto re = processor.Detect(log_line);
 
 							if (!re.has_value() || !*re)
 								return true;

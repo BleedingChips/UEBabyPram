@@ -33,7 +33,7 @@ export namespace UEBabyPram::LogFilter
 
 	struct StatementInterface
 	{
-		virtual std::optional<bool> Detect(LogParser::LogLine const& log, Potato::Reg::DfaProcessor& processor) const = 0;
+		virtual std::optional<bool> Detect(LogParser::LogLine const& log) const = 0;
 	};
 
 	struct ConditionStatement : StatementInterface
@@ -42,7 +42,7 @@ export namespace UEBabyPram::LogFilter
 		CompareType compare;
 		std::variant<std::monostate, std::size_t, LogParser::LogLine::TimeT, std::shared_ptr<re2::RE2>, std::u8string> value;
 
-		virtual std::optional<bool> Detect(LogParser::LogLine const& log, Potato::Reg::DfaProcessor& processor) const override;
+		virtual std::optional<bool> Detect(LogParser::LogLine const& log) const override;
 	};
 
 	struct OperatorStatement : StatementInterface
@@ -50,7 +50,7 @@ export namespace UEBabyPram::LogFilter
 		bool is_or = false;
 		std::shared_ptr<StatementInterface> statement_1;
 		std::shared_ptr<StatementInterface> statement_2;
-		virtual std::optional<bool> Detect(LogParser::LogLine const& log, Potato::Reg::DfaProcessor& processor) const override;
+		virtual std::optional<bool> Detect(LogParser::LogLine const& log) const override;
 	};
 
 	struct LogFilterProcessor
@@ -63,10 +63,10 @@ export namespace UEBabyPram::LogFilter
 			std::pmr::u8string error_message;
 			return AddStatement(statement, error_message);
 		}
-		std::optional<bool> Detect(LogParser::LogLine const& log, Potato::Reg::DfaProcessor& dfa_processor) {
+		std::optional<bool> Detect(LogParser::LogLine const& log) {
 			if (statement)
 			{
-				return statement->Detect(log, dfa_processor);
+				return statement->Detect(log);
 			}
 			return std::nullopt;
 		}
@@ -74,6 +74,23 @@ export namespace UEBabyPram::LogFilter
 		operator bool() const { return statement.operator bool(); }
 	protected:
 		std::shared_ptr<StatementInterface> statement;
+	};
+
+	struct Filter
+	{
+		bool Format(UEBabyPram::LogParser::LogLine const& line, std::pmr::string& output_target);
+		std::shared_ptr<re2::RE2> matched_regex;
+		std::pmr::vector<std::variant<std::u8string, PropertyType, std::size_t>> value;
+	};
+
+	struct LogFilterFormatter
+	{
+		LogFilterFormatter() {}
+		
+		bool AddStatement(std::string_view regstatement, std::string_view filter_type, std::u8string& error_message);
+
+		bool Format(UEBabyPram::LogParser::LogLine const& line, std::pmr::string& output_target);
+		std::pmr::vector<Filter> filters;
 	};
 
 	struct UnsupportReg

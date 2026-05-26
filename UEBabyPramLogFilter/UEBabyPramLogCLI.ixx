@@ -40,5 +40,5 @@ export namespace UEBabyPram::LogFilter
 
 	constexpr auto comment_log = TMP::TypeString{u"CLI"};
 
-	int HandleComment(int argc, char* argv[], FilterSetting& setting, LogFilterProcessor& processor);
+	int HandleComment(int argc, char* argv[], FilterSetting& setting, LogFilterProcessor& processor, LogFilterFormatter& fomatter);
 }

@@ -220,7 +220,7 @@ Potato::Log::AddLogStringWrapper(UEBabyPram::LogFilter::GetEbnfString())
 		}
 	}
 
-	int HandleComment(int argc, char* argv[], FilterSetting& setting, LogFilterProcessor& processor)
+	int HandleComment(int argc, char* argv[], FilterSetting& setting, LogFilterProcessor& processor, LogFilterFormatter& fomatter)
 	{
 		for (std::size_t i = 0; i < argc; ++i)
 		{
@@ -245,8 +245,6 @@ Potato::Log::AddLogStringWrapper(UEBabyPram::LogFilter::GetEbnfString())
 				}
 				return 0;
 			}
-
-
 
 			if (argv_string == "-f" || argv_string == "--file")
 			{
@@ -343,7 +341,7 @@ Potato::Log::AddLogStringWrapper(UEBabyPram::LogFilter::GetEbnfString())
 				}
 				++i;
 			}
-			else if (argv_string == "-omc" || argv_string == "--output_mode_count")
+			else if (argv_string == "-oc" || argv_string == "--output_count")
 			{
 				if (i + 1 < argc)
 				{
@@ -381,7 +379,57 @@ Potato::Log::AddLogStringWrapper(UEBabyPram::LogFilter::GetEbnfString())
 					Log::Log<comment_log, Log::LogLevel::Error, L"Unsupport command -op --out_path, see -h or --help for more infomation">();
 					return -1;
 				}
+			}
+			else if (argv_string == "-ostd" || argv_string == "--output_std")
+			{
+				setting.target = UEBabyPram::LogFilter::OutputTarget::STD;
+			}
+			else if (argv_string == "-omc" || argv_string == "--output_mode_custom")
+			{
+				setting.mode = OutputMode::CUSTOM;
+				if (i + 2 < argc)
+				{
+					std::u8string error_message;
+					std::string_view reg_format = argv[i + 1];
+					std::string_view format_format = argv[i + 2];
+					if (!fomatter.AddStatement(reg_format, format_format, error_message))
+					{
+						Log::Log<comment_log, Log::LogLevel::Error, L"Unsupport command -omc --output_mode_custom, see -h or --help for more infomation. : <{}>">(error_message);
+						return -1;
+					}
+					i += 2;
+				}
+				else {
+					Log::Log<comment_log, Log::LogLevel::Error, L"Unsupport command -omc --output_mode_custom, see -h or --help for more infomation">();
+					return -1;
+				}
+			}
+			else if (argv_string == "-p" || argv_string == "--path")
+			{
+				if (i + 1 < argc)
+				{
+					std::filesystem::path path = argv[i + 1];
 
+					if (std::filesystem::is_directory(path))
+					{
+						for (auto& path_ite : std::filesystem::directory_iterator{ path })
+						{
+							if (std::filesystem::exists(path_ite) && std::filesystem::is_regular_file(path_ite) && path_ite.path().extension() == ".log")
+							{
+								setting.input_file.emplace_back(path_ite);
+							}
+						}
+						++i;
+					}
+					else {
+						Log::Log<comment_log, Log::LogLevel::Error, L"-p --path <path> : path should be a directory, which is <{}>">(path.generic_u16string());
+						return -1;
+					}
+				}
+				else {
+					Log::Log<comment_log, Log::LogLevel::Error, L"Unsupport command -p --path, see -h or --help for more infomation">();
+					return -1;
+				}
 			}
 		}
 		return 0;

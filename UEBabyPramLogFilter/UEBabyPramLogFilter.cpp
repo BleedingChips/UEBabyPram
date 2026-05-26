@@ -49,6 +49,19 @@ namespace UEBabyPram::LogFilter
 		+('||');
 	)";
 
+	static constexpr std::u8string_view filter_string = u8R"(
+		String:='[^\{\}]+' : [1];
+		String:='\{\{' : [2];
+		String:='\}\}' : [3];
+		String:='\{.*?[^\{\}]\}' : [4];
+		String:='\{\}' : [5];
+		%%%%
+		$:=<Exp>;
+		<Exp> := : [1];
+			:= <Exp> String : [2];
+		%%%%
+	)";
+
 	static std::array<std::u8string_view, 7> log_level_array = {
 		u8"VeryVerbose", u8"Verbose", u8"Log", u8"Display", u8"Warning", u8"Error", u8"Fatal"
 	};
@@ -59,12 +72,18 @@ namespace UEBabyPram::LogFilter
 		return ebnf;
 	}
 
+	Potato::EBNF::Ebnf const& GetFilterEbnf()
+	{
+		static Potato::EBNF::Ebnf ebnf(filter_string);
+		return ebnf;
+	}
+
 	std::u8string_view GetEbnfString()
 	{
 		return ebnf_string;
 	}
 
-	std::optional<bool> ConditionStatement::Detect(LogParser::LogLine const& log, Potato::Reg::DfaProcessor& processor) const
+	std::optional<bool> ConditionStatement::Detect(LogParser::LogLine const& log) const
 	{
 		switch (property)
 		{
@@ -214,16 +233,16 @@ namespace UEBabyPram::LogFilter
 		return std::nullopt;
 	}
 
-	std::optional<bool> OperatorStatement::Detect(LogParser::LogLine const& log, Potato::Reg::DfaProcessor& processor) const
+	std::optional<bool> OperatorStatement::Detect(LogParser::LogLine const& log) const
 	{
-		auto s1 = statement_1->Detect(log, processor);
+		auto s1 = statement_1->Detect(log);
 		if (s1.has_value())
 		{
 			if (is_or && *s1 || !is_or && !*s1)
 			{
 				return *s1;
 			}
-			auto s2 = statement_2->Detect(log, processor);
+			auto s2 = statement_2->Detect(log);
 			if (s2.has_value())
 			{
 				return *s2;
@@ -440,5 +459,64 @@ namespace UEBabyPram::LogFilter
 			return true;
 		}
 		return false;
+	}
+
+	bool LogFilterFormatter::AddStatement(std::string_view regstatement, std::string_view filter_type, std::u8string& error_message)
+	{
+		auto str = std::make_shared<re2::RE2>(
+			std::string_view(reinterpret_cast<char const*>(regstatement.data()), regstatement.size())
+		);
+		if (!str->ok())
+		{
+			std::string error;
+			std::format_to(
+				std::back_insert_iterator(error),
+				"Unsupport Reg : <{}>",
+				regstatement
+			);
+			Potato::Encode::UnicodeEncoder<char, char8_t>::EncodeTo(
+				error,
+				std::back_insert_iterator(error_message)
+			);
+			return false;
+		}
+		Potato::EBNF::EbnfProcessor pro;
+		
+		auto symbol = [](Potato::EBNF::SymbolInfo syminfo, std::size_t mask) -> std::any {
+			volatile int i = 0;
+			return {};
+			};
+
+		auto reduce = [](Potato::EBNF::SymbolInfo symbol, Potato::EBNF::ReduceProduction production) -> std::any {
+			volatile int i = 0;
+			return {};
+			};
+		
+		
+		pro.SetObserverTable(GetFilterEbnf(),
+			symbol,
+			reduce
+		);
+
+		if (Potato::EBNF::Process(pro, regstatement))
+		{
+			Filter filter;
+			filter.matched_regex = str;
+			filters.push_back(std::move(filter));
+			return true;
+		}
+		else {
+			std::string error;
+			std::format_to(
+				std::back_insert_iterator(error),
+				"Unsupport Formatter : <{}>",
+				filter_type
+			);
+			Potato::Encode::UnicodeEncoder<char, char8_t>::EncodeTo(
+				error,
+				std::back_insert_iterator(error_message)
+			);
+			return false;
+		}
 	}
 }
