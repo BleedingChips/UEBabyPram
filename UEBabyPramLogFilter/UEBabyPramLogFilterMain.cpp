@@ -274,7 +274,7 @@ int main(int argc, char* argv[])
 								}
 								std::format_to(
 									std::back_insert_iterator(temp_output),
-									"{}\r\n",
+									"{}",
 									Potato::Log::AddLogStringWrapper(*string)
 								);
 								if (setting.target == UEBabyPram::LogFilter::OutputTarget::FILE)

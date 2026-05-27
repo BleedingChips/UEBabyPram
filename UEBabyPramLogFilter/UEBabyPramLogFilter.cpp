@@ -568,7 +568,6 @@ namespace UEBabyPram::LogFilter
 	std::optional<std::u8string> LogFilterFormatter::Format(UEBabyPram::LogParser::LogLine const& line)
 	{
 		std::u8string target;
-		bool modify = false;
 		for (auto& ite : filters)
 		{
 			std::array<absl::string_view, 20> string;
@@ -581,7 +580,6 @@ namespace UEBabyPram::LogFilter
 				string.size()
 			))
 			{
-				modify = true;
 				for (auto& ite_filer : ite.value)
 				{
 					if (std::holds_alternative<std::size_t>(ite_filer))
@@ -643,11 +641,8 @@ namespace UEBabyPram::LogFilter
 						}
 					}
 				}
+				return target;
 			}
-		}
-		if (modify)
-		{
-			return target;
 		}
 		return std::nullopt;
 	}
