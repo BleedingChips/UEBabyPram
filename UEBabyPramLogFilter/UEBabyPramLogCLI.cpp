@@ -2,6 +2,60 @@ module;
 
 module UEBabyPramLogCLI;
 
+std::u8string_view general_help_string = u8R"(
+UEBabyPramLogFilter - UE4 log filtering and formatting tool
+
+Filters and formats Unreal Engine 4 .log files based on time ranges,
+log levels, line numbers, category, and log content matching.
+
+By default, filtered logs are saved in the same directory as the input file with a .filterout extension.
+
+Commands:
+
+  -h, --help [topic]           Show this help or detailed help for a specific topic
+
+  -f, --file <path>            Add a .log file as input
+                               Use -h file for detailed help
+
+  -c, --condition <statement>  Add a filter condition (EBNF grammar)
+                               Use -h condition for detailed help
+
+  -p, --path <directory>       Scan directory for .log files and add as input
+                               Use -h path for detailed help
+
+  -oml, --output_mode_line     Output mode: normal with line numbers 
+                               (mutually exclusive with -omtl, -omc)
+                               Use -h output_mode_line for detailed help
+
+  -omtl, --output_mode_only_time_and_line
+                               Output mode: only time and line number 
+                               (mutually exclusive with -oml, -omc)
+                               Use -h output_mode_only_time_and_line for detailed help
+
+  -osf, --output_separate_frame
+                               Enable output with frame count separators
+                               Use -h output_separate_frame for detailed help
+
+  -e, --extension <ext>        Set custom output file extension
+                               Use -h extension for detailed help
+
+  -oc, --output_count <num>    Set maximum number of output log lines
+                               Use -h output_count for detailed help
+
+  -op, --out_path <directory>  Set output directory for filtered files
+                               Use -h out_path for detailed help
+
+  -ostd, --output_std          Output filtered results to stdout instead of file
+                               Use -h output_std for detailed help
+
+  -omc, --output_mode_custom <regex> <format>
+                               Custom output mode with regex and format template 
+                               (mutually exclusive with -oml, -omtl)
+                               Use -h output_mode_custom for detailed help
+)";
+
+
+
 namespace UEBabyPram::LogFilter
 {
 
@@ -9,214 +63,261 @@ namespace UEBabyPram::LogFilter
 
 	static void PrintGeneralHelp()
 	{
-		Log::Log < comment_log, Log::LogLevel::Display,
-			LR"(Usage: UEBabyPramLogFilter [OPTIONS]
-
-  By default (filter mode), filtered output is written to a file in the same
-  directory as the input file. Use -fmf or -fml to redirect output to STDOUT
-  instead.
-
-Options:
-  -h, --help [TOPIC]                    Show this help message. With a TOPIC argument,
-                                        show detailed help for that command.
-                                        TOPIC can be a short name, or prefixed with
-                                        - or -- (e.g. -c, --condition).
-                                        Available topics: file, condition, path,
-                                        output_mode_line, output_mode_separate_frame,
-                                        extension, find_mode_first, find_mode_last,
-                                        find_mode_count.
-  
-  -f, --file <path>                     Specify input .log file(s). Can be specified
-                                        multiple times.
-  
-  -c, --condition <expr>                Filter condition expression (see -h -c for more
-                                        infonmation). Can be specified multiple times.
-  
-  -p, --path <directory>                Scan all .log files in the given directory.
-  
-  -oml, --output_mode_line              Prepend each output line with its line number.
-  
-  -omsf, --output_mode_separate_frame   Insert frame separation markers when frame
-                                        count changes.
- 
-  -e, --extension <ext>                 Custom output file extension.
-  
-  -fmf, --find_mode_first               Find first N matching entries (requires -fmc).
-                                        This enables FindMode: output goes to STDOUT
-                                        in the following format:
-                                        File:<FilePath> : [Time:(year.month.day:hour.minute.second:millisecond) Line:(number)],...
-                                        Example:
-                                        File:<C:\Log.log> : [Time(2006.11.11:11.23.34:123) Line(123)],...
-  
-  -fml, --find_mode_last                Find last N matching entries (requires -fmc).
-                                        This enables FindMode: output goes to STDOUT
-                                        in the following format:
-                                        File:<FilePath> : [Time:(year.month.day:hour.minute.second:millisecond) Line:(number)],...
-                                        Example:
-                                        File:<C:\Log.log> : [Time(2006.11.11:11.23.34:123) Line(123)],...
-  
-  -fmc, --find_mode_count <N>           Number of entries for find mode (default: 40).
-)"
-		> ();
+		Log::Log<comment_log, Log::LogLevel::Display, u8"{}">(
+			general_help_string
+		);
 	}
 
 	static void PrintCommandHelp(std::string_view topic)
 	{
-		if (topic == "file" || topic == "f")
+		if (topic == "h" || topic == "help")
 		{
-			std::print(
-				R"(-f, --file <path>
+			Log::Log<comment_log, Log::LogLevel::Display, u8"{}">(u8R"(
+  -h, --help [topic]
 
-  Specify one or more input .log files. This option can be repeated to
-  specify multiple files. Each file is processed in parallel using
-  multiple threads.
+    Shows general help overview, or detailed help for a specific topic.
 
-  The path must point to an existing regular file with a .log extension.
-
-  Example:
-    UEBabyPramLogFilter -f output.log
-    UEBabyPramLogFilter -f a.log -f b.log
-
+    Usage:
+      -h              Show general help with all commands
+      -h file         Show detailed help for -f / --file
+      -h condition    Show detailed help for -c / --condition
+      -h path         Show detailed help for -p / --path
+      -h output_mode_line       Show detailed help for -oml
+      -h output_mode_only_time_and_line  Show detailed help for -omtl
+      -h output_separate_frame  Show detailed help for -osf
+      -h extension     Show detailed help for -e / --extension
+      -h output_count  Show detailed help for -oc / --output_count
+      -h out_path      Show detailed help for -op / --out_path
+      -h output_std    Show detailed help for -ostd / --output_std
+      -h output_mode_custom     Show detailed help for -omc
 )");
 		}
-		else if (topic == "condition" || topic == "c")
+		else if (topic == "f" || topic == "file")
 		{
-			std::print(
-				R"(-c, --condition <expr>
+			Log::Log<comment_log, Log::LogLevel::Display, u8"{}">(u8R"(
+  -f, --file <path>
 
-  Add a filter condition expressed in the following EBNF grammar.
-  This option can be specified multiple times; all conditions are
-  AND-combined.
+    Adds a .log file as input. The file must exist and have a .log extension.
 
-  EBNF Grammar:
-	%s
+    Can be used multiple times to process multiple files.
 
-  COMPARE operators:
-    <       Smaller (for string: StartWith)
-    <=      SmallerEqual (for string: EndWith)
-    ==      Equal
-    >=      BiggerEqual (for string: Contains)
-    >       Bigger (for string: regex/pattern match via DFA)
+    Usage:
+      -f "C:\Logs\MyGame.log"
+      -f "/path/to/UE4.log"
 
-  TIME format:
-    year.month.day:hour.minute.second:millisecond
-    year.month.day:hour.minute.second
-    year.month.day:hour.minute
-    year.month.day
-
-  LOGLEVEL (ordered by severity):
-    Fatal(0) > Error(1) > Warning(2) > Display(3) > Log(4) > Verbose(5) > VeryVerbose(6)
-
-  STRING_COMPARE:
-    StartWith  - check if log content starts with a substring (<)
-    EndWith    - check if log content ends with a substring (<=)
-    Equal      - exact match (==)
-    Contains   - check if log content contains a substring (>=)
-    HeadMatchs - regex/pattern match using DFA (>)
-
-  Examples:
-    -c "Level >= Warning"         -- only Warning and above
-    -c "Time > 2024.6.1"          -- logs after June 1, 2024
-    -c "Line > 500"               -- logs after line 500
-    -c "Log.Contains(\"Error\")\"   -- log text contains \"Error\"
-    -c "Category.StartWith(\"Log\")\"
-    -c \"(Level >= Error) && (Log.Contains(\"Assert\"))\"
-
-)",
-Potato::Log::AddLogStringWrapper(UEBabyPram::LogFilter::GetEbnfString())
-);
-		}
-		else if (topic == "path" || topic == "p")
-		{
-			std::print(
-				R"(-p, --path <directory>
-
-  Scan all .log files in the given directory. Every regular file with
-  a .log extension under the directory will be added as an input file.
-
-  Example:
-    UEBabyPramLogFilter -p "C:\Logs\"
-
+    Related: -p / --path to add all .log files in a directory.
 )");
 		}
-		else if (topic == "output-mode-line" || topic == "oml")
+		else if (topic == "c" || topic == "condition")
 		{
-			std::print(
-				R"(-oml, --output_mode_line
+			Log::Log<comment_log, Log::LogLevel::Display, u8"{}">(u8R"(
+  -c, --condition <statement>
 
-  Prepend each output line with its original line number in the
-  format "Line-NNN:<log content>".
+    Adds a filter condition using EBNF grammar.
+    Multiple conditions can be combined; each represents an independent filter.
 
+    Syntax:
+      Time <OP> <time>                     Filter by timestamp
+      Level <OP> <level>                   Filter by log level
+      Line <OP> <number>                   Filter by line number
+      Log.<FUNC>("<string>")               Filter by log message content
+      Category.<FUNC>("<string>")          Filter by log category
+      (<cond>) && (<cond>)                 Logical AND
+      (<cond>) || (<cond>)                 Logical OR
+      <cond> ; <cond>                      Multiple independent conditions
+
+    Comparison operators (<OP>):
+      <  (less than)    <= (less or equal)    == (equal)
+      >= (greater or equal)    >  (greater than)
+
+    String functions (<FUNC>):
+      StartWith  EndWith  Equal  Contains  Match (RE2 regex)
+
+    Log levels (ordered low to high):
+      VeryVerbose  Verbose  Log  Display  Warning  Error  Fatal
+
+    Time formats:
+      YYYY.MM.DD:HH.MM.SS:mmm      Full timestamp
+      MM.DD:HH.MM.SS:mmm           Omit year
+      DD:HH.MM.SS:mmm              Omit year and month
+      HH.MM.SS                     Time only
+
+    Examples:
+      -c "Level >= Warning"
+      -c "Time >= 2021.10.11:10.00.00:000"
+      -c "Log.Contains(\"Error\") "
+      -c "Category.Match(\"Log.*\") "
+      -c "Line >= 100"
+      -c "Level >= Error && Log.Contains(\"Fatal\") "
+      -c "Time < 12.00.00:000"
 )");
 		}
-		else if (topic == "output-mode-separate-frame" || topic == "omsf")
+		else if (topic == "p" || topic == "path")
 		{
-			std::print(
-				R"(-omsf, --output_mode_separate_frame
+			Log::Log<comment_log, Log::LogLevel::Display, u8"{}">(u8R"(
+  -p, --path <directory>
 
-  Insert a frame separation marker when the frame count changes between
-  consecutive log lines. The marker shows the frame delta and elapsed
-  time:
-    =====[N]Frame  [M]ms=====
+    Scans a directory for all .log files (non-recursive) and adds them as input.
 
+    The directory must exist.
+
+    Usage:
+      -p "C:\Logs\"
+      -p "/var/log/ue4/"
+
+    Related: -f / --file to add individual .log files.
 )");
 		}
-		else if (topic == "extension" || topic == "e")
+		else if (topic == "oml" || topic == "output_mode_line")
 		{
-			std::print(
-				R"(-e, --extension <ext>
+			Log::Log<comment_log, Log::LogLevel::Display, u8"{}">(u8R"(
+  -oml, --output_mode_line
 
-  Specify a custom output file extension. If not set, the default
-  suffix ".filterout" is appended to the input file name.
+    Sets output mode to normal output with line numbers prepended.
 
-  Example:
-    UEBabyPramLogFilter -f output.log -e ".filtered"
+    Each output line will be prefixed with the original line number.
 
+    Mutually exclusive with: -omtl, -omc
+
+    Usage:
+      -oml
+
+	Example:
+      Input: [2021.10.11-11.53.12:082][  0]LogConfig2: XXXX
+      Output: Line-12:[2021.10.11-11.53.12:082][  0]LogConfig2: XXXX
 )");
 		}
-		else if (topic == "find-mode-first" || topic == "fmf")
+		else if (topic == "omtl" || topic == "output_mode_only_time_and_line")
 		{
-			std::print(
-				R"(-fmf, --find_mode_first
+			Log::Log<comment_log, Log::LogLevel::Display, u8"{}">(u8R"(
+  -omtl, --output_mode_only_time_and_line
 
-  Instead of writing filtered output to a file, find the first N
-  matching log entries and print them to stdout. Use -fmc to set N.
+    Sets output mode to display only the timestamp and line number.
 
-  Example:
-    UEBabyPramLogFilter -f output.log -c "Level >= Error" -fmf -fmc 10
+    Mutually exclusive with: -oml, -omc
 
+    Usage:
+      -omtl
+
+	Example:
+      Input: [2021.10.11-11.53.12:082][  0]LogConfig2: XXXX
+      Output: [Time:(2021.10.11-11.53.12:082) Line:(12)]
 )");
 		}
-		else if (topic == "find-mode-last" || topic == "fml")
+		else if (topic == "osf" || topic == "output_separate_frame")
 		{
-			std::print(
-				R"(-fml, --find_mode_last
+			Log::Log<comment_log, Log::LogLevel::Display, u8"{}">(u8R"(
+  -osf, --output_separate_frame
 
-  Instead of writing filtered output to a file, find the last N
-  matching log entries and print them to stdout. Use -fmc to set N.
+    Enables output with frame count separators between frames.
 
-  Example:
-    UEBabyPramLogFilter -f output.log -c \"Log.Contains(^crash^)\" -fml -fmc 5
+    Usage:
+      -osf
 
+	Example:
+      Input: 
+          [2021.10.11-11.53.12:082][  0]LogConfig2: XXXX
+          [2021.10.11-11.53.12:092][  0]LogConfig2: XXXX
+          [2021.10.11-11.53.12:102][  2]LogConfig2: XXXX
+      Output:
+          [2021.10.11-11.53.12:082][  0]LogConfig2: XXXX
+          [2021.10.11-11.53.12:092][  0]LogConfig2: XXXX
+          ===[1]Frame  [10]ms===
+          [2021.10.11-11.53.12:102][  2]LogConfig2: XXXX
 )");
 		}
-		else if (topic == "find-mode-count" || topic == "fmc")
+		else if (topic == "e" || topic == "extension")
 		{
-			std::print(
-				R"(-fmc, --find_mode_count <N>
+			Log::Log<comment_log, Log::LogLevel::Display, u8"{}">(u8R"(
+  -e, --extension <ext>
 
-  Set the number of entries for find mode (used with -fmf or -fml).
-  Default value is 40.
+    Sets a custom output file extension for filtered output files.
 
-  Example:
-    UEBabyPramLogFilter -f output.log -c "Level >= Error" -fmf -fmc 20
+    Default extension: .filterout
 
+    Usage:
+      -e ".filtered"
+      -e ".txt"
+)");
+		}
+		else if (topic == "oc" || topic == "output_count")
+		{
+			Log::Log<comment_log, Log::LogLevel::Display, u8"{}">(u8R"(
+  -oc, --output_count <num>
+
+    Sets the maximum number of output log lines to produce.
+
+    Once the limit is reached, remaining matching lines are discarded.
+
+    Usage:
+      -oc 100
+      -oc 1000
+)");
+		}
+		else if (topic == "op" || topic == "out_path")
+		{
+			Log::Log<comment_log, Log::LogLevel::Display, u8"{}">(u8R"(
+  -op, --out_path <directory>
+
+    Sets the output directory for filtered files.
+
+    The directory must exist. Each input .log file produces a corresponding
+    filtered output file in this directory.
+
+    Usage:
+      -op "C:\Filtered\"
+      -op "/tmp/output/"
+)");
+		}
+		else if (topic == "ostd" || topic == "output_std")
+		{
+			Log::Log<comment_log, Log::LogLevel::Display, u8"{}">(u8R"(
+  -ostd, --output_std
+
+    Outputs filtered results to stdout instead of writing to files.
+
+    Usage:
+      -ostd
+)");
+		}
+		else if (topic == "omc" || topic == "output_mode_custom")
+		{
+			Log::Log<comment_log, Log::LogLevel::Display, u8"{}">(u8R"(
+  -omc, --output_mode_custom <regex> <format>
+
+    Sets custom output mode with a regex matcher and format template.
+    Multiple -omc options can be combined, 
+    each representing an independent output mode. 
+    Lines matching the regex will be output in the corresponding format.
+
+    Arguments:
+      <regex>   RE2 regular expression to match against log lines
+      <format>  Format template string with placeholders
+
+    Format placeholders:
+      {Time}       Timestamp of the log entry
+      {Level}      Log level (VeryVerbose, Verbose, Log, Display, Warning, Error, Fatal)
+      {Line}       Line number in the source file
+      {Log}        Log message body text
+      {Category}   Log category name
+      {0} - {9}    Regex capture group references (numbered by opening paren)
+      {{ }}        Escaped literal braces
+
+    Mutually exclusive with: -oml, -omtl
+
+    Usage:
+      -omc "(\w+) " "{Time} [{Category}] {0}: {Log}"
+      -omc "Error: (.+) " "ERROR | {Time} | {1}"
+
+	Example:
+      Command: -omc "Loc:\[X=([-0-9\.]+) Y=([-0-9\.]+) Z=([-0-9\.]+)\]" "(x={1} y={2} z={3}) "
+      Input: [2021.10.11-11.53.12:082][  0]LogConfig2: Loc:[X=123 Y=124 Z=126]
+      Output: (x=123 y=124 z=126)
 )");
 		}
 		else
 		{
-			std::print("Unknown help topic: {}", topic);
-			PrintGeneralHelp();
+			Log::Log<comment_log, Log::LogLevel::Error, L"Unknown topic <{}>, use -h to see available topics">(topic);
 		}
 	}
 
@@ -237,13 +338,13 @@ Potato::Log::AddLogStringWrapper(UEBabyPram::LogFilter::GetEbnfString())
 						next = next.substr(1);
 					PrintCommandHelp(next);
 					++i;
-					return 0;
+					return 1;
 				}
 				else
 				{
 					PrintGeneralHelp();
 				}
-				return 0;
+				return 1;
 			}
 
 			if (argv_string == "-f" || argv_string == "--file")
@@ -263,7 +364,7 @@ Potato::Log::AddLogStringWrapper(UEBabyPram::LogFilter::GetEbnfString())
 					++i;
 				}
 				else {
-					Log::Log<comment_log, Log::LogLevel::Error, L"Unsupport command -f --file, see -h or --help for more infomation">();
+					Log::Log<comment_log, Log::LogLevel::Error, L"Unsupport command -f --file, use -h file for detailed help">();
 					return -1;
 				}
 			}
@@ -279,13 +380,13 @@ Potato::Log::AddLogStringWrapper(UEBabyPram::LogFilter::GetEbnfString())
 					}
 					if (!processor.AddStatement({ reinterpret_cast<char8_t const*>(str.data()), str.size() }))
 					{
-						Log::Log<comment_log, Log::LogLevel::Error, L"Unsupport command -c --condition {}, see -h or --help for more infomation">(str);
+						Log::Log<comment_log, Log::LogLevel::Error, L"Invalid condition <{}>, use -h condition for detailed help">(str);
 						return -1;
 					}
 					++i;
 				}
 				else {
-					Log::Log<comment_log, Log::LogLevel::Error, L"Unsupport command -c --condition, see -h or --help for more infomation">();
+					Log::Log<comment_log, Log::LogLevel::Error, L"Unsupport command -c --condition, use -h condition for detailed help">();
 					return -1;
 				}
 			}
@@ -312,7 +413,7 @@ Potato::Log::AddLogStringWrapper(UEBabyPram::LogFilter::GetEbnfString())
 					}
 				}
 				else {
-					Log::Log<comment_log, Log::LogLevel::Error, L"Unsupport command -p --path, see -h or --help for more infomation">();
+					Log::Log<comment_log, Log::LogLevel::Error, L"Unsupport command -p --path, use -h path for detailed help">();
 					return -1;
 				}
 			}
@@ -324,7 +425,7 @@ Potato::Log::AddLogStringWrapper(UEBabyPram::LogFilter::GetEbnfString())
 			{
 				setting.mode = OutputMode::ONLY_TIME_AND_LINE;
 			}
-			else if (argv_string == "-omsf" || argv_string == "--output_mode_separate_frame")
+			else if (argv_string == "-osf" || argv_string == "--output_separate_frame")
 			{
 				setting.output_with_separate_frame = true;
 			}
@@ -336,7 +437,7 @@ Potato::Log::AddLogStringWrapper(UEBabyPram::LogFilter::GetEbnfString())
 					setting.output_expand = sub_argv;
 				}
 				else {
-					Log::Log<comment_log, Log::LogLevel::Error, L"Unsupport command -e --extension, see -h or --help for more infomation">();
+					Log::Log<comment_log, Log::LogLevel::Error, L"Unsupport command -e --extension, use -h extension for detailed help">();
 					return -1;
 				}
 				++i;
@@ -354,7 +455,7 @@ Potato::Log::AddLogStringWrapper(UEBabyPram::LogFilter::GetEbnfString())
 					}
 				}
 				else {
-					Log::Log<comment_log, Log::LogLevel::Error, L"Unsupport command -omc --output_mode_count, see -h or --help for more infomation">();
+					Log::Log<comment_log, Log::LogLevel::Error, L"Unsupport command -oc --output_count, use -h output_count for detailed help">();
 					return -1;
 				}
 				++i;
@@ -376,7 +477,7 @@ Potato::Log::AddLogStringWrapper(UEBabyPram::LogFilter::GetEbnfString())
 					}
 				}
 				else {
-					Log::Log<comment_log, Log::LogLevel::Error, L"Unsupport command -op --out_path, see -h or --help for more infomation">();
+					Log::Log<comment_log, Log::LogLevel::Error, L"Unsupport command -op --out_path, use -h out_path for detailed help">();
 					return -1;
 				}
 			}
@@ -396,13 +497,13 @@ Potato::Log::AddLogStringWrapper(UEBabyPram::LogFilter::GetEbnfString())
 					std::u8string_view format_format_u8{ reinterpret_cast<char8_t const*>(format_format.data()), format_format.size() };
 					if (!fomatter.AddStatement(reg_format_u8, format_format_u8, error_message))
 					{
-						Log::Log<comment_log, Log::LogLevel::Error, L"Unsupport command -omc --output_mode_custom, see -h or --help for more infomation. : <{}>">(error_message);
+						Log::Log<comment_log, Log::LogLevel::Error, L"Invalid custom format <{}>, use -h output_mode_custom for detailed help">(error_message);
 						return -1;
 					}
 					i += 2;
 				}
 				else {
-					Log::Log<comment_log, Log::LogLevel::Error, L"Unsupport command -omc --output_mode_custom, see -h or --help for more infomation">();
+					Log::Log<comment_log, Log::LogLevel::Error, L"Unsupport command -omc --output_mode_custom, use -h output_mode_custom for detailed help">();
 					return -1;
 				}
 			}
@@ -429,7 +530,7 @@ Potato::Log::AddLogStringWrapper(UEBabyPram::LogFilter::GetEbnfString())
 					}
 				}
 				else {
-					Log::Log<comment_log, Log::LogLevel::Error, L"Unsupport command -p --path, see -h or --help for more infomation">();
+					Log::Log<comment_log, Log::LogLevel::Error, L"Unsupport command -p --path, use -h path for detailed help">();
 					return -1;
 				}
 			}

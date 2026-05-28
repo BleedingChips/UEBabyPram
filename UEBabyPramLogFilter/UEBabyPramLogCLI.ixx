@@ -42,3 +42,29 @@ export namespace UEBabyPram::LogFilter
 
 	int HandleComment(int argc, char* argv[], FilterSetting& setting, LogFilterProcessor& processor, LogFilterFormatter& fomatter);
 }
+
+namespace Potato::Log
+{
+	template<Potato::Log::LogLevel level>
+	struct LogCategoryFormatter<UEBabyPram::LogFilter::comment_log, level>
+	{
+		template<typename OutputIterator, typename ...Parameters>
+		OutputIterator operator()(OutputIterator iterator, std::basic_format_string<wchar_t, std::type_identity_t<Parameters>...> const& pattern, Parameters&& ...parameters)
+		{
+			if constexpr (level == Potato::Log::LogLevel::Error)
+			{
+				Potato::Log::FormatedSystemTime time;
+				iterator = std::format_to(
+					std::move(iterator),
+					L"{}:",
+					level
+				);
+			}
+			return std::format_to(
+				std::move(iterator),
+				pattern,
+				std::forward<Parameters>(parameters)...
+			);
+		}
+	};
+}

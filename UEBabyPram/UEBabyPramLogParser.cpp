@@ -141,7 +141,7 @@ namespace UEBabyPram::LogParser
 	{
 		LinePropertyIndex property;
 		std::size_t offset = 0;
-		auto match = ctre::starts_with<UR"(\[([0-9]{0,4})\.([0-9]{1,2})\.([0-9]{1,2})-([0-9]{1,2})\.([0-9]{1,2})\.([0-9]{1,2}):([0-9]{1,3})\]\[\s{0,3}([0-9]{1,3})\])">(string.substr(offset));
+		auto match = ctre::starts_with<UR"(\[(([0-9]{0,4})\.([0-9]{1,2})\.([0-9]{1,2})-([0-9]{1,2})\.([0-9]{1,2})\.([0-9]{1,2}):([0-9]{1,3}))\]\[\s{0,3}([0-9]{1,3})\])">(string.substr(offset));
 		
 		auto GetIndex = [](auto const& math, std::u8string_view str) ->Potato::Misc::IndexSpan<> {
 			return { static_cast<std::size_t>(math.begin() - str.data()), static_cast<std::size_t>(math.end() - str.data()) };
@@ -149,17 +149,18 @@ namespace UEBabyPram::LogParser
 		
 		if (match)
 		{
-			property.time.year = GetIndex(match.get<1>(), string);
-			property.time.month = GetIndex(match.get<2>(), string);
-			property.time.day = GetIndex(match.get<3>(), string);
-			property.time.hour = GetIndex(match.get<4>(), string);
-			property.time.minute = GetIndex(match.get<5>(), string);
-			property.time.second = GetIndex(match.get<6>(), string);
-			property.time.millisecond = GetIndex(match.get<7>(), string);
-			property.time.total = GetIndex(match.get<0>(), string);
-			property.frame_count = GetIndex(match.get<8>(), string);
+			property.time.total = GetIndex(match.get<1>(), string);
+			property.time.year = GetIndex(match.get<2>(), string);
+			property.time.month = GetIndex(match.get<3>(), string);
+			property.time.day = GetIndex(match.get<4>(), string);
+			property.time.hour = GetIndex(match.get<5>(), string);
+			property.time.minute = GetIndex(match.get<6>(), string);
+			property.time.second = GetIndex(match.get<7>(), string);
+			property.time.millisecond = GetIndex(match.get<8>(), string);
+			property.frame_count = GetIndex(match.get<9>(), string);
 			offset = (match.end() - string.data());
 		}
+		
 		auto match2 = ctre::starts_with<U"[a-zA-Z][a-zA-Z0-9]*?: ">(string.substr(offset));
 		if (match2)
 		{
