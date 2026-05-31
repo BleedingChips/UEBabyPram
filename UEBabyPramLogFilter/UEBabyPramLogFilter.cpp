@@ -9,6 +9,7 @@ namespace UEBabyPram::LogFilter
 		$:='\s+';
 		INT:='[1-9][0-9]*' : [1];
 		STR:='\"(.*?[^\\])\"' : [2];
+		STR:='\^(.*?[^\\])\^' : [2];
 		COMPARE:='<' : [4];
 		COMPARE:='<=' : [5];
 		COMPARE:='==' : [6];
@@ -40,13 +41,15 @@ namespace UEBabyPram::LogFilter
 			:='Category' '.'  STRING_COMPARE  '(' STR ')' : [14];
 			:= '(' <STAT> ')' : [20];
 			:= <STAT> '&&' <STAT>  : [21];
+			:= <STAT> '&' <STAT>  : [21];
 			:= <STAT> '||' <STAT>  : [22];
+			:= <STAT> '|' <STAT>  : [22];
 		<Exp>:=<STAT> ';' :[99];
 			:=<STAT> :[99];
 			:=;
 		%%%%
-		+('&&');
-		+('||');
+		+('&&' '&');
+		+('||' '|');
 	)";
 
 	static constexpr std::u8string_view filter_string = u8R"(

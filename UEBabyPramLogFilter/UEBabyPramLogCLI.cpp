@@ -124,7 +124,6 @@ namespace UEBabyPram::LogFilter
       Category.<FUNC>("<string>")          Filter by log category
       (<cond>) && (<cond>)                 Logical AND
       (<cond>) || (<cond>)                 Logical OR
-      <cond> ; <cond>                      Multiple independent conditions
 
     Comparison operators (<OP>):
       <  (less than)    <= (less or equal)    == (equal)
@@ -323,7 +322,7 @@ namespace UEBabyPram::LogFilter
 
 	int HandleComment(int argc, char* argv[], FilterSetting& setting, LogFilterProcessor& processor, LogFilterFormatter& fomatter)
 	{
-		for (std::size_t i = 0; i < argc; ++i)
+		for (std::size_t i = 1; i < argc; ++i)
 		{
 			std::string_view argv_string = argv[i];
 
@@ -351,7 +350,9 @@ namespace UEBabyPram::LogFilter
 			{
 				if (i + 1 < argc)
 				{
-					std::filesystem::path sub_argv = argv[i + 1];
+					std::u8string path;
+					Potato::Encode::STDInputEncoder<char8_t>::EncodeTo(argv[i + 1], std::back_insert_iterator{ path });
+					std::filesystem::path sub_argv = path;
 
 					if (std::filesystem::exists(sub_argv) && std::filesystem::is_regular_file(sub_argv) && sub_argv.extension() == u8".log")
 					{
@@ -394,11 +395,13 @@ namespace UEBabyPram::LogFilter
 			{
 				if (i + 1 < argc)
 				{
-					std::filesystem::path path = argv[i + 1];
+					std::u8string temp_path;
+					Potato::Encode::STDInputEncoder<char8_t>::EncodeTo(argv[i + 1], std::back_insert_iterator{ temp_path });
+					std::filesystem::path sub_argv = temp_path;
 
-					if (std::filesystem::is_directory(path))
+					if (std::filesystem::is_directory(sub_argv))
 					{
-						for (auto& path_ite : std::filesystem::directory_iterator{ path })
+						for (auto& path_ite : std::filesystem::directory_iterator{ sub_argv })
 						{
 							if (std::filesystem::exists(path_ite) && std::filesystem::is_regular_file(path_ite) && path_ite.path().extension() == ".log")
 							{
@@ -408,7 +411,7 @@ namespace UEBabyPram::LogFilter
 						++i;
 					}
 					else {
-						Log::Log<comment_log, Log::LogLevel::Error, L"-p --path <path> : path should be a directory, which is <{}>">(path.generic_u16string());
+						Log::Log<comment_log, Log::LogLevel::Error, L"-p --path <path> : path should be a directory, which is <{}>">(sub_argv.generic_u16string());
 						return -1;
 					}
 				}
@@ -433,7 +436,9 @@ namespace UEBabyPram::LogFilter
 			{
 				if (i + 1 < argc)
 				{
-					std::filesystem::path sub_argv = argv[i + 1];
+					std::u8string path;
+					Potato::Encode::STDInputEncoder<char8_t>::EncodeTo(argv[i + 1], std::back_insert_iterator{ path });
+					std::filesystem::path sub_argv = path;
 					setting.output_expand = sub_argv;
 				}
 				else {

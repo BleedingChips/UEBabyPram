@@ -68,17 +68,22 @@ std::filesystem::path GetTemporaryPath(std::filesystem::path const& reference_pa
 
 int main(int argc, char* argv[])
 {
-
-
 	UEBabyPram::LogFilter::FilterSetting setting;
 	UEBabyPram::LogFilter::LogFilterProcessor processor;
 	UEBabyPram::LogFilter::LogFilterFormatter formatter;
 
-	auto resulr = UEBabyPram::LogFilter::HandleComment(argc, argv, setting, processor, formatter);
-	if (resulr > 0)
-		return 0;
-	else if(resulr < 0)
-		return resulr;
+	try {
+		auto resulr = UEBabyPram::LogFilter::HandleComment(argc, argv, setting, processor, formatter);
+		if (resulr > 0)
+			return 0;
+		else if (resulr < 0)
+			return resulr;
+	}
+	catch (std::exception const& exc)
+	{
+		Log::Log<log_filter, Log::LogLevel::Error, L"{}">(std::string_view{ exc.what() });
+	}
+	
 
 	if (setting.input_file.empty())
 	{
