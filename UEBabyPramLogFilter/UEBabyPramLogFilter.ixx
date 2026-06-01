@@ -53,6 +53,12 @@ export namespace UEBabyPram::LogFilter
 		virtual std::optional<bool> Detect(LogParser::LogLine const& log) const override;
 	};
 
+	struct NotStatement : StatementInterface
+	{
+		std::shared_ptr<StatementInterface> statement;
+		virtual std::optional<bool> Detect(LogParser::LogLine const& log) const override;
+	};
+
 	struct LogFilterProcessor
 	{
 		LogFilterProcessor() {}

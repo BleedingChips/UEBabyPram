@@ -139,7 +139,7 @@ int main(int argc, char* argv[])
 						out_path = file_path;
 					}
 					else {
-						out_path += file_path.filename();
+						out_path /= file_path.filename();
 					}
 
 					if (!setting.output_expand.empty())
@@ -170,7 +170,9 @@ int main(int argc, char* argv[])
 					std::pmr::deque<LineCount> line_record;
 					std::size_t count = 0;
 					std::optional<std::size_t> min_line;
+					std::optional<std::size_t> min_line_outputed;
 					std::size_t max_line = 0;
+					std::size_t max_line_outputed = 0;
 					UEBabyPram::LogParser::ForeachLogLine(plain_reader, [&](UEBabyPram::LogParser::LogLine log_line) -> bool {
 
 						if (processor)
@@ -193,6 +195,9 @@ int main(int argc, char* argv[])
 						count += 1;
 						if (count >= setting.max_output_count)
 							return true;
+
+						min_line_outputed = min_line;
+						max_line_outputed = max_line;
 
 						if (setting.output_with_separate_frame)
 						{
@@ -297,6 +302,27 @@ int main(int argc, char* argv[])
 
 					;
 
+					std::u8string line_report;
+					if (min_line.has_value())
+					{
+						std::format_to(
+							Potato::Encode::FormatterOutputIteratorWrapper(std::back_insert_iterator(line_report)),
+							"LineRange[{}, {}] ",
+							*min_line,
+							max_line
+						);
+					}
+
+					if (min_line_outputed.has_value())
+					{
+						std::format_to(
+							Potato::Encode::FormatterOutputIteratorWrapper(std::back_insert_iterator(line_report)),
+							"OutputedLineRange[{}, {}] ",
+							*min_line_outputed,
+							max_line_outputed
+						);
+					}
+
 					if (setting.target == UEBabyPram::LogFilter::OutputTarget::STD)
 					{
 						std::string out_buffer;
@@ -306,16 +332,7 @@ int main(int argc, char* argv[])
 							file_path.generic_string(),
 							count
 						);
-						if (min_line.has_value())
-						{
-							std::format_to(
-								std::back_insert_iterator(out_buffer),
-								", LineRange[{}, {}]",
-								*min_line,
-								max_line
-							);
-						}
-						Log::Log<log_filter, Log::LogLevel::Display, "{} : {};">(out_buffer, formated_line);
+						Log::Log<log_filter, Log::LogLevel::Display, "{} {}: {};">(out_buffer, line_report, formated_line);
 					}
 
 					reader.Close();
@@ -332,19 +349,11 @@ int main(int argc, char* argv[])
 							temporary_output_path,
 							out_path
 						);
-					}
-					if (min_line.has_value())
-					{
-						Potato::Log::Log<log_filter, Potato::Log::LogLevel::Log, u8"Output <{}>, <{}> Logs Matched, LineRange[{}, {}]">(
-							out_path.generic_u16string(), count, *min_line, max_line
+
+						Potato::Log::Log<log_filter, Potato::Log::LogLevel::Log, u8"Output <{}>, <{}> Logs Matched, {}">(
+							out_path.generic_u16string(), count, line_report
 						);
 					}
-					else {
-						Potato::Log::Log<log_filter, Potato::Log::LogLevel::Log, u8"Output <{}>, <{}> Logs Matched">(
-							out_path.generic_u16string(), count
-						);
-					}
-					
 				}
 				else {
 					Potato::Log::Log<log_filter, Potato::Log::LogLevel::Log, u8"Unable To Handle File <{}>">(file_path.generic_u16string());

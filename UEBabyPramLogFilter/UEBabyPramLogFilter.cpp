@@ -37,9 +37,10 @@ namespace UEBabyPram::LogFilter
 		<STAT>:='Time' COMPARE <TIME> : [10];
 			:='Level' COMPARE LOGLEVEL : [11];
 			:='Line' COMPARE INT : [12];
-			:='Log' '.'  STRING_COMPARE  '(' STR ')': [13];
+			:='Message' '.'  STRING_COMPARE  '(' STR ')': [13];
 			:='Category' '.'  STRING_COMPARE  '(' STR ')' : [14];
 			:= '(' <STAT> ')' : [20];
+			:= '!' <STAT> 21 22: [40];
 			:= <STAT> '&&' <STAT>  : [21];
 			:= <STAT> '&' <STAT>  : [21];
 			:= <STAT> '||' <STAT>  : [22];
@@ -60,7 +61,7 @@ namespace UEBabyPram::LogFilter
 		String:='\{Time\}' : [5];
 		String:='\{Level\}' : [6];
 		String:='\{Line\}' : [7];
-		String:='\{Log\}' : [8];
+		String:='\{Message\}' : [8];
 		String:='\{Category\}' : [9];
 		%%%%
 		$:=<Exp>;
@@ -258,6 +259,16 @@ namespace UEBabyPram::LogFilter
 		return std::nullopt;
 	}
 
+	std::optional<bool> NotStatement::Detect(LogParser::LogLine const& log) const
+	{
+		auto s1 = statement->Detect(log);
+		if (s1.has_value())
+		{
+			return !*s1;
+		}
+		return std::nullopt;
+	}
+
 	std::shared_ptr<StatementInterface> LogFilterProcessor::ComplierStatement(std::u8string_view statement, std::pmr::u8string& error_message)
 	{
 		Potato::EBNF::EbnfProcessor pro;
@@ -342,6 +353,12 @@ namespace UEBabyPram::LogFilter
 				else {
 					state->value = std::move(string);
 				}
+				return std::shared_ptr<StatementInterface>(state);
+			}
+			else if (production.UserMask == 40)
+			{
+				auto state = std::make_shared<NotStatement>();
+				state->statement = *production[1].TryConsume<std::shared_ptr<StatementInterface>>();
 				return std::shared_ptr<StatementInterface>(state);
 			}
 			else {
@@ -494,8 +511,41 @@ namespace UEBabyPram::LogFilter
 			{
 			case 1:
 			{
+				std::u8string string;
 				auto str = syminfo.TokenIndex.Slice(filter_type);
-				std::u8string string(reinterpret_cast<char8_t const*>(str.data()), str.size());
+				for (std::size_t index = 0; index < str.size(); ++index)
+				{
+					auto ite = str[index];
+					if (ite == u8'\\')
+					{
+						if (index + 1 < str.size())
+						{
+							auto ite2 = str[index + 1];
+							index += 1;
+							switch (ite2)
+							{
+							case u8'r':
+								string.push_back(u8'\r');
+								break;
+							case u8't':
+								string.push_back(u8'\t');
+								break;
+							case u8'n':
+								string.push_back(u8'\n');
+								break;
+							case u8'v':
+								string.push_back(u8'\v');
+								break;
+							default:
+								string.push_back(ite2);
+								break;
+							}
+						}
+						else {
+							string.push_back(ite);
+						}
+					}
+				}
 				return Filter::ElementType{string};
 			}
 			case 2:

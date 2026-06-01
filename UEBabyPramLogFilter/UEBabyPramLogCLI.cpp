@@ -114,16 +114,19 @@ namespace UEBabyPram::LogFilter
   -c, --condition <statement>
 
     Adds a filter condition using EBNF grammar.
-    Multiple conditions can be combined; each represents an independent filter.
+    Multiple conditions will be combined with Or.
 
     Syntax:
       Time <OP> <time>                     Filter by timestamp
       Level <OP> <level>                   Filter by log level
       Line <OP> <number>                   Filter by line number
-      Log.<FUNC>("<string>")               Filter by log message content
+      Message.<FUNC>("<string>")           Filter by log message content
       Category.<FUNC>("<string>")          Filter by log category
       (<cond>) && (<cond>)                 Logical AND
+      (<cond>) & (<cond>)                  Logical AND
       (<cond>) || (<cond>)                 Logical OR
+      (<cond>) | (<cond>)                  Logical OR
+      !<cond>                              Logical NOT
 
     Comparison operators (<OP>):
       <  (less than)    <= (less or equal)    == (equal)
@@ -144,10 +147,10 @@ namespace UEBabyPram::LogFilter
     Examples:
       -c "Level >= Warning"
       -c "Time >= 2021.10.11:10.00.00:000"
-      -c "Log.Contains(\"Error\") "
+      -c "Message.Contains(\"Error\") "
       -c "Category.Match(\"Log.*\") "
       -c "Line >= 100"
-      -c "Level >= Error && Log.Contains(\"Fatal\") "
+      -c "Level >= Error && Message.Contains(\"Fatal\") "
       -c "Time < 12.00.00:000"
 )");
 		}
@@ -297,7 +300,7 @@ namespace UEBabyPram::LogFilter
       {Time}       Timestamp of the log entry
       {Level}      Log level (VeryVerbose, Verbose, Log, Display, Warning, Error, Fatal)
       {Line}       Line number in the source file
-      {Log}        Log message body text
+      {Message}    Log message body text
       {Category}   Log category name
       {0} - {9}    Regex capture group references (numbered by opening paren)
       {{ }}        Escaped literal braces
