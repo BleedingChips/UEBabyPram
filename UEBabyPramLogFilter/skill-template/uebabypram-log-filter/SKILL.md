@@ -67,7 +67,9 @@ uebabypram-log-filter\scripts\UEBabyPramLogFilter.exe
 | 级别 | `Level <OP> <level>` | 按日志级别过滤 |
 | 行号 | `Line <OP> <number>` | 按行号过滤 |
 | 消息 | `Message.<FUNC>("<string>")` | 按日志消息内容过滤 |
+| 消息 | `Message.<FUNC>(^<string>^)` | 按日志消息内容过滤 |
 | 分类 | `Category.<FUNC>("<string>")` | 按日志分类（Category）过滤 |
+| 分类 | `Category.<FUNC>(^<string>^)` | 按日志分类（Category）过滤 |
 | 逻辑与 | `(<cond>) && (<cond>)` | 逻辑 AND |
 | 逻辑与 | `(<cond>) & (<cond>)` | 逻辑 AND |
 | 逻辑或 | `(<cond>) \|\| (<cond>)` | 逻辑 OR |
@@ -184,7 +186,7 @@ uebabypram-log-filter\scripts\UEBabyPramLogFilter.exe
 ## 注意事项
 
 1. **路径中的空格**：文件路径或目录路径包含空格时，需用双引号包裹。
-2. **条件嵌套**：条件字符串中的双引号在 PowerShell 中需转义为 `""`（两个双引号）。
+2. **条件嵌套**：条件字符串中的双引号在 PowerShell 中需转义为 `\"`，并且使用 `''` （单引号）包裹条件字符串，如 `-c 'Message.Contains(\"Log\")'`。
 3. **逻辑或与逻辑与**：逻辑或和逻辑与在 PowerShell 中应使用 `|` 与 `&` 。
 4. **多条件关系**：多个 `-c` 条件为 **OR** 关系；单个 `-c` 内的 `&&` 为 AND 关系。
 5. **互斥输出模式**：`-oml`、`-omtl`、`-omc` 三者互斥，同时只能选一个。
