@@ -437,3 +437,9 @@ out/*
 .xmake
 build/*
 vsxmake*/
+
+# ai-agent
+.opencode/*
+
+# generated skill
+Skills/*

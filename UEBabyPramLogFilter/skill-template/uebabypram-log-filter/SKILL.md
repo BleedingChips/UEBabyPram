@@ -10,13 +10,13 @@ UEBabyPramLogFilter 是一个用于过滤和格式化 Unreal Engine（UE4/UE5）
 ## 工具路径
 
 ```
-uebabypram-log-filter\scripts\UEBabyPramLogFilter.exe
+.\scripts\UEBabyPramLogFilter.exe
 ```
 
 使用 PowerShell 调用时，必须使用 `&` 调用操作符包裹带空格的路径：
 
 ```powershell
-& "uebabypram-log-filter\scripts\UEBabyPramLogFilter.exe" [参数...]
+& ".\scripts\UEBabyPramLogFilter.exe" [参数...]
 ```
 
 ## 核心概念
@@ -186,11 +186,10 @@ uebabypram-log-filter\scripts\UEBabyPramLogFilter.exe
 ## 注意事项
 
 1. **路径中的空格**：文件路径或目录路径包含空格时，需用双引号包裹。
-2. **条件嵌套**：条件字符串中的双引号在 PowerShell 中需转义为 `\"`，并且使用 `''` （单引号）包裹条件字符串，如 `-c 'Message.Contains(\"Log\")'`。
-3. **逻辑或与逻辑与**：逻辑或和逻辑与在 PowerShell 中应使用 `|` 与 `&` 。
-4. **多条件关系**：多个 `-c` 条件为 **OR** 关系；单个 `-c` 内的 `&&` 为 AND 关系。
-5. **互斥输出模式**：`-oml`、`-omtl`、`-omc` 三者互斥，同时只能选一个。
-6. **输出目录**：使用 `-op` 时，目标目录必须已存在。
-7. **正则引擎**：`Match` 函数使用 RE2 正则表达式语法。
-8. **默认输出**：不指定 `-ostd` 时，每个输入 `.log` 文件会生成对应的 `.filterout` 文件。
-9. **查询**：只有在查询下才会指定 `-ostd` 并且通常会跟谁指定 `-oc 0` 用以禁止输出太多日志到STDIO上。
+2. **条件嵌套**：条件字符串中的双引号在 PowerShell 中推荐使用 `^` 替代 `"`。
+3. **条件字符串转义**：条件字符串使用 `\` 来进行转义，如果要使用 `\` 本身则使用 `\\`，若需要 `^` 或 `"` 则需要转义。 
+4. **逻辑或与逻辑与**：逻辑或和逻辑与在 PowerShell 中应使用 `|` 与 `&` 。
+5. **多条件关系**：多个 `-c` 条件为 **OR** 关系；单个 `-c` 内的 `&&` 为 AND 关系。
+6. **互斥输出模式**：`-oml`、`-omtl`、`-omc` 三者互斥，同时只能选一个。
+7. **输出目录**：使用 `-op` 时，目标目录必须已存在。
+8. **正则引擎**：`Match` 函数使用 RE2 正则表达式语法。

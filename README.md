@@ -1,68 +1,45 @@
 # UEBabyPram
 
-一些UE外部工具
+一些UE外部辅助工具
 
 ## 安装
 
 从 Github 上将以下库Clone到本地，并使其保持在同一个路径下：
 
-	```
-	https://github.com/BleedingChips/UEBabyPram.git
-	https://github.com/BleedingChips/Potato.git
-	```
+```
+https://github.com/BleedingChips/UEBabyPram.git
+https://github.com/BleedingChips/Potato.git
+```
 
 在包含该项目的 xmake.lua 上，添加如下代码即可：
 
-	```lua
-	includes("../Potato/")
-	includes("../UEBabyPram/")
+```lua
+includes("../Potato/")
+includes("../UEBabyPram/")
 
-	target(xxx)
-		...
-		add_deps("UEBabyPram")
-	target_end()
-	```
+target(xxx)
+	...
+	add_deps("UEBabyPram")
+target_end()
+```
 
-运行 `xmake_install.ps1` 安装 `xmake`，运行`xmake_generate_vs_project.ps1`将在`vsxmake2022`下产生vs的项目文件。
+运行 `xmake_install.ps1` 安装 `xmake`，运行`xmake_generate_vs_project.ps1`将在`vsxmake2022`下产生vs的项目文件。或直接使用 `xmake build-xxx-skill` 来直接在 `.\skills\` 下生成对应的SKILL
 
 ## 功能
 
 ### LogFilter 
 
-    将UE4日志结构化拆解:
+根据时间，类别，行数，日志内容，来对UE日志进行筛选，查找，以及结构化输出
 
-    ```cpp
-    std::u8string_view Source = 
-        u8R"(LogConfig: Setting CVar [[net.AllowAsyncLoading:1]]
-        [2021.10.11-11.53.12:082][  0]LogConfig: Setting CVar [[con.DebugEarlyDefault:1]]
-        [2021.10.11-11.53.12:082][  0]LogConfig: Display: Setting CVar [[con.DebugEarlyDefault:1]]
-        )";
-    UEBabyPram::LogFilter::ForeachLogLine(Source, [](UEBabyPram::LogFilter::LogLine Line){
-        // 通过读取Line可以获取改行的日志信息
-    });
-    ```
+#### 特点
 
-    LogLine 结构体包含以下变量：
+1. 流式加载，支持大文件
+1. 支持多条件组合查询
+1. 支持自定义格式化输出
+1. AI友好，一键生成对应的SKILL
 
-    ```cpp
-    struct LogLine
-    {
-        // 该行日志打印的时间，可以通过 LogLineProcessor::GetTime(Line) 来获得整数形式的月-日-时-分-秒-毫秒-帧形式的时间。
-        std::u8string_view Time;
+#### 构建方法：
 
-        // 该日志所属的类别，比如LogDemo, LogConfig
-        std::u8string_view Cagetory;
-
-        // 该日志等级，如 log，Display，Error
-        std::u8string_view Level;
-
-        // 该日志不包含上述信息的文本
-        std::u8string_view Str;
-
-        // 该日志包含上述信息的问题
-        std::u8string_view TotalStr;
-
-        // 该日志所在的行数
-        IndexSpan<> LineIndex;
-    };
-    ```
+```
+xmake build-logfilter-skill
+```

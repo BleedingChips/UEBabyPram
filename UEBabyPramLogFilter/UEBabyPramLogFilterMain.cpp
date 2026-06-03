@@ -148,7 +148,7 @@ int main(int argc, char* argv[])
 					}
 
 					Potato::Document::PlainTextReader::Config config;
-					config.cache_buffer_size = std::min(static_cast<std::size_t>(1024) * 1024 * 20, reader.GetStreamSize());
+					config.cache_buffer_size = std::min(static_cast<std::size_t>(1024) * 1024 * 100, reader.GetStreamSize());
 					Potato::Document::PlainTextReader plain_reader(reader, config);
 					Potato::Document::DocumentWriter writter;
 					if (setting.target == UEBabyPram::LogFilter::OutputTarget::FILE)
@@ -210,7 +210,6 @@ int main(int argc, char* argv[])
 								{
 									if (*fc != *last_frame_count)
 									{
-
 										std::int64_t count = static_cast<std::int64_t>(*fc) - static_cast<std::int64_t>(*last_frame_count);
 										auto dur = std::chrono::duration_cast<std::chrono::milliseconds>(*time - last_frame_time);
 
