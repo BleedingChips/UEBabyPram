@@ -186,18 +186,22 @@ int main(int argc, char* argv[])
 						if (!min_line.has_value())
 						{
 							min_line = log_line.line.Begin();
-							max_line = *min_line + 1;
 						}
-						else {
-							max_line = log_line.line.Begin() + 1;
-						}
+						max_line = log_line.line.Begin();
 
+						auto old_count = count;
 						count += 1;
-						if (count >= setting.max_output_count)
-							return true;
 
-						min_line_outputed = min_line;
-						max_line_outputed = max_line;
+						if (!setting.output_span.IsInclude(old_count))
+						{
+							return true;
+						}
+
+						if (!min_line_outputed.has_value())
+						{
+							min_line_outputed = log_line.line.Begin();
+						}
+						max_line_outputed = log_line.line.Begin();
 
 						if (setting.output_with_separate_frame)
 						{
@@ -222,7 +226,6 @@ int main(int argc, char* argv[])
 										);
 										if (setting.target == UEBabyPram::LogFilter::OutputTarget::FILE)
 										{
-
 											for (std::size_t i = 0; i < 10; ++i)
 											{
 												formated_line += u8"\t\t\t\t";

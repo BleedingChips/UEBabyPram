@@ -61,6 +61,7 @@ if os.scriptdir() == os.projectdir() then
             local template = path.join(os.projectdir(), "UEBabyPramLogFilter", "skill-template")
 
             print("[1/3] Copying skill-template to %s", skilldir)
+            os.tryrm(skilldir)
             os.cp(path.join(template, "*"), skilldir)
 
             print("[2/3] Configuring and building UEBabyPramLogFilter (release)...")

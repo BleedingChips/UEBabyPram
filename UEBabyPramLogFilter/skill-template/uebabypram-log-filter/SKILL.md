@@ -23,7 +23,7 @@ UEBabyPramLogFilter 是一个用于过滤和格式化 Unreal Engine（UE4/UE5）
 
 - 工具读取 `.log` 文件，根据一个或多个条件过滤日志行，输出过滤后的结果。
 - 默认情况下，输出文件保存在输入文件同目录下，扩展名为 `.filterout`。
-- 多个 `-c` 条件之间为 **或（OR）** 关系；单个条件内部可使用 `&&` 和 `||` 构建复杂逻辑。
+- 多个 `-c` 条件之间为 **或（OR）** 关系；单个条件内部可使用 `&` 和 `|` 构建复杂逻辑。
 
 ---
 
@@ -46,14 +46,14 @@ UEBabyPramLogFilter 是一个用于过滤和格式化 Unreal Engine（UE4/UE5）
 
 | 选项 | 说明 |
 |------|------|
-| `-oml, --output_mode_line` | 输出模式：带行号前缀（与 `-omtl`、`-omc` 互斥） |
+| `-oml, --output_mode_line` | 输出模式：标准模式带行号（与 `-omtl`、`-omc` 互斥） |
 | `-omtl, --output_mode_only_time_and_line` | 输出模式：仅显示时间戳和行号（与 `-oml`、`-omc` 互斥） |
 | `-omc, --output_mode_custom <regex> <format>` | 自定义输出模式：用正则匹配并格式化（与 `-oml`、`-omtl` 互斥，可多次使用代表多个独立模式） |
 | `-osf, --output_separate_frame` | 在帧之间插入帧计数分隔线 |
 | `-e, --extension <ext>` | 自定义输出文件扩展名（默认 `.filterout`） |
-| `-oc, --output_count <num>` | 限制最大输出行数 |
+| `-or, --output_range <num1> <num2>` | 设置已被筛选完成的输出日志行的索引范围（0-indexed，输出索引 >= num1 且 < num2 的条数） |
 | `-op, --out_path <directory>` | 设置输出目录 |
-| `-ostd, --output_std` | 输出到 stdout 而非文件，只在查询模式中配合-oc使用 |
+| `-ostd, --output_std` | 输出到 stdout 而非文件 |
 
 ---
 
@@ -66,13 +66,9 @@ UEBabyPramLogFilter 是一个用于过滤和格式化 Unreal Engine（UE4/UE5）
 | 时间 | `Time <OP> <time>` | 按时间戳过滤 |
 | 级别 | `Level <OP> <level>` | 按日志级别过滤 |
 | 行号 | `Line <OP> <number>` | 按行号过滤 |
-| 消息 | `Message.<FUNC>("<string>")` | 按日志消息内容过滤 |
 | 消息 | `Message.<FUNC>(^<string>^)` | 按日志消息内容过滤 |
-| 分类 | `Category.<FUNC>("<string>")` | 按日志分类（Category）过滤 |
 | 分类 | `Category.<FUNC>(^<string>^)` | 按日志分类（Category）过滤 |
-| 逻辑与 | `(<cond>) && (<cond>)` | 逻辑 AND |
 | 逻辑与 | `(<cond>) & (<cond>)` | 逻辑 AND |
-| 逻辑或 | `(<cond>) \|\| (<cond>)` | 逻辑 OR |
 | 逻辑或 | `(<cond>) \| (<cond>)` | 逻辑 OR |
 | 逻辑非 | `!<cond>` | 逻辑 NOT |
 
@@ -92,9 +88,9 @@ UEBabyPramLogFilter 是一个用于过滤和格式化 Unreal Engine（UE4/UE5）
 
 | 格式 | 示例 |
 |------|------|
-| `YYYY.MM.DD-HH.MM.SS:mmm` | `2021.10.11-11.53.12:082` |
-| `MM.DD-HH.MM.SS:mmm` | `10.11-11.53.12:082`（省略年份） |
-| `DD-HH.MM.SS:mmm` | `11-11.53.12:082`（省略年、月） |
+| `YYYY.MM.DD:HH.MM.SS:mmm` | `2021.10.11-11.53.12:082` |
+| `MM.DD:HH.MM.SS:mmm` | `10.11-11.53.12:082`（省略年份） |
+| `DD:HH.MM.SS:mmm` | `11-11.53.12:082`（省略年、月） |
 | `HH.MM.SS` | `11.53.12`（仅时间） |
 
 ---
@@ -127,18 +123,17 @@ UEBabyPramLogFilter 是一个用于过滤和格式化 Unreal Engine（UE4/UE5）
 
 ### 过滤包含 "Error" 的日志
 ```powershell
-& "...\UEBabyPramLogFilter.exe" -f "MyGame.log" -c "Message.Contains(""Error"")"
+& "...\UEBabyPramLogFilter.exe" -f "MyGame.log" -c 'Message.Contains(^Error^)'
 ```
 
 ### 组合条件：Error 级别且消息包含 "Fatal"
 ```powershell
-& "...\UEBabyPramLogFilter.exe" -f "MyGame.log" -c "Level >= Error && Message.Contains(""Fatal"")"
+& "...\UEBabyPramLogFilter.exe" -f "MyGame.log" -c "Level >= Error & Message.Contains(^Fatal^)"
 ```
 
 ### 按分类正则匹配
 ```powershell
-& "...\UEBabyPramLogFilter.exe" -f "MyGame.log" -c "Category.Match(""Log.*"")"
-```
+& "...\UEBabyPramLogFilter.exe" -f "MyGame.log" -c 'Category.Match(^Log.*^)'
 
 ### 处理整个目录的日志，输出到指定目录
 ```powershell
@@ -155,9 +150,14 @@ UEBabyPramLogFilter 是一个用于过滤和格式化 Unreal Engine（UE4/UE5）
 & "...\UEBabyPramLogFilter.exe" -f "MyGame.log" -omc "Loc:\[X=([-0-9\.]+) Y=([-0-9\.]+) Z=([-0-9\.]+)\]" "(x={1} y={2} z={3})" -ostd
 ```
 
-### 限制输出行数并输出到 stdout
+### 限制输出行数范围并输出到 stdout
 ```powershell
-& "...\UEBabyPramLogFilter.exe" -f "MyGame.log" -c "Level >= Error" -oc 50 -ostd
+& "...\UEBabyPramLogFilter.exe" -f "MyGame.log" -c "Level >= Error" -or 0 50 -ostd
+```
+
+### 只查找包含 "Error" 的日志并禁止输出日志
+```powershell
+& "...\UEBabyPramLogFilter.exe" -f "MyGame.log" -c "Level >= Error" -or 0 0 -ostd
 ```
 
 ### 启用帧分隔
@@ -172,11 +172,11 @@ UEBabyPramLogFilter 是一个用于过滤和格式化 Unreal Engine（UE4/UE5）
 当用户请求筛选或者查询，按以下步骤操作：
 
 1. **确定输入**：确定用户的日志文件路径，或日志躲在目录路径
-2. **理解过滤需求**：将用户的自然语言描述转换成对应的过滤条件语法
+2. **理解过滤需求**：将用户的自然语言描述转换成对应的过滤条件语法，检查是否需要转义
 3. **选择输出方式**：
 - 默认输出到文件(`.filterout` 扩展名)
-- 若只需要查看符合条件的日志条数，添加 `-ostd` 参数让结果输出到stdio上，并且通过 `-oc 0` 屏蔽所有的具体日志输出
-- 若需直接查看结果，添加 `-ostd` 参数，输出的结果数量可能过大，一般需要添加 `-oc 0` 或 `-oc 1` 限制输出个数
+- 若只需要查看符合条件的日志条数，添加 `-ostd` 参数让结果输出到 stdout，并且通过 `-or 0 n` 设置需要的索引范围
+- 若需直接查看结果，添加 `-ostd` 参数，输出的结果数量可能过大，一般需要添加 `-or 0 n` 限制输出行数范围
 4. **选择输出格式**：确定用户的输出格式要求需求，若无特定需求可跳过
 5. **构建命令**：组装完整的命令并执行，一般Windows系统下优先选用PowerShell
 6. **展示结果**：想用户展示过滤结果或输出文件路径
@@ -186,10 +186,8 @@ UEBabyPramLogFilter 是一个用于过滤和格式化 Unreal Engine（UE4/UE5）
 ## 注意事项
 
 1. **路径中的空格**：文件路径或目录路径包含空格时，需用双引号包裹。
-2. **条件嵌套**：条件字符串中的双引号在 PowerShell 中推荐使用 `^` 替代 `"`。
-3. **条件字符串转义**：条件字符串使用 `\` 来进行转义，如果要使用 `\` 本身则使用 `\\`，若需要 `^` 或 `"` 则需要转义。 
-4. **逻辑或与逻辑与**：逻辑或和逻辑与在 PowerShell 中应使用 `|` 与 `&` 。
-5. **多条件关系**：多个 `-c` 条件为 **OR** 关系；单个 `-c` 内的 `&&` 为 AND 关系。
-6. **互斥输出模式**：`-oml`、`-omtl`、`-omc` 三者互斥，同时只能选一个。
-7. **输出目录**：使用 `-op` 时，目标目录必须已存在。
-8. **正则引擎**：`Match` 函数使用 RE2 正则表达式语法。
+2. **多条件关系**：多个 `-c` 条件为 **OR** 关系；单个 `-c` 内的 `&` 为 AND 关系。
+3. **互斥输出模式**：`-oml`、`-omtl`、`-omc` 三者互斥，同时只能选一个。
+4. **输出目录**：使用 `-op` 时，目标目录必须已存在。
+5. **正则引擎**：`Match` 函数使用 RE2 正则表达式语法。
+6. **日志输出**: `-ostd` 需要配合 `-or` 使用限制输出的日志量。

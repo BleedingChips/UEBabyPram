@@ -39,8 +39,10 @@ Commands:
   -e, --extension <ext>        Set custom output file extension
                                Use -h extension for detailed help
 
-  -oc, --output_count <num>    Set maximum number of output log lines
-                               Use -h output_count for detailed help
+  -or, --output_range <num1> <num2>
+                                Set index range of output log lines (0-indexed)
+                                Outputs lines with index >= num1, < num2
+                                Use -h output_range for detailed help
 
   -op, --out_path <directory>  Set output directory for filtered files
                                Use -h out_path for detailed help
@@ -86,7 +88,7 @@ namespace UEBabyPram::LogFilter
       -h output_mode_only_time_and_line  Show detailed help for -omtl
       -h output_separate_frame  Show detailed help for -osf
       -h extension     Show detailed help for -e / --extension
-      -h output_count  Show detailed help for -oc / --output_count
+      -h output_range  Show detailed help for -or / --output_range
       -h out_path      Show detailed help for -op / --out_path
       -h output_std    Show detailed help for -ostd / --output_std
       -h output_mode_custom     Show detailed help for -omc
@@ -120,11 +122,9 @@ namespace UEBabyPram::LogFilter
       Time <OP> <time>                     Filter by timestamp
       Level <OP> <level>                   Filter by log level
       Line <OP> <number>                   Filter by line number
-      Message.<FUNC>("<string>")           Filter by log message content
-      Category.<FUNC>("<string>")          Filter by log category
-      (<cond>) && (<cond>)                 Logical AND
+      Message.<FUNC>(^<string>^)           Filter by log message content
+      Category.<FUNC>(^<string>^)          Filter by log category
       (<cond>) & (<cond>)                  Logical AND
-      (<cond>) || (<cond>)                 Logical OR
       (<cond>) | (<cond>)                  Logical OR
       !<cond>                              Logical NOT
 
@@ -135,22 +135,25 @@ namespace UEBabyPram::LogFilter
     String functions (<FUNC>):
       StartWith  EndWith  Equal  Contains  Match (RE2 regex)
 
+    Note: ^ is used as a string delimiter in <string> arguments.
+    To represent a literal ^ character, use ^^.
+
     Log levels (ordered low to high):
       VeryVerbose  Verbose  Log  Display  Warning  Error  Fatal
 
     Time formats:
-      YYYY.MM.DD:HH.MM.SS:mmm      Full timestamp
-      MM.DD:HH.MM.SS:mmm           Omit year
-      DD:HH.MM.SS:mmm              Omit year and month
+      YYYY.MM.DD-HH.MM.SS:mmm      Full timestamp
+      YYYY.MM.DD-HH.MM.SS          Omit millisecond
+      HH.MM.SS:mmm                 Omit year, month and day
       HH.MM.SS                     Time only
 
     Examples:
       -c "Level >= Warning"
-      -c "Time >= 2021.10.11:10.00.00:000"
-      -c "Message.Contains(\"Error\") "
-      -c "Category.Match(\"Log.*\") "
+      -c "Time >= 2021.10.11-10.00.00:000"
+      -c "Message.Contains(^Error^) "
+      -c "Category.Match(^Log.*^) "
       -c "Line >= 100"
-      -c "Level >= Error && Message.Contains(\"Fatal\") "
+      -c "Level >= Error & Message.Contains(^Fatal^) "
       -c "Time < 12.00.00:000"
 )");
 		}
@@ -242,18 +245,19 @@ namespace UEBabyPram::LogFilter
       -e ".txt"
 )");
 		}
-		else if (topic == "oc" || topic == "output_count")
+		else if (topic == "or" || topic == "output_range")
 		{
 			Log::Log<comment_log, Log::LogLevel::Display, u8"{}">(u8R"(
-  -oc, --output_count <num>
+  -or, --output_range <num1> <num2>
 
-    Sets the maximum number of output log lines to produce.
-
-    Once the limit is reached, remaining matching lines are discarded.
+    Sets the index range of output log lines to produce.
+    Outputs lines whose 0-based index is >= num1 and < num2.
+    Lines outside this range are discarded.
 
     Usage:
-      -oc 100
-      -oc 1000
+      -or 0 100     Output first 100 matching lines (indices 0-99)
+      -or 1000 2000 Output lines with indices 1000-1999
+      -or 0 5       Output first 5 matching lines (indices 0-4)
 )");
 		}
 		else if (topic == "op" || topic == "out_path")
@@ -450,20 +454,25 @@ namespace UEBabyPram::LogFilter
 				}
 				++i;
 			}
-			else if (argv_string == "-oc" || argv_string == "--output_count")
+			else if (argv_string == "-or" || argv_string == "--output_range")
 			{
-				if (i + 1 < argc)
+				if (i + 2 < argc)
 				{
+					std::size_t min = 0;
+					std::size_t max = 0;
 					std::string_view sub_argv = argv[i + 1];
-					auto info = Potato::Format::DirectDeformat(sub_argv, setting.max_output_count);
-					if (!info)
+					std::string_view sub_argv2 = argv[i + 2];
+					auto info = Potato::Format::DirectDeformat(sub_argv, min);
+					auto info2 = Potato::Format::DirectDeformat(sub_argv2, max);
+					if (!info || !info2 || min > max)
 					{
-						Log::Log<comment_log, Log::LogLevel::Error, L"-omc or --output_mode_count require a number">(sub_argv);
+						Log::Log<comment_log, Log::LogLevel::Error, L"-or or --output_range require a valid range (num1 <= num2)">();
 						return -1;
 					}
+					setting.output_span = {min, max};
 				}
 				else {
-					Log::Log<comment_log, Log::LogLevel::Error, L"Unsupport command -oc --output_count, use -h output_count for detailed help">();
+					Log::Log<comment_log, Log::LogLevel::Error, L"Unsupport command -or --output_range, use -h output_range for detailed help">();
 					return -1;
 				}
 				++i;

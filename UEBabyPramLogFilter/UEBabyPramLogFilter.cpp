@@ -7,9 +7,9 @@ namespace UEBabyPram::LogFilter
 {
 	static constexpr std::u8string_view ebnf_string = u8R"(
 		$:='\s+';
-		INT:='[1-9][0-9]*' : [1];
-		STR:='\"(.*?[^\\])\"' : [2];
-		STR:='\^(.*?[^\\])\^' : [2];
+		INT:='[0-9]+' : [1];
+		STR:='\^(.*?[^\^])\^' : [2];
+		STR:='\^(\^)\^' : [2];
 		COMPARE:='<' : [4];
 		COMPARE:='<=' : [5];
 		COMPARE:='==' : [6];
@@ -30,8 +30,8 @@ namespace UEBabyPram::LogFilter
 		LOGLEVEL:='Fatal':[16];
 		%%%%
 		$:=<Exp>;
-		<TIME>:=INT '.' INT '.' INT ':' INT '.' INT '.' INT ':' INT : [1];
-			:=INT '.' INT '.' INT ':' INT '.' INT '.' INT  : [1];
+		<TIME>:=INT '.' INT '.' INT '-' INT '.' INT '.' INT ':' INT : [1];
+			:=INT '.' INT '.' INT '-' INT '.' INT '.' INT  : [1];
 			:=INT '.' INT '.' INT  ':' INT : [1];
 			:=INT '.' INT '.' INT : [1];
 		<STAT>:='Time' COMPARE <TIME> : [10];
@@ -41,9 +41,7 @@ namespace UEBabyPram::LogFilter
 			:='Category' '.'  STRING_COMPARE  '(' STR ')' : [14];
 			:= '(' <STAT> ')' : [20];
 			:= '!' <STAT> 21 22: [40];
-			:= <STAT> '&&' <STAT>  : [21];
 			:= <STAT> '&' <STAT>  : [21];
-			:= <STAT> '||' <STAT>  : [22];
 			:= <STAT> '|' <STAT>  : [22];
 		<Exp>:=<STAT> ';' :[99];
 			:=<STAT> :[99];
@@ -282,7 +280,21 @@ namespace UEBabyPram::LogFilter
 			}
 			else if (mask == 2)
 			{
-				std::u8string value{ syminfo.TokenIndex.Slice(statement) };
+				auto string_view = syminfo.TokenIndex.Slice(statement);
+				std::u8string value;
+				for (std::size_t index =0; index < string_view.size(); ++index)
+				{
+					auto ite = string_view[index];
+					if (ite == u8'^' && index + 1 < string_view.size())
+					{
+						auto ite2 = string_view[index + 1];
+						value.push_back(ite2);
+						++index;
+					}
+					else {
+						value.push_back(ite);
+					}
+				}
 				return value;
 			}
 			else if (mask >= 4 && mask <= 8)
