@@ -256,7 +256,7 @@ int main(int argc, char* argv[])
 						{
 							std::format_to(
 								Potato::Encode::FormatterOutputIteratorWrapper(std::back_insert_iterator(formated_line)),
-								"line{}-{}",
+								"line-{}:{}",
 								log_line.line.Begin(),
 								Potato::Log::AddLogStringWrapper(log_line.total_str)
 							);
