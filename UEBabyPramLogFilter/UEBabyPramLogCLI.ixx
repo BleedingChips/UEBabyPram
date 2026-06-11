@@ -36,6 +36,7 @@ export namespace UEBabyPram::LogFilter
 		OutputMode mode = OutputMode::NORMAL;
 		bool output_with_separate_frame = false;
 		Potato::Misc::IndexSpan<> output_span = { 0, std::numeric_limits<std::size_t>::max() };
+		bool not_repeat = false;
 	};
 
 	constexpr auto comment_log = TMP::TypeString{u"CLI"};

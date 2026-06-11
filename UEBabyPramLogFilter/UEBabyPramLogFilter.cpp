@@ -158,7 +158,7 @@ namespace UEBabyPram::LogFilter
 				if (re2_ref->Match(
 					std::string_view(reinterpret_cast<char const*>(log.property.category.data()), log.property.category.size()),
 					0,
-					log.str.size(),
+					log.property.category.size(),
 					re2::RE2::Anchor::UNANCHORED,
 					nullptr,
 					0
@@ -556,6 +556,9 @@ namespace UEBabyPram::LogFilter
 						else {
 							string.push_back(ite);
 						}
+					}
+					else {
+						string.push_back(ite);
 					}
 				}
 				return Filter::ElementType{string};

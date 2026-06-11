@@ -33,8 +33,11 @@ Commands:
                                Use -h output_mode_only_time_and_line for detailed help
 
   -osf, --output_separate_frame
-                               Enable output with frame count separators
-                               Use -h output_separate_frame for detailed help
+                                Enable output with frame count separators
+                                Use -h output_separate_frame for detailed help
+
+  -nr, --not_repeat            Suppress duplicate output lines
+                                Use -h not_repeat for detailed help
 
   -e, --extension <ext>        Set custom output file extension
                                Use -h extension for detailed help
@@ -87,6 +90,7 @@ namespace UEBabyPram::LogFilter
       -h output_mode_line       Show detailed help for -oml
       -h output_mode_only_time_and_line  Show detailed help for -omtl
       -h output_separate_frame  Show detailed help for -osf
+      -h not_repeat    Show detailed help for -nr / --not_repeat
       -h extension     Show detailed help for -e / --extension
       -h output_range  Show detailed help for -or / --output_range
       -h out_path      Show detailed help for -op / --out_path
@@ -229,6 +233,18 @@ namespace UEBabyPram::LogFilter
           [2021.10.11-11.53.12:092][  0]LogConfig2: XXXX
           ===[1]Frame  [10]ms===
           [2021.10.11-11.53.12:102][  2]LogConfig2: XXXX
+)");
+		}
+		else if (topic == "nr" || topic == "not_repeat")
+		{
+			Log::Log<comment_log, Log::LogLevel::Display, u8"{}">(u8R"(
+  -nr, --not_repeat
+
+    Suppresses duplicate output lines. When enabled, each unique output
+    line is printed only once; subsequent identical lines are skipped.
+
+    Usage:
+      -nr
 )");
 		}
 		else if (topic == "e" || topic == "extension")
@@ -550,6 +566,15 @@ namespace UEBabyPram::LogFilter
 					Log::Log<comment_log, Log::LogLevel::Error, L"Unsupport command -p --path, use -h path for detailed help">();
 					return -1;
 				}
+			}
+			else if (argv_string == "-nr" || argv_string == "-not_repeat")
+			{
+				setting.not_repeat = true;
+			}
+			else
+			{
+				Log::Log<comment_log, Log::LogLevel::Error, L"Unsupport command {}">(argv_string);
+				return -1;
 			}
 		}
 		return 0;

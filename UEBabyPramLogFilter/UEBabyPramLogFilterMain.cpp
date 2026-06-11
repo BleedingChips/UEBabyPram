@@ -162,6 +162,9 @@ int main(int argc, char* argv[])
 					UEBabyPram::LogParser::LogLine::TimeT last_frame_time;
 					std::optional<std::size_t> last_frame_count;
 					std::u8string formated_line;
+					std::u8string formated_this_line;
+					std::u8string sperated_line;
+					std::u8string single_sperated_line;
 					std::chrono::system_clock::time_point last_log_time = std::chrono::system_clock::now();
 					struct LineCount
 					{
@@ -173,8 +176,13 @@ int main(int argc, char* argv[])
 					std::optional<std::size_t> min_line_outputed;
 					std::size_t max_line = 0;
 					std::size_t max_line_outputed = 0;
+					std::vector<std::u8string> repeated_string;
 					UEBabyPram::LogParser::ForeachLogLine(plain_reader, [&](UEBabyPram::LogParser::LogLine log_line) -> bool {
-
+						
+						formated_this_line.clear();
+						sperated_line.clear();
+						single_sperated_line.clear();
+						
 						if (processor)
 						{
 							auto re = processor.Detect(log_line);
@@ -187,15 +195,79 @@ int main(int argc, char* argv[])
 						{
 							min_line = log_line.line.Begin();
 						}
-						max_line = log_line.line.Begin();
+						max_line = log_line.line.Begin();			
 
-						auto old_count = count;
-						count += 1;
-
-						if (!setting.output_span.IsInclude(old_count))
+						if (!setting.output_span.IsInclude(count))
 						{
 							return true;
 						}
+
+						if (setting.mode == UEBabyPram::LogFilter::OutputMode::NORMAL)
+						{
+							formated_this_line += log_line.total_str;
+						}
+						else if(setting.mode == UEBabyPram::LogFilter::OutputMode::NORMAL_WITH_LINE) 
+						{
+							std::format_to(
+								Potato::Encode::FormatterOutputIteratorWrapper(std::back_insert_iterator(formated_this_line)),
+								"line-{}:{}",
+								log_line.line.Begin(),
+								Potato::Log::AddLogStringWrapper(log_line.total_str)
+							);
+						}
+						else if (setting.mode == UEBabyPram::LogFilter::OutputMode::ONLY_TIME_AND_LINE)
+						{
+							if (!log_line.property.time.year.empty())
+							{
+								std::format_to(
+									Potato::Encode::FormatterOutputIteratorWrapper(std::back_insert_iterator(formated_this_line)),
+									"[Time:({}) Line:({})]\r\n",
+									Potato::Log::AddLogStringWrapper(log_line.property.time.total),
+									log_line.line.Begin()
+								);
+							}
+							else {
+								std::format_to(
+									Potato::Encode::FormatterOutputIteratorWrapper(std::back_insert_iterator(formated_this_line)),
+									"[Time:(---) Line:({})]\r\n",
+									log_line.line.Begin()
+								);
+							}
+						}
+						else if (setting.mode == UEBabyPram::LogFilter::OutputMode::CUSTOM)
+						{
+							auto string = formatter.Format(log_line);
+							if (string.has_value())
+							{
+								std::format_to(
+									Potato::Encode::FormatterOutputIteratorWrapper(std::back_insert_iterator(formated_this_line)),
+									"{}\r\n",
+									Potato::Log::AddLogStringWrapper(*string)
+								);
+							}
+						}
+
+						if (setting.not_repeat)
+						{
+							bool repeat = false;
+							for (auto& ite : repeated_string)
+							{
+								if (ite == formated_this_line)
+								{
+									repeat = true;
+									break;
+								}
+							}
+							if (repeat)
+							{
+								return true;
+							}
+							else {
+								repeated_string.push_back(formated_this_line);
+							}
+						}
+
+						count += 1;
 
 						if (!min_line_outputed.has_value())
 						{
@@ -217,10 +289,8 @@ int main(int argc, char* argv[])
 										std::int64_t count = static_cast<std::int64_t>(*fc) - static_cast<std::int64_t>(*last_frame_count);
 										auto dur = std::chrono::duration_cast<std::chrono::milliseconds>(*time - last_frame_time);
 
-										std::u8string sperate;
-
 										std::format_to(
-											Potato::Encode::FormatterOutputIteratorWrapper(std::back_insert_iterator(sperate)),
+											Potato::Encode::FormatterOutputIteratorWrapper(std::back_insert_iterator(single_sperated_line)),
 											"===[{}]Frame  [{}]ms===",
 											count, dur.count()
 										);
@@ -228,15 +298,15 @@ int main(int argc, char* argv[])
 										{
 											for (std::size_t i = 0; i < 10; ++i)
 											{
-												formated_line += u8"\t\t\t\t";
-												formated_line += sperate;
-												formated_line += u8"\t\t\t\t";
+												sperated_line += u8"\t\t\t\t";
+												sperated_line += single_sperated_line;
+												sperated_line += u8"\t\t\t\t";
 											}
 										}
 										else {
-											formated_line += sperate;
+											sperated_line += single_sperated_line;
 										}
-										formated_line += u8"\r\n";
+										sperated_line += u8"\r\n";
 										last_frame_count = *fc;
 										last_frame_time = *time;
 									}
@@ -248,50 +318,8 @@ int main(int argc, char* argv[])
 							}
 						}
 
-						if (setting.mode == UEBabyPram::LogFilter::OutputMode::NORMAL)
-						{
-							formated_line += log_line.total_str;
-						}
-						else if(setting.mode == UEBabyPram::LogFilter::OutputMode::NORMAL_WITH_LINE) 
-						{
-							std::format_to(
-								Potato::Encode::FormatterOutputIteratorWrapper(std::back_insert_iterator(formated_line)),
-								"line-{}:{}",
-								log_line.line.Begin(),
-								Potato::Log::AddLogStringWrapper(log_line.total_str)
-							);
-						}
-						else if (setting.mode == UEBabyPram::LogFilter::OutputMode::ONLY_TIME_AND_LINE)
-						{
-							if (!log_line.property.time.year.empty())
-							{
-								std::format_to(
-									Potato::Encode::FormatterOutputIteratorWrapper(std::back_insert_iterator(formated_line)),
-									"[Time:({}) Line:({})]\r\n",
-									Potato::Log::AddLogStringWrapper(log_line.property.time.total),
-									log_line.line.Begin()
-								);
-							}
-							else {
-								std::format_to(
-									Potato::Encode::FormatterOutputIteratorWrapper(std::back_insert_iterator(formated_line)),
-									"[Time:(---) Line:({})]\r\n",
-									log_line.line.Begin()
-								);
-							}
-						}
-						else if (setting.mode == UEBabyPram::LogFilter::OutputMode::CUSTOM)
-						{
-							auto string = formatter.Format(log_line);
-							if (string.has_value())
-							{
-								std::format_to(
-									Potato::Encode::FormatterOutputIteratorWrapper(std::back_insert_iterator(formated_line)),
-									"{}",
-									Potato::Log::AddLogStringWrapper(*string)
-								);
-							}
-						}
+						formated_line += sperated_line;
+						formated_line += formated_this_line;
 
 						if (setting.target == UEBabyPram::LogFilter::OutputTarget::FILE)
 						{

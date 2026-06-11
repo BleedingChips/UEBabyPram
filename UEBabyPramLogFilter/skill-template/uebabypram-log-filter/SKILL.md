@@ -50,6 +50,7 @@ UEBabyPramLogFilter 是一个用于过滤和格式化 Unreal Engine（UE4/UE5）
 | `-omtl, --output_mode_only_time_and_line` | 输出模式：仅显示时间戳和行号（与 `-oml`、`-omc` 互斥） |
 | `-omc, --output_mode_custom <regex> <format>` | 自定义输出模式：用正则匹配并格式化（与 `-oml`、`-omtl` 互斥，可多次使用代表多个独立模式） |
 | `-osf, --output_separate_frame` | 在帧之间插入帧计数分隔线 |
+| `-nr, --not_repeat` | 抑制重复输出行，每行唯一内容只输出一次 |
 | `-e, --extension <ext>` | 自定义输出文件扩展名（默认 `.filterout`） |
 | `-or, --output_range <num1> <num2>` | 设置已被筛选完成的输出日志行的索引范围（0-indexed，输出索引 >= num1 且 < num2 的条数） |
 | `-op, --out_path <directory>` | 设置输出目录 |
@@ -147,7 +148,12 @@ UEBabyPramLogFilter 是一个用于过滤和格式化 Unreal Engine（UE4/UE5）
 
 ### 使用自定义格式提取数据
 ```powershell
-& "...\UEBabyPramLogFilter.exe" -f "MyGame.log" -omc "Loc:\[X=([-0-9\.]+) Y=([-0-9\.]+) Z=([-0-9\.]+)\]" "(x={1} y={2} z={3})" -ostd
+& "...\UEBabyPramLogFilter.exe" -f "MyGame.log" -omc "Loc:\[X=([-0-9\.]+) Y=([-0-9\.]+) Z=([-0-9\.]+)\]" "(x={1} y={2} z={3})"
+```
+
+### 使用自定义格式提取日志的种类
+```powershell
+& "...\UEBabyPramLogFilter.exe" -f "MyGame.log" -omc ".*" "{Category}"
 ```
 
 ### 限制输出行数范围并输出到 stdout
@@ -163,6 +169,16 @@ UEBabyPramLogFilter 是一个用于过滤和格式化 Unreal Engine（UE4/UE5）
 ### 启用帧分隔
 ```powershell
 & "...\UEBabyPramLogFilter.exe" -f "MyGame.log" -c "Level >= Warning" -osf
+```
+
+### 过滤重复日志行
+```powershell
+& "...\UEBabyPramLogFilter.exe" -f "MyGame.log" -c "Level >= Error" -nr
+```
+
+### 查找所有分类包含Log的所有分类，并输出到 stdout
+```powershell
+& "...\UEBabyPramLogFilter.exe" -f "MyGame.log" -c "Category.Match(^Log^)" -omc ".*" "{Category}" -ostd -nr
 ```
 
 ---
