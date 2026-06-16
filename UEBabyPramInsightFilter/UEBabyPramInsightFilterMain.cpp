@@ -36,8 +36,8 @@ int main(int argc, char* argv[])
 		Potato::Document::DocumentReader reader(insight_path);
 		if (reader)
 		{
-			UEBabyPram::InsightParser::InsightContext context;
-			UEBabyPram::InsightParser::ForEachInsight(reader, context);
+			//UEBabyPram::InsightParser::InsightContext context;
+			//UEBabyPram::InsightParser::ForEachInsight(reader, context);
 		}
 	}
 

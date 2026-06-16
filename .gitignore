@@ -443,3 +443,8 @@ vsxmake*/
 
 # generated skill
 Skills/*
+
+# UnrealEngine Temporary
+MiniUnrealEngine/Core/*
+MiniUnrealEngine/TraceAnalysis/*
+MiniUnrealEngine/TraceLog/*

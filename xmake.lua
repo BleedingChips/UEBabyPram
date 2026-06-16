@@ -1,5 +1,8 @@
-add_rules("mode.debug", "mode.release", "mode.releasedbg", "mode.profile")
-set_languages("cxxlatest")
+
+if os.scriptdir() == os.projectdir() then
+    add_rules("mode.debug", "mode.release", "mode.releasedbg", "mode.profile")
+    set_languages("cxxlatest")
+end
 
 add_requires("ctre")
 add_requires("lz4")
@@ -8,12 +11,14 @@ if os.scriptdir() == os.projectdir() then
     includes("../Potato/")
 end
 
+includes("MiniUnrealEngine/")
+
 target("UEBabyPram")
     set_kind("static")
     add_files("UEBabyPram/**.cpp")
     add_files("UEBabyPram/**.ixx", {public=true})
-    add_includedirs("UEBabyPram/InsightProtocol/")
-    add_headerfiles("UEBabyPram/InsightProtocol/*.h")
+    --add_includedirs("UEBabyPram/InsightProtocol/")
+    --add_headerfiles("UEBabyPram/InsightProtocol/*.h")
     add_deps("Potato")
     add_packages("ctre")
     add_packages("lz4")
@@ -87,6 +92,7 @@ if os.scriptdir() == os.projectdir() then
         add_deps("Potato")
         add_deps("UEBabyPram")
         add_packages("re2")
+        add_deps("UE_TraceAnalysis")
     target_end()
 end
 

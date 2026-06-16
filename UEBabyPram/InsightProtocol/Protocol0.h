@@ -3,10 +3,11 @@
 #pragma once
 
 // HEADER_UNIT_SKIP - Not included directly
+#include <stdint.h>
+
 
 namespace UE {
 namespace Trace {
-
 #if defined(TRACE_PRIVATE_PROTOCOL_0)
 inline
 #endif

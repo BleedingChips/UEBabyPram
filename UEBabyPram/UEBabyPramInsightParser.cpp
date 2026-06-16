@@ -1,6 +1,6 @@
 module;
 #include <cassert>
-
+#include "InsightProtocol/Protocol7.h"
 module UEBabyPramInsightParser;
 
 import Potato;
@@ -9,6 +9,7 @@ import UEBabyPramInsightDefine;
 namespace UEBabyPram::InsightParser
 {
 	using namespace Potato;
+	using namespace UE::Trace;
 
 	bool MetaDataStage(Potato::Streamer::StreamRandomReader& reader, InsightContext& context, Potato::Log::LogPrinter& printer)
 	{
