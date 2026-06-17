@@ -1,3 +1,3 @@
 export module UEBabyPram;
 export import UEBabyPramLogParser;
-export import UEBabyPramInsightParser;
+export import UEBabyPramInsight;

@@ -1,0 +1,3 @@
+export module UEBabyPramInsight;
+export import UEBabyPramInsightAnalyzer;
+export import UEBabyPramInsightEngine;

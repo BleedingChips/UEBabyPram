@@ -5,6 +5,7 @@ import std;
 
 int main(int argc, char* argv[])
 {
+
 	std::filesystem::path insight_path;
 
 	for (std::size_t i = 0; i < argc; ++i)
