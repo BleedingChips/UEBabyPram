@@ -1,5 +1,5 @@
 module;
-
+#include <cassert>
 export module UEBabyPramInsightDefine;
 
 import std;
@@ -28,6 +28,38 @@ export namespace UEBabyPram::InsightParser
 		std::int64_t
 	>;
 
+	namespace FMath
+	{
+		template<class T1, class T2>
+		auto Max(T1&& t1, T2&& t2)
+		{
+			return std::max(std::forward<T1>(t1), std::forward<T2>(t2));
+		}
+
+		template<class T1, class T2>
+		auto Min(T1&& t1, T2&& t2)
+		{
+			return std::min(std::forward<T1>(t1), std::forward<T2>(t2));
+		}
+
+		constexpr inline uint32 CountLeadingZeros(uint32 Value)
+		{
+			return std::countl_zero(Value);
+		}
+
+		inline uint32 CeilLogTwo(uint32 Arg)
+		{
+			// if Arg is 0, change it to 1 so that we return 0
+			Arg = Arg ? Arg : 1;
+			return 32 - CountLeadingZeros(Arg - 1);
+		}
+
+		inline uint32 RoundUpToPowerOfTwo(uint32 Arg)
+		{
+			return 1u << CeilLogTwo(Arg);
+		}
+	}
+
 	enum class EAllowShrinking : uint8
 	{
 		No,
@@ -40,7 +72,6 @@ export namespace UEBabyPram::InsightParser
 
 	using ANSICHAR = char;
 	using WIDECHAR = wchar_t;
-	using FStreamReader = Potato::Streamer::StreamRandomReader;
 
 	template<std::size_t Count>
 	struct TInlineAllocator
@@ -89,6 +120,37 @@ export namespace UEBabyPram::InsightParser
 		}
 	};
 
+	template<typename T, class PREDICATE_CLASS>
+	struct TDereferenceWrapper
+	{
+		const PREDICATE_CLASS& Predicate;
+
+		TDereferenceWrapper(const PREDICATE_CLASS& InPredicate)
+			: Predicate(InPredicate) {
+		}
+
+		/** Pass through for non-pointer types */
+		bool operator()(T& A, T& B) { return Predicate(A, B); }
+		bool operator()(const T& A, const T& B) const { return Predicate(A, B); }
+	};
+	/** Partially specialized version of the above class */
+	template<typename T, class PREDICATE_CLASS>
+	struct TDereferenceWrapper<T*, PREDICATE_CLASS>
+	{
+		const PREDICATE_CLASS& Predicate;
+
+		TDereferenceWrapper(const PREDICATE_CLASS& InPredicate)
+			: Predicate(InPredicate) {
+		}
+
+		/** Dereference pointers */
+		bool operator()(T* A, T* B) const
+		{
+			return Predicate(*A, *B);
+		}
+	};
+
+
 	template<typename Type, typename Allocator = void>
 	struct TArray : public std::vector<Type>
 	{
@@ -100,9 +162,12 @@ export namespace UEBabyPram::InsightParser
 		auto Num() const { return static_cast<std::int32_t>(Super::size()); }
 		decltype(auto) Last() { return *Super::rbegin(); }
 
-		template<typename OType>
-		void Add(OType&& otype) {
-			return Super::push(std::move(otype));
+		void Add(Type&& otype) {
+			Super::emplace_back(std::move(otype));
+		};
+
+		void Add(Type const& otype) {
+			Super::emplace_back(otype);
 		};
 
 		auto GetData() { return Super::data(); }
@@ -125,7 +190,7 @@ export namespace UEBabyPram::InsightParser
 				Super::resize(size);
 			}
 		}
-		void SetNum(std::size_t Size)
+		void SetNum(std::size_t Size, EAllowShrinking Shrinking = EAllowShrinking::Default)
 		{
 			Super::resize(Size);
 		}
@@ -160,14 +225,86 @@ export namespace UEBabyPram::InsightParser
 			Super::insert(Super::begin() + InIndex, std::ranges::all_of(InitList));
 			return InIndex;
 		}
+
+		template<class FuncT>
+		void RemoveAll(FuncT&& func)
+		{
+			Super::erase(
+				std::remove_if(Super::begin(), Super::end(), std::forward<FuncT>(func)),
+				Super::end()
+			);
+		}
+
+		template<class FuncT>
+		void RemoveAllSwap(FuncT&& func)
+		{
+			RemoveAll(std::forward<FuncT>(func));
+		}
+
+		bool IsEmpty() const { return Super::empty(); }
+
+		template <class PREDICATE_CLASS>
+		void Heapify(const PREDICATE_CLASS& Predicate)
+		{
+			TDereferenceWrapper<Type, PREDICATE_CLASS> PredicateWrapper(Predicate);
+			Algo::Heapify(*this, PredicateWrapper);
+		}
+
+		template<typename ...OT>
+		int32 Emplace(OT&& ...ot)
+		{
+			auto old_size = Super::size();
+			Super::emplace_back(std::forward<OT>(ot)...);
+			return old_size;
+		}
+
+		const Type& HeapTop() const
+		{
+			return (*this)[0];
+		}
+
+		template <class PREDICATE_CLASS>
+		int32 HeapPush(Type InItem, const PREDICATE_CLASS& Predicate)
+		{
+			// Add at the end, then sift up
+			this->Add(std::move(InItem));
+			TDereferenceWrapper<Type, PREDICATE_CLASS> PredicateWrapper(Predicate);
+			int32 Result = AlgoImpl::HeapSiftUp(GetData(), (int32)0, Num() - 1, FIdentityFunctor(), PredicateWrapper);
+
+			return Result;
+		}
+
+		template <class PREDICATE_CLASS>
+		void HeapPopDiscard(const PREDICATE_CLASS& Predicate, EAllowShrinking AllowShrinking = EAllowShrinking::Default)
+		{
+			Super::erase(Super::begin());
+			TDereferenceWrapper<Type, PREDICATE_CLASS> PredicateWrapper(Predicate);
+			AlgoImpl::HeapSiftDown(GetData(), (int32)0, Num(), FIdentityFunctor(), PredicateWrapper);
+		}
+
+		void Empty()
+		{
+			Super::clear();
+		}
+
+		Type& Add_GetRef(Type type)
+		{
+			Super::emplace_back(std::move(type));
+			return *Super::rbegin();
+		}
 	};
 
 	using std::memcpy;
+	using std::memmove;
 
 	struct FMemory
 	{
-		static void* Malloc(std::size_t ByteSize) { return new std::byte[ByteSize]; }
-		static void Free(void* Memory) { return delete Memory; }
+		static void* Malloc(std::size_t ByteSize, std::size_t Aligmas = alignof(std::nullptr_t)) 
+		{
+			assert(Aligmas <= alignof(std::nullptr_t));
+			return std::malloc(ByteSize);
+		}
+		static void Free(void* Memory) { return std::free(Memory); }
 		static void Memcpy(void* Target, void const* Source, std::size_t Size)
 		{
 			std::copy_n(
@@ -175,6 +312,11 @@ export namespace UEBabyPram::InsightParser
 				Size,
 				reinterpret_cast<std::byte*>(Target)
 			);
+		}
+
+		static void* Realloc(void* Original, SIZE_T Count, uint32 Alignment = alignof(std::nullptr_t))
+		{
+			return std::realloc(Original, Count);
 		}
 	};
 

@@ -1,23 +1,32 @@
 module;
-#include <cassert>
 #include <lz4.h>
+#define UE_LOG(X1, ...)
+module UEBabyPramInsightTidPacketTransport;
 
-module UEBabyPramInsightTransport;
-
+import std;
 import Potato;
 import UEBabyPramInsightDefine;
+import UEBabyPramInsightStreamReader;
+
+namespace UE::Trace::Private
+{
+	using namespace UEBabyPram::InsightParser;
+	int32 Decode(const void* Src, int32 SrcSize, void* Dest, int32 DestSize)
+	{
+		return LZ4_decompress_safe((const char*)Src, (char*)Dest, SrcSize, DestSize);
+	}
+}
+
 
 namespace UEBabyPram::InsightParser
 {
-	using namespace Potato;
-
 	bool FTidPacketTransport::IsEmpty() const
 	{
-		if (Threads.size() > 0)
+		if (Threads.Num() > 0)
 		{
 			for (const FThreadStream& Thread : Threads)
 			{
-				if (!Thread.Buffer.empty())
+				if (!Thread.Buffer.IsEmpty())
 				{
 					return false;
 				}
@@ -29,32 +38,26 @@ namespace UEBabyPram::InsightParser
 	////////////////////////////////////////////////////////////////////////////////
 	FTidPacketTransport::EReadPacketResult FTidPacketTransport::ReadPacket()
 	{
-		FTidPacketBase packet_base;
-		auto readed_size = Reader->StreamRead(&packet_base);
+		using namespace UE::Trace::Private;
 
-		if (readed_size != sizeof(FTidPacketBase))
+		const auto* PacketBase = GetPointer<FTidPacketBase>();
+		if (PacketBase == nullptr)
 		{
 			return EReadPacketResult::NeedMoreData;
 		}
 
-		Reader->StreamSeek(-sizeof(FTidPacketBase));
-
-		std::pmr::vector<std::byte> datas;
-		datas.resize(packet_base.PacketSize);
-		auto readed = Reader->StreamRead(datas.data(), datas.size());
-
-		if (!readed || readed != datas.size())
+		if (GetPointer<uint8>(PacketBase->PacketSize) == nullptr)
 		{
 			return EReadPacketResult::NeedMoreData;
 		}
-
-		auto* PacketBase = reinterpret_cast<FTidPacketBase*>(datas.data());
 
 #if UE_TRACE_ANALYSIS_DEBUG
 		++NumPackets;
 		TotalPacketHeaderSize += sizeof(FTidPacketBase);
 		TotalPacketSize += PacketBase->PacketSize;
 #endif // UE_TRACE_ANALYSIS_DEBUG
+
+		FTransport::Advance(PacketBase->PacketSize);
 
 		uint32 ThreadId = PacketBase->ThreadId & FTidPacketBase::ThreadIdMask;
 
@@ -84,7 +87,7 @@ namespace UEBabyPram::InsightParser
 		uint32 DataSize = PacketBase->PacketSize - sizeof(FTidPacketBase);
 		if (PacketBase->ThreadId & FTidPacketBase::EncodedMarker)
 		{
-			const FTidPacketEncoded* Packet = (const FTidPacketEncoded*)PacketBase;
+			const auto* Packet = (const FTidPacketEncoded*)PacketBase;
 			uint16 DecodedSize = Packet->DecodedSize;
 
 #if UE_TRACE_ANALYSIS_DEBUG
@@ -111,18 +114,11 @@ namespace UEBabyPram::InsightParser
 
 			if (DataSize != 0)
 			{
-				auto old_size = Thread->Buffer.size();
-				Thread->Buffer.resize(old_size + DecodedSize);
-				uint8* Dest = reinterpret_cast<uint8*>(Thread->Buffer.data() + old_size);
-				auto ResultSize = LZ4_decompress_safe(
-					reinterpret_cast<char const*>(Packet->Data), 
-					reinterpret_cast<char*>(Dest),
-					DataSize, 
-					DecodedSize
-					);
-				
+				uint8* Dest = Thread->Buffer.Append(DecodedSize);
+				int32 ResultSize = UE::Trace::Private::Decode(Packet->Data, DataSize, Dest, DecodedSize);
 				if (int32(DecodedSize) != ResultSize)
 				{
+					UE_LOG(LogCore, Error, TEXT("Unable to decompress packet; tid=%u, expected %u bytes, but decoded %d bytes!"), ThreadId, uint32(DecodedSize), ResultSize);
 					return EReadPacketResult::ReadError;
 				}
 
@@ -137,6 +133,7 @@ namespace UEBabyPram::InsightParser
 			}
 			else // DataSize == 0
 			{
+				UE_LOG(LogCore, Warning, TEXT("Unable to decompress packet; tid=%u, expected to decompress %u bytes, but the packet is empty!"), ThreadId, uint32(DecodedSize));
 			}
 		}
 		else // not encoded
@@ -158,7 +155,7 @@ namespace UEBabyPram::InsightParser
 			// for debugging purposes only
 			//UE_LOG(LogCore, Log, TEXT("Uncompressed packet (tid=%u): %u bytes"), ThreadId, DataSize);
 
-			Thread->Buffer.append_range(std::span((std::byte*)(PacketBase + 1), DataSize));
+			Thread->Buffer.Append((uint8*)(PacketBase + 1), DataSize);
 
 #if UE_TRACE_ANALYSIS_DEBUG && UE_TRACE_ANALYSIS_DEBUG_LEVEL >= 4
 			UE_TRACE_ANALYSIS_DEBUG_BeginStringBuilder();
@@ -192,7 +189,7 @@ namespace UEBabyPram::InsightParser
 		uint32	ThreadId,
 		bool	bAddIfNotFound)
 	{
-		uint32 ThreadCount = Threads.size();
+		uint32 ThreadCount = Threads.Num();
 		for (uint32 i = 0; i < ThreadCount; ++i)
 		{
 			if (Threads[i].ThreadId == ThreadId)
@@ -208,7 +205,7 @@ namespace UEBabyPram::InsightParser
 
 		FThreadStream Thread;
 		Thread.ThreadId = ThreadId;
-		Threads.push_back(Thread);
+		Threads.Add(Thread);
 		return &(Threads[ThreadCount]);
 	}
 
@@ -221,13 +218,10 @@ namespace UEBabyPram::InsightParser
 			Result = ReadPacket();
 		} while (Result == EReadPacketResult::Continue);
 
-		Threads.erase(
-			std::remove_if(Threads.begin(), Threads.end(), [](const FThreadStream& Thread)
-				{
-					return (Thread.ThreadId <= ETransportTid::Importants) ? false : Thread.Buffer.empty();
-				}),
-			Threads.end()
-		);
+		Threads.RemoveAll([](const FThreadStream& Thread)
+			{
+				return (Thread.ThreadId <= ETransportTid::Importants) ? false : Thread.Buffer.IsEmpty();
+			});
 
 #if UE_TRACE_ANALYSIS_DEBUG
 		DebugUpdate();
@@ -263,7 +257,7 @@ namespace UEBabyPram::InsightParser
 	}
 
 	////////////////////////////////////////////////////////////////////////////////
-	void FTidPacketTransport::DebugBegin(Log::LogPrinter&)
+	void FTidPacketTransport::DebugBegin()
 	{
 #if UE_TRACE_ANALYSIS_DEBUG
 		UE_TRACE_ANALYSIS_DEBUG_LOG("FTidPacketTransport::DebugBegin()");
@@ -271,7 +265,7 @@ namespace UEBabyPram::InsightParser
 	}
 
 	////////////////////////////////////////////////////////////////////////////////
-	void FTidPacketTransport::DebugEnd(Log::LogPrinter&)
+	void FTidPacketTransport::DebugEnd()
 	{
 #if UE_TRACE_ANALYSIS_DEBUG
 		Threads.RemoveAll([](const FThreadStream& Thread)
@@ -347,14 +341,13 @@ namespace UEBabyPram::InsightParser
 	////////////////////////////////////////////////////////////////////////////////
 	uint32 FTidPacketTransport::GetThreadCount() const
 	{
-		return uint32(Threads.size());
+		return uint32(Threads.Num());
 	}
 
 	////////////////////////////////////////////////////////////////////////////////
-	std::span<std::byte> FTidPacketTransport::GetThreadStream(uint32 Index)
+	FStreamReader* FTidPacketTransport::GetThreadStream(uint32 Index)
 	{
-		auto& ref = Threads[Index].Buffer;
-		return std::span<std::byte>(ref.data(), ref.size());
+		return &(Threads[Index].Buffer);
 	}
 
 	////////////////////////////////////////////////////////////////////////////////

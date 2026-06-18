@@ -3,7 +3,8 @@ module;
 #include <cassert>
 #include "Protocol.h"
 
-#define check(Condition) assert(Condition)
+#define check(Condition, ...) assert(Condition)
+#define checkf(Condition, ...) assert(Condition)
 
 module UEBabyPramInsightEngine;
 
@@ -11,9 +12,17 @@ import std;
 import Potato;
 import UEBabyPramInsightDefine;
 import UEBabyPramInsightAlgo;
+import UEBabyPramInsightTransport;
+import UEBabyPramInsightTidPacketTransport;
+import UEBabyPramInsightTraceTransport;
+import UEBabyPramInsightAnalyzer;
 
 #define ANSITEXTVIEW(String) FAnsiStringView{String}
 #define UE_TRACE_ANALYSIS_DEBUG_LOG(String, ...)
+#define TEXT(Str) L##Str
+#define ensure(Cond) (assert(Cond), (Cond))
+#define UNLIKELY(Cond) (Cond)
+#define Forward std::forward
 
 namespace UEBabyPram::InsightParser
 {
@@ -5148,7 +5157,7 @@ namespace UEBabyPram::InsightParser
 		switch (TransportVersion)
 		{
 		case ETransport::Raw:			Transport = new FTransport(); break;
-		case ETransport::Packet:		Transport = new FPacketTransport(); break;
+		//case ETransport::Packet:		Transport = new FPacketTransport(); break;
 		case ETransport::TidPacket:		Transport = new FTidPacketTransport(); break;
 		case ETransport::TidPacketSync:	Transport = new FTidPacketTransportSync(); break;
 		default:

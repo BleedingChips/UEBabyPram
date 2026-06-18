@@ -5,6 +5,7 @@ export module UEBabyPramInsightTransport;
 import std;
 import Potato;
 import UEBabyPramInsightDefine;
+import UEBabyPramInsightStreamReader;
 
 
 export namespace UEBabyPram::InsightParser

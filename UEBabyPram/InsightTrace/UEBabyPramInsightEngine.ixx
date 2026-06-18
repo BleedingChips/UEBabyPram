@@ -7,6 +7,7 @@ export module UEBabyPramInsightEngine;
 import std;
 import Potato;
 import UEBabyPramInsightDefine;
+import UEBabyPramInsightStreamReader;
 import UEBabyPramInsightAnalyzer;
 
 export namespace UEBabyPram::InsightParser
