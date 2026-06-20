@@ -1,6 +1,10 @@
+
 import UEBabyPram;
 import Potato;
 import std;
+import UEBabyPramInsightInterface;
+
+
 
 
 int main(int argc, char* argv[])
@@ -34,12 +38,7 @@ int main(int argc, char* argv[])
 
 	if (!insight_path.empty() && std::filesystem::exists(insight_path))
 	{
-		Potato::Document::DocumentReader reader(insight_path);
-		if (reader)
-		{
-			//UEBabyPram::InsightParser::InsightContext context;
-			//UEBabyPram::InsightParser::ForEachInsight(reader, context);
-		}
+		UEBabyPram::InsightParser::Test(insight_path);
 	}
 
 	return 0;

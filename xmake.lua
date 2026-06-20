@@ -5,23 +5,22 @@ if os.scriptdir() == os.projectdir() then
 end
 
 add_requires("ctre")
-add_requires("lz4")
 
 if os.scriptdir() == os.projectdir() then
     includes("../Potato/")
 end
 
-includes("MiniUnrealEngine/")
+includes("./UEBabyPram/MiniUESource/")
+
 
 target("UEBabyPram")
     set_kind("static")
+    set_languages("cxxlatest")
     add_files("UEBabyPram/*.cpp")
     add_files("UEBabyPram/*.ixx", {public=true})
-    add_files("UEBabyPram/InsightTrace/*.ixx", {public=true})
-    add_files("UEBabyPram/InsightTrace/*.cpp")
     add_deps("Potato")
+    add_deps("UEBabyPramMiniUESource")
     add_packages("ctre")
-    add_packages("lz4")
 target_end()
 
 if os.scriptdir() == os.projectdir() then
