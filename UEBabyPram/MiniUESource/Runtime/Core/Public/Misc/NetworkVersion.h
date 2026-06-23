@@ -4,8 +4,8 @@
 
 #include "Containers/UnrealString.h"
 #include "CoreTypes.h"
-//#include "Delegates/Delegate.h"
-//#include "Logging/LogMacros.h"
+#include "Delegates/Delegate.h"
+#include "Logging/LogMacros.h"
 #include "Misc/EngineNetworkCustomVersion.h"
 
 // The version number used for determining network compatibility. If zero, uses the engine compatible version.
@@ -14,7 +14,7 @@
 // The version number used for determining replay compatibility
 #define ENGINE_REPLAY_VERSION  ENGINE_NET_VERSION
 
-//CORE_API DECLARE_LOG_CATEGORY_EXTERN( LogNetVersion, Log, All );
+CORE_API DECLARE_LOG_CATEGORY_EXTERN( LogNetVersion, Log, All );
 
 class FNetworkReplayVersion
 {
@@ -51,7 +51,6 @@ ENUM_CLASS_FLAGS(EEngineNetworkRuntimeFeatures);
 
 struct FNetworkVersion
 {
-#if 0
 	/** Called in GetLocalNetworkVersion if bound */
 	DECLARE_DELEGATE_RetVal( uint32, FGetLocalNetworkVersionOverride );
 	static CORE_API FGetLocalNetworkVersionOverride GetLocalNetworkVersionOverride;
@@ -63,7 +62,7 @@ struct FNetworkVersion
 	/** Called in GetReplayCompatibleChangelist if bound */
 	DECLARE_DELEGATE_RetVal(uint32, FGetReplayCompatibleChangeListOverride);
 	static CORE_API FGetReplayCompatibleChangeListOverride GetReplayCompatibleChangeListOverride;
-#endif
+
 	static CORE_API uint32 GetNetworkCompatibleChangelist();
 	static CORE_API uint32 GetReplayCompatibleChangelist();
 

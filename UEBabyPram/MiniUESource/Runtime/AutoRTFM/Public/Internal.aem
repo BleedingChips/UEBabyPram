@@ -1,0 +1,9 @@
+# Copyright Epic Games, Inc. All Rights Reserved.
+
+# AutoRTFM internal mappings.
+# See Engine/Source/Runtime/AutoRTFM/Documentation/ExternalMappings.md
+# for syntax and more information.
+
+same autortfm_lookup_function
+map  autortfm_open -> autortfm_open_from_closed
+map  autortfm_open_explicit_validation -> autortfm_open_from_closed_explicit_validation

@@ -4,7 +4,7 @@
 
 #include "Containers/UnrealString.h"
 #include "CoreTypes.h"
-//#include "Logging/LogMacros.h"
+#include "Logging/LogMacros.h"
 #include "Math/Axis.h"
 #include "Math/MathFwd.h"
 #include "Math/Matrix.h"
@@ -88,7 +88,7 @@ public:
 	{
 		if (VectorContainsNaNOrInfinite(Scale3D))
 		{
-			check((TEXT("TTransform<T> Vectorized Scale3D contains NaN"), false));
+			logOrEnsureNanError(TEXT("TTransform<T> Vectorized Scale3D contains NaN"));
 			const_cast<TTransform<T>*>(this)->Scale3D = GlobalVectorConstants::Float1110;
 		}
 	}
@@ -97,7 +97,7 @@ public:
 	{
 		if (VectorContainsNaNOrInfinite(Translation))
 		{
-			check((TEXT("TTransform<T> Vectorized Translation contains NaN"), false));
+			logOrEnsureNanError(TEXT("TTransform<T> Vectorized Translation contains NaN"));
 			const_cast<TTransform<T>*>(this)->Translation = VectorZero();
 		}
 	}
@@ -106,8 +106,7 @@ public:
 	{
 		if (VectorContainsNaNOrInfinite(Rotation))
 		{
-			check((TEXT("TTransform<T> Vectorized Rotation contains NaN"), false));
-			//logOrEnsureNanError(TEXT("TTransform<T> Vectorized Rotation contains NaN"));
+			logOrEnsureNanError(TEXT("TTransform<T> Vectorized Rotation contains NaN"));
 			const_cast<TTransform<T>*>(this)->Rotation = GlobalVectorConstants::Float0001;
 		}
 	}

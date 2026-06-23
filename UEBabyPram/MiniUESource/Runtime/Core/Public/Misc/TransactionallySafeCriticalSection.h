@@ -2,7 +2,7 @@
 
 #pragma once
 
-//#include "AutoRTFM.h"
+#include "AutoRTFM.h"
 
 #if UE_AUTORTFM
 #include "Async/TransactionallySafeRecursiveMutex.h"

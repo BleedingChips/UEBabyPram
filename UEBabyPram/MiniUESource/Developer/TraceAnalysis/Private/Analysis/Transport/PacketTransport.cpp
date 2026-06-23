@@ -3,8 +3,6 @@
 #include "PacketTransport.h"
 #include "HAL/UnrealMemory.h"
 
-#include "TraceAnalysisDebug.h"
-
 #include <initializer_list>
 
 ////////////////////////////////////////////////////////////////////////////////

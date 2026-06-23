@@ -12,16 +12,27 @@ end
 
 includes("./UEBabyPram/MiniUESource/")
 
-
 target("UEBabyPram")
     set_kind("static")
     set_languages("cxxlatest")
     add_files("UEBabyPram/*.cpp")
     add_files("UEBabyPram/*.ixx", {public=true})
     add_deps("Potato")
-    add_deps("UEBabyPramMiniUESource")
     add_packages("ctre")
 target_end()
+
+if true then
+
+    target("UEBabyPramInsightParser")
+        set_kind("static")
+        set_languages("cxxlatest")
+        add_files("UEBabyPram/UEBabyPramInsightParser/**.cpp")
+        add_files("UEBabyPram/UEBabyPramInsightParser/**.ixx", {public=true})
+        add_deps("Potato")
+        add_deps("UEBabyPramMiniUESource", {public = true})
+    target_end()
+
+end
 
 if os.scriptdir() == os.projectdir() then
     set_project("UEBabyPram")
@@ -90,6 +101,7 @@ if os.scriptdir() == os.projectdir() then
         add_files("UEBabyPramInsightFilter/*.ixx")
         add_deps("Potato")
         add_deps("UEBabyPram")
+        add_deps("UEBabyPramMiniUESource")
         add_packages("re2")
     target_end()
 end

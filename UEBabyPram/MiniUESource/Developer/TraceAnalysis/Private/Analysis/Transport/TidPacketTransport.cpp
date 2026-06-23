@@ -3,9 +3,7 @@
 #include "TidPacketTransport.h"
 #include "Algo/BinarySearch.h"
 #include "HAL/UnrealMemory.h"
-//#include "CoreGlobals.h"
-
-#define UE_LOG(Category, ...)
+#include "CoreGlobals.h"
 
 ////////////////////////////////////////////////////////////////////////////////
 namespace UE {

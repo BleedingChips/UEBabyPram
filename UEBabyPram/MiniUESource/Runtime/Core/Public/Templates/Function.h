@@ -3,7 +3,7 @@
 #pragma once
 
 #include "CoreTypes.h"
-//#include "AutoRTFM.h"
+#include "AutoRTFM.h"
 #include "Concepts/NotCVRefTo.h"
 #include "Misc/AssertionMacros.h"
 #include "Misc/IntrusiveUnsetOptionalState.h"

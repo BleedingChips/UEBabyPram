@@ -6,7 +6,7 @@
 #include "Algo/Sort.h"
 #include "Algo/StableSort.h"
 #include "Containers/ArrayView.h"
-//#include "CoreGlobals.h"
+#include "CoreGlobals.h"
 #include "HAL/UnrealMemory.h"
 //#include "Internationalization/Internationalization.h"
 //#include "Logging/LogMacros.h"
@@ -22,7 +22,7 @@
 #include "Transport/TidPacketTransport.h"
 #include "Transport/Transport.h"
 
-//DEFINE_LOG_CATEGORY_STATIC(LogTraceAnalysis, Log, All)
+DEFINE_LOG_CATEGORY_STATIC(LogTraceAnalysis, Log, All)
 
 #define LOCTEXT_NAMESPACE "TraceAnalysis"
 
@@ -32,7 +32,7 @@ namespace Trace {
 // {{{1 misc -------------------------------------------------------------------
 
 ////////////////////////////////////////////////////////////////////////////////
-void SerializeToCborImpl(TArray<uint8>&, const IAnalyzer::FEventData&, uint32);
+//void SerializeToCborImpl(TArray<uint8>&, const IAnalyzer::FEventData&, uint32);
 
 ////////////////////////////////////////////////////////////////////////////////
 class FFnv1aHash
@@ -987,16 +987,7 @@ uint32 IAnalyzer::FEventData::GetSize() const
 ////////////////////////////////////////////////////////////////////////////////
 void IAnalyzer::FEventData::SerializeToCbor(TArray<uint8>& Out) const
 {
-	const auto* Info = (const FEventDataInfo*)this;
-	uint32 Size = Info->Size;
-	if (Info->AuxCollector != nullptr)
-	{
-		for (FAuxData& Data : *(Info->AuxCollector))
-		{
-			Size += Data.DataSize;
-		}
-	}
-	SerializeToCborImpl(Out, *this, Size);
+	check(false);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -2510,7 +2501,7 @@ public:
 
 		inline void EmitMessage(EAnalysisMessageSeverity Severity, FStringView Message) const
 		{
-			OnMessage(Severity, Message);
+			const bool _ = OnMessage.ExecuteIfBound(Severity, Message);
 		}
 
 		template<typename FormatType, typename... Types>

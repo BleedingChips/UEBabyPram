@@ -3,7 +3,7 @@
 #pragma once
 
 #include "CoreTypes.h"
-//#include "Internationalization/TextNamespaceFwd.h"
+#include "Internationalization/TextNamespaceFwd.h"
 #include "Serialization/Archive.h"
 
 class FBulkData;

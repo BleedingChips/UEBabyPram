@@ -5,8 +5,8 @@
 #include "CoreTypes.h"
 #include "HAL/PlatformAtomics.h"
 #include "HAL/PlatformCrt.h"
-//#include "Misc/Exec.h"
-//#include "Misc/OutputDevice.h"
+#include "Misc/Exec.h"
+#include "Misc/OutputDevice.h"
 #include "Templates/Atomic.h"
 
 class UWorld;
@@ -94,9 +94,8 @@ public:
 
 /** The global memory allocator's interface. */
 class FMalloc  : 
-	public FUseSystemMallocForNew
-	//,
-	//public FExec
+	public FUseSystemMallocForNew,
+	public FExec
 {
 public:
 	/**
@@ -219,10 +218,10 @@ public:
 	CORE_API virtual void GetAllocatorStats( FGenericMemoryStats& out_Stats );
 
 	/** Dumps current allocator stats to the log. */
-	//virtual void DumpAllocatorStats( class FOutputDevice& Ar )
-	//{
-		//Ar.Logf( TEXT("Allocator Stats for %s: (not implemented)" ), GetDescriptiveName() );
-	//}
+	virtual void DumpAllocatorStats( class FOutputDevice& Ar )
+	{
+		Ar.Logf( TEXT("Allocator Stats for %s: (not implemented)" ), GetDescriptiveName() );
+	}
 
 	/**
 	 * Returns if the allocator is guaranteed to be thread-safe and therefore

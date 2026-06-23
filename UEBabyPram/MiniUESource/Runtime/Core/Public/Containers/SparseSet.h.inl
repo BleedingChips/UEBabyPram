@@ -1011,7 +1011,6 @@ public:
 	 * Describes the set's contents through an output device.
 	 * @param Ar - The output device to describe the set's contents through.
 	 */
-#if 0
 	void Dump(FOutputDevice& Ar)
 	{
 		Ar.Logf( TEXT("UE_TSPARSE_SET: %i elements, %i hash slots"), Elements.Num(), HashSize );
@@ -1029,7 +1028,6 @@ public:
 			Ar.Logf(TEXT("   Hash[%i] = %i"),HashIndex,NumElementsInBucket);
 		}
 	}
-#endif
 
 	[[nodiscard]] bool VerifyHashElementsKey(KeyInitType Key) const
 	{
@@ -1051,7 +1049,7 @@ public:
 		}
 		return bResult;
 	}
-#if 0
+
 	void DumpHashElements(FOutputDevice& Ar)
 	{
 		for (int32 HashIndex = 0, LocalHashSize = HashSize; HashIndex < LocalHashSize; ++HashIndex)
@@ -1075,7 +1073,6 @@ public:
 			}
 		}
 	}
-#endif
 
 	/** @return the intersection of two sets. (A AND B)*/
 	[[nodiscard]] UE_TSPARSE_SET Intersect(const UE_TSPARSE_SET& OtherSet) const

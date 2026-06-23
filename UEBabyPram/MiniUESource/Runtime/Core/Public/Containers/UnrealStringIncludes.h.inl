@@ -42,7 +42,7 @@
 #include "Traits/IsCharType.h"
 #include "Traits/IsCharEncodingCompatibleWith.h"
 #include "Traits/IsCharEncodingSimplyConvertibleTo.h"
-//#include "AutoRTFM.h"
+#include "AutoRTFM.h"
 
 #if UE_ENABLE_INCLUDE_ORDER_DEPRECATED_IN_5_7
 #include "Misc/OutputDevice.h"

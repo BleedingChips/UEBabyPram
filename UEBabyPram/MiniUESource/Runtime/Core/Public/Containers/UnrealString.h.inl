@@ -2178,13 +2178,12 @@ public:
 		// This must match the GetTypeHash behavior of FStringView
 		return FCrc::Strihash_DEPRECATED(S.Len(), *S);
 	}
-#if 0
+
 	static void AutoRTFMAssignFromOpenToClosed(UE_STRING_CLASS& Closed, const UE_STRING_CLASS& Open)
 	{
 		const AutoRTFM::EContextStatus Status = AutoRTFM::Close([&] { Closed = Open; });
 		ensure(AutoRTFM::EContextStatus::OnTrack == Status);
 	}
-#endif
 };
 
 template<> struct TIsZeroConstructType<UE_STRING_CLASS> { enum { Value = true }; };

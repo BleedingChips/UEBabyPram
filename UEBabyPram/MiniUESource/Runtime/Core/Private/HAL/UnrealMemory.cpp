@@ -3,7 +3,7 @@
 #include "HAL/UnrealMemory.h"
 #include "Math/UnrealMathUtility.h"
 #include "Containers/Array.h"
-//#include "Logging/LogMacros.h"
+#include "Logging/LogMacros.h"
 #include "HAL/ThreadSafeCounter.h"
 #include "Containers/LockFreeList.h"
 #include "Stats/Stats.h"
@@ -14,7 +14,7 @@
 	Memory functions.
 -----------------------------------------------------------------------------*/
 
-//#include "ProfilingDebugging/MemoryTrace.h"
+#include "ProfilingDebugging/MemoryTrace.h"
 #include "HAL/MallocThreadSafeProxy.h"
 #include "HAL/MallocVerify.h"
 #include "HAL/MallocLeakDetectionProxy.h"

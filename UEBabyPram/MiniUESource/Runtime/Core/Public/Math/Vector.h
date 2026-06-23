@@ -14,11 +14,11 @@
 #include "Misc/NetworkVersion.h"
 #include "Math/Color.h"
 #include "Math/IntPoint.h"
-//#include "Logging/LogMacros.h"
+#include "Logging/LogMacros.h"
 #include "Math/Vector2D.h"
 #include "Misc/ByteSwap.h"
-//#include "Internationalization/Text.h"
-//#include "Internationalization/Internationalization.h"
+#include "Internationalization/Text.h"
+#include "Internationalization/Internationalization.h"
 #include "Math/IntVector.h"
 #include "Math/Axis.h"
 #include "Serialization/MemoryLayout.h"
@@ -2306,7 +2306,6 @@ UE_FORCEINLINE_HINT FString TVector<T>::ToString() const
     return FString::Printf(TEXT("X=%3.3f Y=%3.3f Z=%3.3f"), X, Y, Z);
 }
 
-#if 0
 template<typename T>
 inline FText TVector<T>::ToText() const
 {
@@ -2317,8 +2316,7 @@ inline FText TVector<T>::ToText() const
 
     return FText::Format(NSLOCTEXT("Core", "Vector3", "X={X} Y={Y} Z={Z}"), Args);
 }
-#endif
-#if 0
+
 template<typename T>
 inline FText TVector<T>::ToCompactText() const
 {
@@ -2371,7 +2369,6 @@ inline FText TVector<T>::ToCompactText() const
 
     return NSLOCTEXT("Core", "Vector3_CompactZeroVector", "V(0)");
 }
-#endif
 
 template<typename T>
 inline FString TVector<T>::ToCompactString() const

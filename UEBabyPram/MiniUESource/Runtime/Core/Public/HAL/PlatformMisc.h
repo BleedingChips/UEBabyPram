@@ -4,7 +4,7 @@
 #include "CoreTypes.h"
 #include "GenericPlatform/GenericPlatformMisc.h"
 #include COMPILED_PLATFORM_HEADER(PlatformMisc.h)
-//#include "ProfilingDebugging/CpuProfilerTrace.h"
+#include "ProfilingDebugging/CpuProfilerTrace.h"
 
 #ifndef UE_DEBUG_BREAK
 #error UE_DEBUG_BREAK is not defined for this platform

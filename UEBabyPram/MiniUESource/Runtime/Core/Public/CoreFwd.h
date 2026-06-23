@@ -5,7 +5,7 @@
 #include "CoreTypes.h"
 #include "Containers/ContainersFwd.h" // IWYU pragma: export
 #include "Math/MathFwd.h" // IWYU pragma: export
-//#include "UObject/UObjectHierarchyFwd.h" // IWYU pragma: export
+#include "UObject/UObjectHierarchyFwd.h" // IWYU pragma: export
 
 // Basic types
 class FName;

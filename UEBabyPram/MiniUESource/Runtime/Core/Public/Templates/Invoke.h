@@ -3,7 +3,7 @@
 #pragma once
 
 #include "CoreTypes.h"
-//#include "AutoRTFM.h"
+#include "AutoRTFM.h"
 #include "Traits/MemberFunctionPtrOuter.h"
 #include <type_traits>
 

@@ -6,7 +6,7 @@
 #include "GenericPlatform/GenericPlatformMemory.h"
 #include "HAL/MemoryBase.h"
 #include "HAL/PlatformMemory.h"
-//#include "ProfilingDebugging/MemoryTrace.h"
+#include "ProfilingDebugging/MemoryTrace.h"
 #include "Templates/IsPointer.h"
 
 #ifndef UE_USE_VERYLARGEPAGEALLOCATOR
@@ -195,13 +195,13 @@ struct FMemory
 	UE_ALLOCATION_FUNCTION(1) static inline void* SystemMalloc(SIZE_T Size)
 	{
 		void* Ptr = ::malloc(Size);
-		//MemoryTrace_Alloc(uint64(Ptr), Size, 0, EMemoryTraceRootHeap::SystemMemory);
+		MemoryTrace_Alloc(uint64(Ptr), Size, 0, EMemoryTraceRootHeap::SystemMemory);
 		return Ptr;
 	}
 
 	static inline void SystemFree(void* Ptr)
 	{
-		//MemoryTrace_Free(uint64(Ptr), EMemoryTraceRootHeap::SystemMemory);
+		MemoryTrace_Free(uint64(Ptr), EMemoryTraceRootHeap::SystemMemory);
 		::free(Ptr);
 	}
 

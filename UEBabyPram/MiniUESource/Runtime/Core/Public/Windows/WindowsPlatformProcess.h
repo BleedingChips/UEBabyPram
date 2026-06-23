@@ -3,14 +3,14 @@
 #pragma once
 
 #include "CoreTypes.h"
-//#include "Delegates/Delegate.h"
+#include "Delegates/Delegate.h"
 #include "GenericPlatform/GenericPlatformProcess.h"
 #include "Windows/WindowsSystemIncludes.h"
 
 class FEvent;
 class FRunnableThread;
 
-//DECLARE_DELEGATE_OneParam(FLaunchURLOverride, const TCHAR*)
+DECLARE_DELEGATE_OneParam(FLaunchURLOverride, const TCHAR*)
 
 /** Windows implementation of the process handle. */
 struct FProcHandle : public TProcHandle<Windows::HANDLE, nullptr>

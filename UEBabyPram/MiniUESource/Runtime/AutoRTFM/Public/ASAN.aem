@@ -1,0 +1,9 @@
+# Copyright Epic Games, Inc. All Rights Reserved.
+
+# AutoRTFM external mappings for ASAN.
+# See Engine/Source/Runtime/AutoRTFM/Documentation/ExternalMappings.md
+# for syntax and more information.
+
+same __asan_addr_is_in_fake_stack
+same __asan_get_current_fake_stack
+same __asan_poison_memory_region

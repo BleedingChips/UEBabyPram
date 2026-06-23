@@ -5,8 +5,8 @@
 #include "CoreTypes.h"
 #include "HAL/PlatformMutex.h"
 #include "LowLevelMemTrackerDefines.h" // LLM_ENABLED_IN_CONFIG
-//#include "ProfilingDebugging/TagTrace.h"
-//#include "AutoRTFM.h"
+#include "ProfilingDebugging/TagTrace.h"
+#include "AutoRTFM.h"
 
 #ifndef PLATFORM_SUPPORTS_LLM
 	#define PLATFORM_SUPPORTS_LLM 1

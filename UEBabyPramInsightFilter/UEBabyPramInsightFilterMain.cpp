@@ -1,8 +1,11 @@
 
+
+#include "Trace/Analyzer.h"
+#include "Analysis/Engine.h"
+
 import UEBabyPram;
 import Potato;
 import std;
-import UEBabyPramInsightInterface;
 
 
 
@@ -38,7 +41,7 @@ int main(int argc, char* argv[])
 
 	if (!insight_path.empty() && std::filesystem::exists(insight_path))
 	{
-		UEBabyPram::InsightParser::Test(insight_path);
+		//UEBabyPram::InsightParser::Test(insight_path);
 	}
 
 	return 0;

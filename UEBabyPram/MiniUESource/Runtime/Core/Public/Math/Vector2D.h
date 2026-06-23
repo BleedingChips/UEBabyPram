@@ -15,7 +15,7 @@
 #endif
 #include "Misc/EngineNetworkCustomVersion.h"
 #include "Math/IntPoint.h"
-//#include "Logging/LogMacros.h"
+#include "Logging/LogMacros.h"
 
 #include <type_traits>
 

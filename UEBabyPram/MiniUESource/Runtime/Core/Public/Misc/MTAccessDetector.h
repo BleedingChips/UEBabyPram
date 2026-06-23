@@ -15,7 +15,7 @@
 #include "HAL/PreprocessorHelpers.h"
 #include "HAL/PlatformStackWalk.h"
 #include "Misc/Build.h"
-//#include "AutoRTFM.h"
+#include "AutoRTFM.h"
 #include <atomic>
 
 struct FRWAccessDetector;

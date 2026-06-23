@@ -14,7 +14,11 @@
 #include "Templates/EnableIf.h"
 #include "Templates/IsEnumClass.h"
 
-#define UE_API
+#if !WITH_TEXT_ARCHIVE_SUPPORT
+	#define UE_API FORCEINLINE
+#else
+	#define UE_API CORE_API
+#endif
 
 class FName;
 class FString;

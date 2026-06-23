@@ -5,7 +5,7 @@
 #include "CoreFwd.h"
 #include "CoreTypes.h"
 #include "HAL/PlatformProperties.h"
-//#include "Internationalization/TextNamespaceFwd.h"
+#include "Internationalization/TextNamespaceFwd.h"
 #include "Math/MathFwd.h"
 #include "Misc/AssertionMacros.h"
 #include "Misc/Build.h"

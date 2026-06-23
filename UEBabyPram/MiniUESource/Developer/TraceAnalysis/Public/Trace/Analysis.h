@@ -4,7 +4,7 @@
 
 #include "Containers/Array.h"
 //#include "Delegates/Delegate.h"
-#include <functional>
+#include "Containers/StringView.h"
 
 #define UE_API TRACEANALYSIS_API
 
@@ -23,9 +23,12 @@ enum class EAnalysisMessageSeverity
 	Error
 };
 
-struct FMessageDelegate : std::function<void(EAnalysisMessageSeverity, FStringView)>
+struct FMessageDelegate
 {
-	using std::function<void(EAnalysisMessageSeverity, FStringView)>::function;
+	bool ExecuteIfBound(EAnalysisMessageSeverity, FStringView)
+	{
+		return false;
+	}
 };
 
 /**

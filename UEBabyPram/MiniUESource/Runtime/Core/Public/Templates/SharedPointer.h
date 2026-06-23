@@ -9,7 +9,7 @@
 #include "HAL/UnrealMemory.h"
 #include "Containers/Array.h"
 #include "Containers/Map.h"
-//#include "CoreGlobals.h"
+#include "CoreGlobals.h"
 #include "Misc/UEOps.h"
 
 
@@ -203,7 +203,7 @@ public:
 		: Object(new ObjectType())
 		, SharedReferenceCount(SharedPointerInternals::NewDefaultReferenceController<Mode>(Object))
 	{
-		//EnsureRetrievingVTablePtrDuringCtor(TEXT("TSharedRef()"));
+		EnsureRetrievingVTablePtrDuringCtor(TEXT("TSharedRef()"));
 		Init(Object);
 	}
 

@@ -10,8 +10,8 @@
 #include "Math/NumericLimits.h"
 #include "Misc/CompressionFlags.h"
 #include "Misc/EnumClassFlags.h"
-//#include "ProfilingDebugging/CsvProfilerConfig.h"
-//#include "ProfilingDebugging/ExternalProfilerConfig.h"
+#include "ProfilingDebugging/CsvProfilerConfig.h"
+#include "ProfilingDebugging/ExternalProfilerConfig.h"
 
 #if PLATFORM_CPU_X86_FAMILY
 #include <xmmintrin.h> // _mm_prefetch

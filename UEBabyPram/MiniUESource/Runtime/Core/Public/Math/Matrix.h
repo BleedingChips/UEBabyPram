@@ -379,9 +379,7 @@ public:
 	/** Output ToString */
 	void DebugPrint() const
 	{
-#if 0
 		UE_LOG(LogUnrealMath, Log, TEXT("%s"), *ToString());
-#endif
 	}
 
 	/** For debugging purpose, could be changed */
@@ -467,7 +465,7 @@ private:
 	 */
 	static void ErrorEnsure(const TCHAR* Message)
 	{
-		//UE_LOG(LogUnrealMath, Error, TEXT("%s"), Message);
+		UE_LOG(LogUnrealMath, Error, TEXT("%s"), Message);
 		ensureMsgf(false, TEXT("%s"), Message);
 	}
 };
