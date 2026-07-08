@@ -29,6 +29,12 @@ struct FMessageDelegate
 	{
 		return false;
 	}
+
+	template<typename ...Func>
+	static FMessageDelegate CreateRaw(Func&& ...func)
+	{
+		return {};
+	}
 };
 
 /**

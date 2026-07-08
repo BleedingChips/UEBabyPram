@@ -157,7 +157,7 @@ int main(int argc, char* argv[])
 					}
 					Potato::Document::PlainTextWritter::Config writer_config;
 					config.bom = Potato::Document::BomT::UTF8;
-					Potato::Document::PlainTextWritter plain_writer(writter, writer_config);
+					Potato::Document::PlainTextWriter plain_writer(writter, writer_config);
 
 					UEBabyPram::LogParser::LogLine::TimeT last_frame_time;
 					std::optional<std::size_t> last_frame_count;
