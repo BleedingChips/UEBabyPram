@@ -28,13 +28,14 @@ FAnalysisCache::FFileContents::FFileContents(const TCHAR* FilePath)
 {
 	IPlatformFile& PlatformFile = FPlatformFileManager::Get().GetPlatformFile();
 
-	if (FParse::Param(FCommandLine::Get(), TEXT("disableanalysiscache")))
+	if (true)
 	{
 		UE_LOG(LogAnalysisCache, Display, TEXT("Putting cache in transient mode."));
 		bTransientMode = true;
 		return;
 	}
 	
+	/*
 	// Opening the file we can encounter one of 3 scenarios:
 	// 1. File does not exist, create on first save
 	// 2. File exist, we can read the contents
@@ -86,6 +87,7 @@ FAnalysisCache::FFileContents::FFileContents(const TCHAR* FilePath)
 	{
 		Version = CurrentVersion;
 	}
+	*/
 }
 
 //////////////////////////////////////////////////////////////////////

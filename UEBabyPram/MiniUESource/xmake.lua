@@ -53,7 +53,7 @@ target("UEBabyPramMiniUESource")
     add_defines("UE_VFS_PATHS=\"Z:/\"", {public = true})
     add_defines("UE_MODULE_NAME=\"Core\"", {public=true})
     add_defines("NO_LOGGING=1", {public=true})
-    add_defines("ENGINE_VERSION_STRING=\"Core\"", {public=true})
+    --add_defines("ENGINE_VERSION_STRING=\"Core\"", {public=true})
     add_defines("UBT_MODULE_MANIFEST=\"UnrealEditor.modules\"", {public = true})
     -- Define End
 
@@ -72,7 +72,7 @@ target("UEBabyPramMiniUESource")
         add_links("Gdi32.lib")
         add_links("Winmm.lib")
         add_links("shell32.lib")
-        add_links("lphlpapi.lib")
+        add_links("iphlpapi.lib")
         add_links("Setupapi.lib")
         add_links("Netapi32.lib")
         add_links("Synchronization.lib")
@@ -83,10 +83,11 @@ target("UEBabyPramMiniUESource")
     -- Core
     add_files("./Runtime/Core/**.cpp")
     add_headerfiles("./Runtime/Core/**.h")
-    add_includedirs("./Runtime/Core/Public/", {public = true})
     add_includedirs("./Runtime/Core/Private/")
+    add_includedirs("./Runtime/Core/Public/", {public = true})
     add_includedirs("./Runtime/Core/Internal/")
     add_defines("CORE_API=", {public = true})
+    set_pcxxheader("./Runtime/Core/Public/CoreSharedPCH.h")
     -- Core End
 
     -- AtomicQueue Begin
@@ -96,7 +97,7 @@ target("UEBabyPramMiniUESource")
     -- Oodle Begin
     add_includedirs("./Runtime/OodleDataCompression/Sdks/2.9.14/include/")
     if is_plat("windows") then
-        add_linkdirs("./Runtime/OddleDataCompression/Sdks/2.9.14/lib/Win64/")
+        add_linkdirs("./Runtime/OodleDataCompression/Sdks/2.9.14/lib/Win64/")
         if is_mode("debug") then
             add_links("oo2core_win64_debug.lib")
         else
@@ -108,16 +109,16 @@ target("UEBabyPramMiniUESource")
     -- BuildSetting Begin
     add_files("./Runtime/BuildSettings/**.cpp")
     add_headerfiles("./Runtime/BuildSettings/**.h")
-    add_includedirs("./Runtime/BuildSettings/Public/", {public = true})
     add_includedirs("./Runtime/BuildSettings/Private/")
+    add_includedirs("./Runtime/BuildSettings/Public/", {public = true})
     add_defines("BUILDSETTINGS_API=", {public = true})
     -- BuildSetting End
     
     -- AutoRTFM Begin
     add_files("./RunTime/AutoRTFM/**.cpp")
     add_headerfiles("./RunTime/AutoRTFM/**.h")
-    add_includedirs("./RunTime/AutoRTFM/Public/", {public = true})
     add_includedirs("./RunTime/AutoRTFM/Private/")
+    add_includedirs("./RunTime/AutoRTFM/Public/", {public = true})
     add_defines("AUTORTFM_API=", {public = true})
     -- AutoRTFM End
 
@@ -125,8 +126,8 @@ target("UEBabyPramMiniUESource")
     -- TraceLog Begin
     add_files("./Runtime/TraceLog/**.cpp")
     add_headerfiles("./Runtime/TraceLog/**.h")
-    add_includedirs("./Runtime/TraceLog/Public/", {public = true})
     add_includedirs("./Runtime/TraceLog/Private/")
+    add_includedirs("./Runtime/TraceLog/Public/", {public = true})
     add_defines("TRACELOG_API=", {public = true})
     -- TraceLog End
 
@@ -134,8 +135,8 @@ target("UEBabyPramMiniUESource")
     -- TraceAnalyze Begin
     add_files("./Developer/TraceAnalysis/**.cpp")
     add_headerfiles("./Developer/TraceAnalysis/**.h")
-    add_includedirs("./Developer/TraceAnalysis/Public/", {public = true})
     add_includedirs("./Developer/TraceAnalysis/Private/", {public = true})
+    add_includedirs("./Developer/TraceAnalysis/Public/", {public = true})
     add_defines("TRACEANALYSIS_API=", {public = true})
     -- TraceAnalyze End
 
@@ -147,16 +148,16 @@ target("UEBabyPramMiniUESource")
     --TraceService Begin
     add_files("./Developer/TraceServices/**.cpp")
     add_headerfiles("./Developer/TraceServices/**.h")
-    add_includedirs("./Developer/TraceServices/Public/", {public = true})
     add_includedirs("./Developer/TraceServices/Private/", {public = true})
+    add_includedirs("./Developer/TraceServices/Public/", {public = true})
     add_defines("TRACESERVICES_API=", {public = true})
     --TraceService End
 
     --Cbor Begin
     add_files("./Runtime/Cbor/**.cpp")
     add_headerfiles("./Runtime/Cbor/**.h")
+    add_includedirs("./Runtime/Cbor/Private/")
     add_includedirs("./Runtime/Cbor/Public/", {public = true})
-    add_includedirs("./Runtime/Cbor/Private/", {public = true})
     add_defines("CBOR_API=", {public = true})
     --Cbor End
 
@@ -167,6 +168,12 @@ target("UEBabyPramMiniUESource")
     add_includedirs("./Runtime/SymsLib/", {public = true})
     add_defines("SYMS_API=", {public = true})
     --SymsLib End
+
+    --Launch Begin
+    add_headerfiles("./Runtime/Launch/**.h")
+    add_includedirs("./Runtime/Launch/", {public = true})
+    add_defines("SYMS_API=", {public = true})
+    --Launch End
     
     add_includedirs("./Developer/DerivedDataCache/Public/")
     add_includedirs("./Developer/DesktopPlatform/Public/")

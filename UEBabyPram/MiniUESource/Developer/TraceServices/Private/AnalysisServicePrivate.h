@@ -45,7 +45,7 @@ public:
 	void Start();
 	virtual void Stop(bool bAndWait) const override;
 	virtual void Wait() const override;
-	virtual bool IsAnalysisComplete() const override { return !Processor.IsActive(); }
+	virtual bool IsAnalysisComplete() const override { return true; }
 
 	virtual const TCHAR* GetName() const override { return *Name; }
 	virtual uint32 GetTraceId() const override { return TraceId; }
@@ -108,7 +108,7 @@ private:
 	TArray<FAnalysisMessage> PendingMessages;
 	mutable std::atomic<uint32> PendingMessagesCount;
 	mutable TUniquePtr<UE::Trace::IInDataStream> DataStream;
-	mutable UE::Trace::FAnalysisProcessor Processor;
+	//mutable UE::Trace::FAnalysisProcessor Processor;
 };
 
 class FAnalysisService

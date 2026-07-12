@@ -143,6 +143,7 @@ FAnalysisSession::~FAnalysisSession()
 
 void FAnalysisSession::Start()
 {
+	/*
 	UE::Trace::FAnalysisContext Context;
 	for (UE::Trace::IAnalyzer* Analyzer : ReadAnalyzers())
 	{
@@ -150,21 +151,24 @@ void FAnalysisSession::Start()
 	}
 	Context.SetMessageDelegate(UE::Trace::FMessageDelegate::CreateRaw(this, &FAnalysisSession::OnAnalysisMessage));
 	Processor = Context.Process(*DataStream);
+	*/
 }
 
 void FAnalysisSession::Stop(bool bAndWait) const
 {
+	/*
 	DataStream->Close();
 	Processor.Stop();
 	if (bAndWait)
 	{
 		Wait();
 	}
+	*/
 }
 
 void FAnalysisSession::Wait() const
 {
-	Processor.Wait();
+	//Processor.Wait();
 }
 
 void FAnalysisSession::EnumerateMetadata(TFunctionRef<void(const FTraceSessionMetadata& Metadata)> Callback) const
@@ -333,6 +337,7 @@ TSharedPtr<const IAnalysisSession> FAnalysisService::StartAnalysis(const TCHAR* 
 
 TSharedPtr<const IAnalysisSession> FAnalysisService::StartAnalysis(uint32 TraceId, const TCHAR* SessionName, TUniquePtr<UE::Trace::IInDataStream>&& DataStream)
 {
+	/*
 	TSharedRef<FAnalysisSession> Session = MakeShared<FAnalysisSession>(TraceId, SessionName, MoveTemp(DataStream));
 
 	FAnalysisSessionEditScope _(*Session);
@@ -373,6 +378,8 @@ TSharedPtr<const IAnalysisSession> FAnalysisService::StartAnalysis(uint32 TraceI
 
 	Session->Start();
 	return Session;
+	*/
+	return {};
 }
 
 } // namespace TraceServices

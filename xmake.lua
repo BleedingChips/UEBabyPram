@@ -100,8 +100,7 @@ if os.scriptdir() == os.projectdir() then
         add_files("UEBabyPramInsightFilter/*.cpp")
         add_files("UEBabyPramInsightFilter/*.ixx")
         add_deps("Potato")
-        add_deps("UEBabyPram")
-        add_deps("UEBabyPramMiniUESource")
+        add_deps("UEBabyPramInsightParser")
         add_packages("re2")
     target_end()
 end

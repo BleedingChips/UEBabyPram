@@ -1,6 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "BuildSettings.h"
+#include "Resources/Version.h"
 
 namespace BuildSettings
 {
@@ -26,7 +27,7 @@ namespace BuildSettings
 
 	const TCHAR* GetEngineVersionString()
 	{
-		return TEXT(ENGINE_VERSION_STRING);
+		return ENGINE_VERSION_STRING;
 	}
 
 	int GetCurrentChangelist()
