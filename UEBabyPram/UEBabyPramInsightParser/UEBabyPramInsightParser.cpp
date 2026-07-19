@@ -12,6 +12,7 @@ module;
 
 module UEBabyPramInsightParser;
 import std;
+import UEBabyPramInsightParserCPUProvider;
 
 	class FSummarizeCpuScopeAnalyzer
 	{
@@ -424,13 +425,16 @@ namespace UEBabyPram::InsightParser
 {
 	void Test(DataResourceInterface& resource)
 	{
+		CpuReceiverInterface Interface;
 
-		TSharedPtr<TraceServices::IAnalysisSession> Session = TraceServices::CreateAnalysisSession(0, nullptr, {});
 
-		FSummarizeCpuProfilerProvider CpuProfilerProvider;
-		TSharedPtr<UE::Trace::IAnalyzer> CpuProfilerAnalyzer = TraceServices::CreateCpuProfilerAnalyzer(*Session, CpuProfilerProvider, CpuProfilerProvider);
+		CpuProfilerAnalyzer analyzer{ Interface };
+		//TSharedPtr<TraceServices::IAnalysisSession> Session = TraceServices::CreateAnalysisSession(0, nullptr, {});
 
-		TArray<UE::Trace::IAnalyzer*> List = { CpuProfilerAnalyzer.Get() };
+		//FSummarizeCpuProfilerProvider CpuProfilerProvider;
+		//TSharedPtr<UE::Trace::IAnalyzer> CpuProfilerAnalyzer = TraceServices::CreateCpuProfilerAnalyzer(*Session, CpuProfilerProvider, CpuProfilerProvider);
+
+		TArray<UE::Trace::IAnalyzer*> List = { &analyzer };
 		UE::Trace::FMessageDelegate Delegate;
 		UE::Trace::FAnalysisEngine engine{ std::move(List), std::move(Delegate) };
 

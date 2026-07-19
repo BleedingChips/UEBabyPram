@@ -57,10 +57,11 @@ target("UEBabyPramMiniUESource")
     add_defines("UBT_MODULE_MANIFEST=\"UnrealEditor.modules\"", {public = true})
     -- Define End
 
+    add_defines("UBT_MODULE_MANIFEST_DEBUGGAME=\"UnrealEditor-Win64-DebugGame.modules\"", {public=true})
     if is_mode("debug") then
         add_defines("UE_BUILD_DEBUG=1", {public=true})
     else
-        add_defines("UE_BUILD_DEVELOP=1", {public=true})
+        add_defines("UE_BUILD_DEVELOPMENT=1", {public=true})
     end
 
     if is_plat("windows") then

@@ -14,8 +14,8 @@ export namespace UEBabyPram::InsightParser
 
 	struct CpuReceiverInterface
 	{
-		virtual bool RequireThread(std::u8string_view thread_name);
-		virtual void OnCPUEventCreated();
+		virtual bool RequireThread(std::u8string_view thread_name) { return true; }
+		//virtual void OnCPUEventCreated();
 	};
 }
 

@@ -1,8 +1,11 @@
 module;
 
 #include "Trace/Analyzer.h"
+#include "Containers/UnrealString.h"
+#include "Containers/StringConv.h"
 
 module UEBabyPramInsightParserCPUProvider;
+import std;
 
 namespace UEBabyPram::InsightParser
 {
@@ -11,16 +14,16 @@ namespace UEBabyPram::InsightParser
 	{
 		auto& Builder = Context.InterfaceBuilder;
 
-		Builder.RouteEvent(ID::RouteId_EventSpec, "CpuProfiler", "EventSpec");
-		Builder.RouteEvent(ID::RouteId_EndThread, "CpuProfiler", "EndThread");
-		Builder.RouteEvent(ID::RouteId_EventBatchV3, "CpuProfiler", "EventBatchV3"); // added in UE 5.6
-		Builder.RouteEvent(ID::RouteId_EventBatchV2, "CpuProfiler", "EventBatchV2"); // backward compatibility, added in UE 5.1, removed in 5.6
-		Builder.RouteEvent(ID::RouteId_EventBatch, "CpuProfiler", "EventBatch"); // backward compatibility; removed in UE 5.1
-		Builder.RouteEvent(ID::RouteId_EndCapture, "CpuProfiler", "EndCapture"); // backward compatibility; removed in UE 5.1
-		Builder.RouteEvent(ID::RouteId_MetadataSpec, "CpuProfiler", "MetadataSpec");
-		Builder.RouteEvent(ID::RouteId_Metadata, "CpuProfiler", "Metadata");
+		Builder.RouteEvent(RouteId_EventSpec, "CpuProfiler", "EventSpec");
+		Builder.RouteEvent(RouteId_EndThread, "CpuProfiler", "EndThread");
+		Builder.RouteEvent(RouteId_EventBatchV3, "CpuProfiler", "EventBatchV3"); // added in UE 5.6
+		Builder.RouteEvent(RouteId_EventBatchV2, "CpuProfiler", "EventBatchV2"); // backward compatibility, added in UE 5.1, removed in 5.6
+		Builder.RouteEvent(RouteId_EventBatch, "CpuProfiler", "EventBatch"); // backward compatibility; removed in UE 5.1
+		Builder.RouteEvent(RouteId_EndCapture, "CpuProfiler", "EndCapture"); // backward compatibility; removed in UE 5.1
+		Builder.RouteEvent(RouteId_MetadataSpec, "CpuProfiler", "MetadataSpec");
+		Builder.RouteEvent(RouteId_Metadata, "CpuProfiler", "Metadata");
 
-		Builder.RouteLoggerEvents(ID::RouteId_CpuScope, "Cpu", true); // scoped trace events
+		Builder.RouteLoggerEvents(RouteId_CpuScope, "Cpu", true); // scoped trace events
 	}
 
 	////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -32,8 +35,74 @@ namespace UEBabyPram::InsightParser
 
 	////////////////////////////////////////////////////////////////////////////////////////////////////
 
-	bool FCpuProfilerAnalyzer::OnEvent(uint16 RouteId, EStyle Style, const FOnEventContext& Context)
+	bool CpuProfilerAnalyzer::OnEvent(uint16 RouteId, EStyle Style, const FOnEventContext& Context)
 	{
+		const auto& EventData = Context.EventData;
+
+		struct ThreadInfo
+		{
+			std::u8string_view thread_name;
+		};
+
+		ThreadInfo info;
+
+		if (Context.ThreadInfo.GetName() != nullptr)
+		{
+			info.thread_name = reinterpret_cast<char8_t const*>(Context.ThreadInfo.GetName());
+		}
+
+		switch (RouteId)
+		{
+		case RouteId_EventSpec:
+			OnEventSpec(Context);
+			break;
+		case RouteId_EndThread:
+		{
+			volatile int i = 0;
+			break;
+		}
+
+		case RouteId_EventBatchV3:
+		case RouteId_EventBatchV2: // backward compatibility
+		{
+			volatile int i = 0;
+			break;
+		}
+
+		case RouteId_EventBatch: // backward compatibility
+		case RouteId_EndCapture: // backward compatibility
+		{
+			volatile int i = 0;
+			break;
+		}
+
+		case RouteId_CpuScope:
+		{
+			volatile int i = 0;
+			break;
+		}
+
+		case RouteId_MetadataSpec:
+		{
+			OnMetadataSpec(Context);
+			break;
+		}
+			
+
+		case RouteId_Metadata:
+		{
+			volatile int i = 0;
+			break;
+		}
+		}
+
+
+
+
+
+
+
+		/*
 		LLM_SCOPE_BYNAME(TEXT("Insights/FCpuProfilerAnalyzer"));
 
 		const auto& EventData = Context.EventData;
@@ -194,11 +263,91 @@ namespace UEBabyPram::InsightParser
 		}
 
 		} // switch (RouteId)
-
+		*/
 		return true;
 	}
 
+	void CpuProfilerAnalyzer::OnEventSpec(const FOnEventContext& Context)
+	{
+		const auto& EventData = Context.EventData;
+
+		uint32 SpecId = EventData.GetValue<uint32>("Id");
+
+		const TCHAR* TimerName = nullptr;
+		FString Name;
+		if (EventData.GetString("Name", Name))
+		{
+			TimerName = *Name;
+		}
+		else
+		{
+			uint8 CharSize = EventData.GetValue<uint8>("CharSize");
+			if (CharSize == sizeof(ANSICHAR))
+			{
+				const ANSICHAR* AnsiName = reinterpret_cast<const ANSICHAR*>(EventData.GetAttachment());
+				Name = StringCast<TCHAR>(AnsiName).Get();
+				TimerName = *Name;
+			}
+			else if (CharSize == 0 || CharSize == sizeof(TCHAR)) // 0 for backwards compatibility
+			{
+				TimerName = reinterpret_cast<const TCHAR*>(EventData.GetAttachment());
+			}
+			else
+			{
+				Name = FString::Printf(TEXT("<invalid %u>"), SpecId);
+				TimerName = *Name;
+			}
+		}
+
+		if (TimerName[0] == 0)
+		{
+			Name = FString::Printf(TEXT("<noname %u>"), SpecId);
+			TimerName = *Name;
+		}
+
+		FString File;
+		uint32 Line = 0;
+		if (EventData.GetString("File", File) && !File.IsEmpty())
+		{
+			Line = EventData.GetValue<uint32>("Line");
+		}
+		const TCHAR* FileName = !File.IsEmpty() ? *File : nullptr;
+
+		//const TCHAR* StoredTimerName = Session.StoreString(TimerName);
+
+		std::wstring_view EventName = TimerName;
+
+		static std::set<std::wstring> Timer;
+		static std::optional<std::uint32_t> system_id;
+
+		if (EventName == std::wstring_view{ L"Frame" })
+		{
+			system_id = SpecId;
+			volatile int i = 0;
+		}
+
+		if (Timer.insert(std::wstring{ EventName }).second)
+		{
+			if (EventName.contains(L"Frame"))
+			{
+				volatile int i2 = 0;
+			}
+			else if (EventName.contains(L"BlueprintUpdateAnimation"))
+			{
+				volatile int i2 = 0;
+			}
+		}
+
+		
+
+		volatile int i = 0;
+		
+		//DefineMergedTimer(SpecId, StoredTimerName, FileName, Line);
+	}
+
 	////////////////////////////////////////////////////////////////////////////////////////////////////
+
+	/*
 
 	void FCpuProfilerAnalyzer::ProcessBuffer(const FEventTime& EventTime, FThreadState& ThreadState, const uint8* BufferPtr, uint32 BufferSize)
 	{
@@ -1085,6 +1234,7 @@ namespace UEBabyPram::InsightParser
 		}
 		return *ThreadState;
 	}
+	*/
 
 }
 
