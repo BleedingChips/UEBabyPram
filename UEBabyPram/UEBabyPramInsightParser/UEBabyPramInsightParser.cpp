@@ -425,7 +425,7 @@ namespace UEBabyPram::InsightParser
 {
 	void Test(DataResourceInterface& resource)
 	{
-		CpuReceiverInterface Interface;
+		InsightReciver Interface;
 
 
 		CpuProfilerAnalyzer analyzer{ Interface };

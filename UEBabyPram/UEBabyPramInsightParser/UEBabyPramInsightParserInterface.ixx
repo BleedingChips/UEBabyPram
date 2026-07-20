@@ -12,10 +12,10 @@ export namespace UEBabyPram::InsightParser
 		virtual int32 Read(void* Data, uint32 Size) = 0;
 	};
 
-	struct CpuReceiverInterface
+	struct InsightReciver
 	{
+		virtual bool RequireEventName(std::wstring_view event_name) { return true; }
 		virtual bool RequireThread(std::u8string_view thread_name) { return true; }
-		//virtual void OnCPUEventCreated();
 	};
 }
 

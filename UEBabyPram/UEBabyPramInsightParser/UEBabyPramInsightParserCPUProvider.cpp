@@ -39,18 +39,6 @@ namespace UEBabyPram::InsightParser
 	{
 		const auto& EventData = Context.EventData;
 
-		struct ThreadInfo
-		{
-			std::u8string_view thread_name;
-		};
-
-		ThreadInfo info;
-
-		if (Context.ThreadInfo.GetName() != nullptr)
-		{
-			info.thread_name = reinterpret_cast<char8_t const*>(Context.ThreadInfo.GetName());
-		}
-
 		switch (RouteId)
 		{
 		case RouteId_EventSpec:
@@ -84,7 +72,7 @@ namespace UEBabyPram::InsightParser
 
 		case RouteId_MetadataSpec:
 		{
-			OnMetadataSpec(Context);
+			//OnMetadataSpec(Context);
 			break;
 		}
 			
