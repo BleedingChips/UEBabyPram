@@ -8,12 +8,14 @@ module;
 #include "TraceServices/Model/Threads.h"
 #include "TraceServices/Model/TimingProfiler.h"
 
-#pragma optimize("", off)
-
 module UEBabyPramInsightParser;
 import std;
-import UEBabyPramInsightParserCPUProvider;
+import UEBabyPramInsightParserAnalysisInterface;
+import UEBabyPramInsightParserCPUAnalysis;
+import UEBabyPramInsightParserAnalysisSession;
 
+namespace UEBabyPram::InsightParser
+{
 	class FSummarizeCpuScopeAnalyzer
 	{
 	public:
@@ -66,8 +68,8 @@ import UEBabyPramInsightParserCPUProvider;
 
 
 	class FSummarizeCpuProfilerProvider
-		: public TraceServices::IEditableThreadProvider
-		, public TraceServices::IEditableTimingProfilerProvider
+		: public IEditableThreadProvider
+		, public IEditableTimingProfilerProvider
 	{
 	public:
 		FSummarizeCpuProfilerProvider();
@@ -421,14 +423,15 @@ import UEBabyPramInsightParserCPUProvider;
 		return nullptr;
 	}
 
-namespace UEBabyPram::InsightParser
-{
 	void Test(DataResourceInterface& resource)
 	{
 		InsightReciver Interface;
 
+		FSummarizeCpuProfilerProvider provider;
 
-		CpuProfilerAnalyzer analyzer{ Interface };
+		FAnalysisSession seesion{1, L"asdasd"};
+
+		FCpuProfilerAnalyzer analyzer{ seesion, provider, provider };
 		//TSharedPtr<TraceServices::IAnalysisSession> Session = TraceServices::CreateAnalysisSession(0, nullptr, {});
 
 		//FSummarizeCpuProfilerProvider CpuProfilerProvider;
@@ -464,6 +467,5 @@ namespace UEBabyPram::InsightParser
 		
 	}
 }
-#pragma optimize("", on)
 
 //export import UEBabyPramInsightInterface;

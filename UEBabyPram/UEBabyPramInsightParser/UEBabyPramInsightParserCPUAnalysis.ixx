@@ -9,41 +9,27 @@ module;
 // TraceServices
 #include "Model/MonotonicTimeline.h"
 #include "TraceServices/Model/TimingProfiler.h"
+#include "TraceServices/Model/Threads.h"
 
-export module UEBabyPramInsightParserCPUProvider;
+export module UEBabyPramInsightParserCPUAnalysis;
+
+import UEBabyPramInsightParserAnalysisInterface;
 import UEBabyPramInsightParserInterface;
 
 export namespace UEBabyPram::InsightParser
 {
 
-	class CpuProfilerAnalyzer
+	class FCpuProfilerAnalyzer
 		: public UE::Trace::IAnalyzer
 	{
 	public:
-		CpuProfilerAnalyzer(InsightReciver& reciver) : reciver(reciver) {}
-		~CpuProfilerAnalyzer() = default;
+		FCpuProfilerAnalyzer(IAnalysisSession& Session, IEditableTimingProfilerProvider& InEditableTimingProfilerProvider, IEditableThreadProvider& InEditableThreadProvider);
+		~FCpuProfilerAnalyzer();
 		virtual void OnAnalysisBegin(const FOnAnalysisContext& Context) override;
 		virtual void OnAnalysisEnd(/*const FOnAnalysisEndContext& Context*/) override;
 		virtual bool OnEvent(uint16 RouteId, EStyle Style, const FOnEventContext& Context) override;
 
 	private:
-
-		enum : uint16
-		{
-			RouteId_EventSpec,
-			RouteId_EndThread,
-			RouteId_EventBatchV3,
-			RouteId_EventBatchV2, // backward compatibility
-			RouteId_EventBatch, // backward compatibility
-			RouteId_EndCapture, // backward compatibility
-			RouteId_CpuScope,
-			RouteId_MetadataSpec,
-			RouteId_Metadata,
-		};
-
-		void OnEventSpec(const FOnEventContext& Context);
-
-		/*
 		struct FEventScopeState
 		{
 			uint64 StartCycle;
@@ -75,6 +61,19 @@ export namespace UEBabyPram::InsightParser
 			uint32 Count;
 		};
 
+		enum : uint16
+		{
+			RouteId_EventSpec,
+			RouteId_EndThread,
+			RouteId_EventBatchV3,
+			RouteId_EventBatchV2, // backward compatibility
+			RouteId_EventBatch, // backward compatibility
+			RouteId_EndCapture, // backward compatibility
+			RouteId_CpuScope,
+			RouteId_MetadataSpec,
+			RouteId_Metadata,
+		};
+
 		void ProcessBuffer(const FEventTime& EventTime, FThreadState& ThreadState, const uint8* BufferPtr, uint32 BufferSize);
 		void ProcessBufferV2(const FEventTime& EventTime, FThreadState& ThreadState, const uint8* BufferPtr, uint32 BufferSize, int32 Version);
 		void DispatchPendingEvents(uint64& LastCycle, uint64 CurrentCycle, FThreadState& ThreadState, const FPendingEvent*& PendingCursor, int32& RemainingPending, bool bIsBeginEvent);
@@ -82,7 +81,7 @@ export namespace UEBabyPram::InsightParser
 		void EndOpenEvents(FThreadState& ThreadState, double Timestamp);
 		void OnCpuScopeEnter(const FOnEventContext& Context);
 		void OnCpuScopeLeave(const FOnEventContext& Context);
-		
+		void OnEventSpec(const FOnEventContext& Context);
 		void OnMetadataSpec(const FOnEventContext& Context);
 
 		uint32 GetOrAddTimer(uint32 SpecId);
@@ -93,11 +92,8 @@ export namespace UEBabyPram::InsightParser
 		void SetTimerName(uint32 SpecId, uint32 TimerId, const TCHAR* TimerName);
 
 		FThreadState& GetOrAddThreadState(uint32 ThreadId);
-		*/
 
 	private:
-
-		/*
 		IAnalysisSession& Session;
 		IEditableTimingProfilerProvider& EditableTimingProfilerProvider;
 		IEditableThreadProvider& EditableThreadProvider;
@@ -116,9 +112,5 @@ export namespace UEBabyPram::InsightParser
 
 		uint32 NumTimerWarnings = 0;
 		static constexpr uint32 NumMaxWarnings = 100;
-		*/
-
-
-		InsightReciver& reciver;
 	};
 }
