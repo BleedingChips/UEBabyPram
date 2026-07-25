@@ -6,7 +6,6 @@
 import Potato;
 import std;
 import UEBabyPramInsightParser;
-import UEBabyPramInsightParserInterface;
 
 struct DcomentWrapper : public UEBabyPram::InsightParser::DataResourceInterface
 {

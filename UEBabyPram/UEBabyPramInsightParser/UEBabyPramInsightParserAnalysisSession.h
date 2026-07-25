@@ -1,4 +1,4 @@
-module;
+#pragma once
 
 #include "TraceServices/Model/AnalysisSession.h"
 #include "TraceServices/Containers/Allocators.h"
@@ -9,10 +9,9 @@ module;
 #include "AnalysisCache.h"
 #include "AnalysisServicePrivate.h"
 
-export module UEBabyPramInsightParserAnalysisSession;
-import UEBabyPramInsightParserAnalysisInterface;
+#include "UEBabyPramInsightParserAnalysisInterface.h"
 
-export namespace UEBabyPram::InsightParser
+namespace UEBabyPram::InsightParser
 {
 
 	using TraceServices::IAnalysisSession;

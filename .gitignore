@@ -443,3 +443,6 @@ vsxmake*/
 
 # generated skill
 Skills/*
+
+# UE
+!UEBabyPram/MiniUESource/Runtime/OodleDataCompression/Sdks/2.9.14/lib/Win64/*.lib

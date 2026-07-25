@@ -1,4 +1,5 @@
-module;
+#pragma once
+
 #include "CoreTypes.h"
 #include "Containers/Map.h"
 #include "Containers/UnrealString.h"
@@ -11,12 +12,9 @@ module;
 #include "TraceServices/Model/TimingProfiler.h"
 #include "TraceServices/Model/Threads.h"
 
-export module UEBabyPramInsightParserCPUAnalysis;
+#include "UEBabyPramInsightParserAnalysisInterface.h"
 
-import UEBabyPramInsightParserAnalysisInterface;
-import UEBabyPramInsightParserInterface;
-
-export namespace UEBabyPram::InsightParser
+namespace UEBabyPram::InsightParser
 {
 
 	class FCpuProfilerAnalyzer

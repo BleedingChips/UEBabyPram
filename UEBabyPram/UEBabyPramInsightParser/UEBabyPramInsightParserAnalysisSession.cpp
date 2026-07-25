@@ -1,8 +1,7 @@
-module;
+
 #include "Trace/Analyzer.h"
 #include "Templates/Tuple.h"
-
-module UEBabyPramInsightParserAnalysisSession;
+#include "UEBabyPramInsightParserAnalysisSession.h"
 
 namespace UEBabyPram::InsightParser
 {

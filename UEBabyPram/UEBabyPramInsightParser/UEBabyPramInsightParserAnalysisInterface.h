@@ -1,13 +1,11 @@
-module;
+#pragma once
+
 #include "TraceServices/Model/AnalysisSession.h"
 #include "TraceServices/Model/TimingProfiler.h"
 #include "Model/MonotonicTimeline.h"
 #include "TraceServices/Model/Threads.h"
 
-
-export module UEBabyPramInsightParserAnalysisInterface;
-
-export namespace UEBabyPram::InsightParser
+namespace UEBabyPram::InsightParser
 {
 
 	using TraceServices::IEditableProvider;

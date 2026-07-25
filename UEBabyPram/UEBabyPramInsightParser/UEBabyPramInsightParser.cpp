@@ -1,4 +1,4 @@
-module;
+
 #include "Trace/Analyzer.h"
 #include "Analysis/Engine.h"
 #include "Analysis/StreamReader.h"
@@ -8,11 +8,9 @@ module;
 #include "TraceServices/Model/Threads.h"
 #include "TraceServices/Model/TimingProfiler.h"
 
-module UEBabyPramInsightParser;
-import std;
-import UEBabyPramInsightParserAnalysisInterface;
-import UEBabyPramInsightParserCPUAnalysis;
-import UEBabyPramInsightParserAnalysisSession;
+#include "UEBabyPramInsightParserAnalysisInterface.h"
+#include "UEBabyPramInsightParserCPUAnalysis.h"
+#include "UEBabyPramInsightParserAnalysisSession.h"
 
 namespace UEBabyPram::InsightParser
 {
@@ -212,17 +210,6 @@ namespace UEBabyPram::InsightParser
 
 	void FSummarizeCpuProfilerProvider::AddThread(uint32 Id, const TCHAR* Name, EThreadPriority Priority)
 	{
-		if (Name != nullptr)
-		{
-			std::wstring_view ThreadName = Name;
-
-			if (ThreadName.contains(L"Core"))
-			{
-				volatile int i = 0;
-			}
-		}
-		
-
 		TUniquePtr<FThread>* Found = Threads.Find(Id);
 		if (!Found)
 		{
@@ -368,30 +355,16 @@ namespace UEBabyPram::InsightParser
 
 	void FSummarizeCpuProfilerProvider::AppendBeginEvent(const FSummarizeCpuScopeAnalyzer::FScopeEvent& ScopeEvent)
 	{
-		//FPlatformEventTraceAnalyzer
-		auto Name = LookupScopeName(ScopeEvent.ScopeId);
-		std::wstring NameSW = **Name;
-		//sadas 
-		//sadsad
-		static std::set<std::wstring> Names;
-		if (Name != nullptr && ( Name->Contains(TEXT("GameThread")) || Name->Contains(TEXT("Context")) && Name->Contains(TEXT("Switch")) || Name->StartsWith(TEXT("Core"))))
-		{
-			if (Names.insert(NameSW).second)
-			{
-				volatile int o = 0;
-			}
-			
-		}
+		auto String = LookupScopeName(ScopeEvent.ScopeId);
 		// Notify the registered scope analyzers.
 		for (TSharedPtr<FSummarizeCpuScopeAnalyzer>& Analyzer : ScopeAnalyzers)
 		{
-			Analyzer->OnCpuScopeEnter(ScopeEvent, LookupScopeName(ScopeEvent.ScopeId));
+			Analyzer->OnCpuScopeEnter(ScopeEvent, String);
 		}
 	}
 
 	void FSummarizeCpuProfilerProvider::AppendEndEvent(const FSummarizeCpuScopeAnalyzer::FScope& Scope, const FString* ScopeName)
 	{
-		std::wstring_view name = **ScopeName;
 		// Notify the registered scope analyzers.
 		for (TSharedPtr<FSummarizeCpuScopeAnalyzer>& Analyzer : ScopeAnalyzers)
 		{
@@ -423,7 +396,7 @@ namespace UEBabyPram::InsightParser
 		return nullptr;
 	}
 
-	void Test(DataResourceInterface& resource)
+	void TestImp(DataResourceInterface& resource)
 	{
 		InsightReciver Interface;
 

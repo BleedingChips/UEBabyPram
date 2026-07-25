@@ -28,6 +28,8 @@ if true then
         set_languages("cxxlatest")
         add_files("UEBabyPram/UEBabyPramInsightParser/**.cpp")
         add_files("UEBabyPram/UEBabyPramInsightParser/**.ixx", {public=true})
+        add_includedirs("UEBabyPram/UEBabyPramInsightParser/")
+        add_headerfiles("UEBabyPram/UEBabyPramInsightParser/**.h")
         add_deps("Potato")
         add_deps("UEBabyPramMiniUESource", {public = true})
     target_end()

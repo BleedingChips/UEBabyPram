@@ -1,12 +1,18 @@
+module;
 
+#include "UEBabyPramInsightParserInterface.h"
 
 export module UEBabyPramInsightParser;
 import std;
-import UEBabyPramInsightParserInterface;
 
 export namespace UEBabyPram::InsightParser
 {
-	void Test(DataResourceInterface& resource);
+	using UEBabyPram::InsightParser::DataResourceInterface;
+
+	void Test(DataResourceInterface& resource)
+	{
+		TestImp(resource);
+	}
 }
 
 

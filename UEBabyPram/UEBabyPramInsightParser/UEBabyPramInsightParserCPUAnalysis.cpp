@@ -1,4 +1,4 @@
-module;
+
 
 #include "Trace/Analyzer.h"
 #include "Containers/UnrealString.h"
@@ -10,9 +10,7 @@ module;
 #include "Serialization/MemoryReader.h"
 #include "CborReader.h"
 
-module UEBabyPramInsightParserCPUAnalysis;
-import std;
-import UEBabyPramInsightParserAnalysisInterface;
+#include "UEBabyPramInsightParserCPUAnalysis.h"
 
 namespace UEBabyPram::InsightParser
 {
