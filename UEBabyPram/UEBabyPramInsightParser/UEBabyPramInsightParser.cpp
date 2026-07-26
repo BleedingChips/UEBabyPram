@@ -11,59 +11,11 @@
 #include "UEBabyPramInsightParserAnalysisInterface.h"
 #include "UEBabyPramInsightParserCPUAnalysis.h"
 #include "UEBabyPramInsightParserAnalysisSession.h"
+#include "UEBabyPramInsightParserInterface.h"
+#include "UEBabyPramInsightParserPlatformAnalysis.h"
 
 namespace UEBabyPram::InsightParser
 {
-	class FSummarizeCpuScopeAnalyzer
-	{
-	public:
-		enum class EScopeEventType : uint32
-		{
-			Enter,
-			Exit
-		};
-
-		struct FScopeEvent
-		{
-			EScopeEventType ScopeEventType;
-			uint32 ScopeId;
-			uint32 ThreadId;
-			double Timestamp; // As Seconds
-		};
-
-		struct FScope
-		{
-			uint32 ScopeId;
-			uint32 ThreadId;
-			double EnterTimestamp; // As Seconds
-			double ExitTimestamp;  // As Seconds
-		};
-
-	public:
-		virtual ~FSummarizeCpuScopeAnalyzer() = default;
-
-		/** Invoked when a CPU scope is discovered. This function is always invoked first when a CPU scope is encountered for the first time.*/
-		virtual void OnCpuScopeDiscovered(uint32 ScopeId) {}
-
-		/** Invoked when CPU scope specification is encountered in the trace stream. */
-		virtual void OnCpuScopeName(uint32 ScopeId, const FStringView& ScopeName) {};
-
-		/** Invoked when a scope is entered. The scope name might not be known yet. */
-		virtual void OnCpuScopeEnter(const FScopeEvent& ScopeEnter, const FString* ScopeName) {};
-
-		/** Invoked when a scope is exited. The scope name might not be known yet. */
-		virtual void OnCpuScopeExit(const FScope& Scope, const FString* ScopeName) {};
-
-		/** Invoked when a root event on the specified thread along with all child events down to the leaves are known. */
-		virtual void OnCpuScopeTree(uint32 ThreadId, const TArray64<FSummarizeCpuScopeAnalyzer::FScopeEvent>& ScopeEvents, const TFunction<const FString* (uint32)>& ScopeLookupNameFn) {};
-
-		/** Invoked when the trace stream has been fully consumed/processed. */
-		virtual void OnCpuScopeAnalysisEnd() {};
-
-		static constexpr uint32 CoroutineSpecId = (1u << 31u) - 1u;
-		static constexpr uint32 CoroutineUnknownSpecId = (1u << 31u) - 2u;
-	};
-
 
 	class FSummarizeCpuProfilerProvider
 		: public IEditableThreadProvider
@@ -249,7 +201,7 @@ namespace UEBabyPram::InsightParser
 
 			if (!Name.IsEmpty())
 			{
-				Analyzer->OnCpuScopeName(TimerId, Name);
+				Analyzer->OnCpuScopeName(TimerId, Name.GetData(), Name.Len());
 			}
 		}
 
@@ -266,7 +218,7 @@ namespace UEBabyPram::InsightParser
 		// Notify the registered scope analyzers.
 		for (TSharedPtr<FSummarizeCpuScopeAnalyzer>& Analyzer : ScopeAnalyzers)
 		{
-			Analyzer->OnCpuScopeName(TimerId, Name);
+			Analyzer->OnCpuScopeName(TimerId, Name.GetData(), Name.Len());
 		}
 	}
 
@@ -359,7 +311,7 @@ namespace UEBabyPram::InsightParser
 		// Notify the registered scope analyzers.
 		for (TSharedPtr<FSummarizeCpuScopeAnalyzer>& Analyzer : ScopeAnalyzers)
 		{
-			Analyzer->OnCpuScopeEnter(ScopeEvent, String);
+			Analyzer->OnCpuScopeEnter(ScopeEvent, String->GetCharArray().GetData(), String->GetCharArray().Num());
 		}
 	}
 
@@ -368,16 +320,38 @@ namespace UEBabyPram::InsightParser
 		// Notify the registered scope analyzers.
 		for (TSharedPtr<FSummarizeCpuScopeAnalyzer>& Analyzer : ScopeAnalyzers)
 		{
-			Analyzer->OnCpuScopeExit(Scope, ScopeName);
+			Analyzer->OnCpuScopeExit(Scope, 
+				ScopeName != nullptr ? ScopeName->GetCharArray().GetData() : nullptr, 
+				ScopeName != nullptr ? ScopeName->GetCharArray().Num() : 0
+			);
 		}
 	}
 
 	void FSummarizeCpuProfilerProvider::OnCpuScopeTree(uint32 ThreadId, const FScopeTreeInfo& ScopeTreeInfo)
 	{
 		// Notify the registered scope analyzers.
+
+		auto Func = [](void* Object, uint32 Id, wchar_t const*& ScopeName, std::size_t& ScoprNameLen) -> bool {
+			auto This = static_cast<FSummarizeCpuProfilerProvider*>(Object);
+			if (This->LookupScopeNameFn)
+			{
+				auto Str = This->LookupScopeNameFn(Id);
+				if (Str != nullptr)
+				{
+					ScopeName = Str->GetCharArray().GetData();
+					ScoprNameLen = Str->GetCharArray().Num();
+					return true;
+				}
+			}
+			return false;
+			};
+
 		for (TSharedPtr<FSummarizeCpuScopeAnalyzer>& Analyzer : ScopeAnalyzers)
 		{
-			Analyzer->OnCpuScopeTree(ThreadId, ScopeTreeInfo.ScopeEvents, LookupScopeNameFn);
+			Analyzer->OnCpuScopeTree(ThreadId, 
+				ScopeTreeInfo.ScopeEvents.GetData(), ScopeTreeInfo.ScopeEvents.Num(),
+				Func, static_cast<void*>(this)
+			);
 		}
 	}
 
@@ -396,21 +370,32 @@ namespace UEBabyPram::InsightParser
 		return nullptr;
 	}
 
-	void TestImp(DataResourceInterface& resource)
+	template<typename T>
+	struct NoneDeleter
+	{
+		void operator()(T const* Ptr) {}
+	};
+
+	void TestImp(DataResourceInterface& Resource, FSummarizeCpuScopeAnalyzer& Analyzer)
 	{
 		InsightReciver Interface;
 
 		FSummarizeCpuProfilerProvider provider;
 
+		provider.AddCpuScopeAnalyzer(
+			TSharedPtr<FSummarizeCpuScopeAnalyzer>(&Analyzer, NoneDeleter<FSummarizeCpuScopeAnalyzer>{})
+		);
+
 		FAnalysisSession seesion{1, L"asdasd"};
 
 		FCpuProfilerAnalyzer analyzer{ seesion, provider, provider };
+		FPlatformEventTraceAnalyzer Analyzer2{ seesion };
 		//TSharedPtr<TraceServices::IAnalysisSession> Session = TraceServices::CreateAnalysisSession(0, nullptr, {});
 
 		//FSummarizeCpuProfilerProvider CpuProfilerProvider;
 		//TSharedPtr<UE::Trace::IAnalyzer> CpuProfilerAnalyzer = TraceServices::CreateCpuProfilerAnalyzer(*Session, CpuProfilerProvider, CpuProfilerProvider);
 
-		TArray<UE::Trace::IAnalyzer*> List = { &analyzer };
+		TArray<UE::Trace::IAnalyzer*> List = { &analyzer, &Analyzer2 };
 		UE::Trace::FMessageDelegate Delegate;
 		UE::Trace::FAnalysisEngine engine{ std::move(List), std::move(Delegate) };
 
@@ -422,7 +407,7 @@ namespace UEBabyPram::InsightParser
 
 			int32 BytesRead = Buffer.Fill([&](uint8* Out, uint32 Size)
 				{
-					return resource.Read(Out, Size);
+					return Resource.Read(Out, Size);
 				});
 
 			if (BytesRead <= 0)

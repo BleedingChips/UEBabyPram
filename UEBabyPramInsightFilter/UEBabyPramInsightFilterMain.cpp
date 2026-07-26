@@ -7,17 +7,10 @@ import Potato;
 import std;
 import UEBabyPramInsightParser;
 
-struct DcomentWrapper : public UEBabyPram::InsightParser::DataResourceInterface
+struct ScopeAnayzer : public UEBabyPram::InsightParser::ScopeAnalyzer
 {
-	DcomentWrapper(Potato::Document::DocumentReader& reader) : reader(reader) {}
-	virtual std::int32_t Read(void* out_data, std::uint32_t byte_size) override
-	{
-		return static_cast<std::int32_t>(reader.StreamRead(static_cast<std::byte*>(out_data), byte_size));
-	}
-protected:
-	Potato::Document::DocumentReader& reader;
-};
 
+};
 
 
 int main(int argc, char* argv[])
@@ -52,8 +45,8 @@ int main(int argc, char* argv[])
 	if (!insight_path.empty() && std::filesystem::exists(insight_path))
 	{
 		Potato::Document::DocumentReader Reader(insight_path);
-		DcomentWrapper Wrapper{ Reader };
-		UEBabyPram::InsightParser::Test(Wrapper);
+		ScopeAnayzer Ana;
+		UEBabyPram::InsightParser::Test(Reader, Ana);
 	}
 
 	return 0;
