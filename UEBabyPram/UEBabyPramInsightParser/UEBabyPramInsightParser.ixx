@@ -15,6 +15,10 @@ export namespace UEBabyPram::InsightParser
 		using FSummarizeCpuScopeAnalyzer::OnCpuScopeDiscovered;
 		using FSummarizeCpuScopeAnalyzer::OnCpuScopeAnalysisEnd;
 
+		using FSummarizeCpuScopeAnalyzer::EScopeEventType;
+		using FSummarizeCpuScopeAnalyzer::FScope;
+		using FSummarizeCpuScopeAnalyzer::FScopeEvent;
+
 		virtual void OnCpuScopeName(uint32 ScopeId, std::wstring_view ScopeName) {}
 		virtual void OnCpuScopeEnter(const FScopeEvent& ScopeEnter, std::wstring_view ScopeName) {};
 		virtual void OnCpuScopeExit(const FScope& Scope, std::wstring_view ScopeName) {};
@@ -22,26 +26,48 @@ export namespace UEBabyPram::InsightParser
 
 	protected:
 		
-
+		static std::wstring_view CoverStringView(wchar_t const* ScopeName, std::size_t ScopeNameLen)
+		{
+			if (ScopeName != nullptr && ScopeNameLen > 0)
+			{
+				if (ScopeName[ScopeNameLen - 1] == 0)
+				{
+					return std::wstring_view{ ScopeName, ScopeNameLen - 1};
+				}
+				return std::wstring_view{ ScopeName, ScopeNameLen };
+			}
+			return {};
+		}
 		/** Invoked when CPU scope specification is encountered in the trace stream. */
 		virtual void OnCpuScopeName(uint32 ScopeId, wchar_t const* ScopeName, std::size_t ScopeNameLen) {
-			OnCpuScopeName(ScopeId, std::wstring_view(ScopeName, ScopeNameLen));
+			OnCpuScopeName(ScopeId, CoverStringView(ScopeName, ScopeNameLen));
 		};
 
 		/** Invoked when a scope is entered. The scope name might not be known yet. */
 		virtual void OnCpuScopeEnter(const FScopeEvent& ScopeEnter, wchar_t const* ScopeName, std::size_t ScopeNameLen) {
-			OnCpuScopeEnter(ScopeEnter, std::wstring_view(ScopeName, ScopeNameLen));
+			OnCpuScopeEnter(ScopeEnter, CoverStringView(ScopeName, ScopeNameLen));
 		};
 
 		/** Invoked when a scope is exited. The scope name might not be known yet. */
 		virtual void OnCpuScopeExit(const FScope& Scope, wchar_t const* ScopeName, std::size_t ScopeNameLen) {
-			OnCpuScopeExit(Scope, std::wstring_view(ScopeName, ScopeNameLen));
+			OnCpuScopeExit(Scope, CoverStringView(ScopeName, ScopeNameLen));
 		};
 
-		using ScopeNameFunction = bool(void* Object, uint32, wchar_t const*& ScopeName, std::size_t& ScopeNameLen);
+		using ScopeNameFunction = bool(*)(void* Object, uint32, wchar_t const*& ScopeName, std::size_t& ScopeNameLen);
 
 		/** Invoked when a root event on the specified thread along with all child events down to the leaves are known. */
-		virtual void OnCpuScopeTree(uint32 ThreadId, FSummarizeCpuScopeAnalyzer::FScopeEvent const* ScopeEvents, std::size_t ScopeEventsLen, ScopeNameFunction func, void* Object) {};
+		virtual void OnCpuScopeTree(uint32 ThreadId, FSummarizeCpuScopeAnalyzer::FScopeEvent const* ScopeEvents, std::size_t ScopeEventsLen, ScopeNameFunction func, void* Object) {
+			auto fun_object = [=](std::uint32_t ScopeID) -> std::wstring_view {
+				wchar_t const* OutString = nullptr;
+				std::size_t OutStringLen = 0;
+				if (func(Object, ScopeID, OutString, OutStringLen))
+				{
+					return CoverStringView(OutString, OutStringLen);
+				}
+				return {};
+			};
+			OnCpuScopeTree(ThreadId, std::span(ScopeEvents, ScopeEventsLen), fun_object);
+		};
 	};
 
 	struct DcomentWrapper : public UEBabyPram::InsightParser::DataResourceInterface
