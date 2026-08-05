@@ -10,22 +10,19 @@
 #include "Serialization/MemoryReader.h"
 #include "CborReader.h"
 
-#include "UEBabyPramInsightParserCPUAnalysis.h"
+#include "UEBabyPramInsightParserCPUAnalysisNewVersion.h"
 
 namespace UEBabyPram::InsightParser
 {
 
-	FCpuProfilerAnalyzer::FCpuProfilerAnalyzer(IAnalysisSession& InSession, IEditableTimingProfilerProvider& InEditableTimingProfilerProvider, IEditableThreadProvider& InEditableThreadProvider, BaseParser& Parser)
-		: Session(InSession)
-		, EditableTimingProfilerProvider(InEditableTimingProfilerProvider)
-		, EditableThreadProvider(InEditableThreadProvider)
-		, Parser(Parser)
+	CPUScopeAnalyzer::CPUScopeAnalyzer(AnalysisContext& AnaContext)
+		: AnaContext(AnaContext)
 	{
 	}
 
 	////////////////////////////////////////////////////////////////////////////////////////////////////
 
-	FCpuProfilerAnalyzer::~FCpuProfilerAnalyzer()
+	CPUScopeAnalyzer::~CPUScopeAnalyzer()
 	{
 		for (auto& KV : ThreadStatesMap)
 		{
@@ -36,7 +33,7 @@ namespace UEBabyPram::InsightParser
 
 	////////////////////////////////////////////////////////////////////////////////////////////////////
 
-	void FCpuProfilerAnalyzer::OnAnalysisBegin(const FOnAnalysisContext& Context)
+	void CPUScopeAnalyzer::OnAnalysisBegin(const FOnAnalysisContext& Context)
 	{
 		auto& Builder = Context.InterfaceBuilder;
 
@@ -54,7 +51,7 @@ namespace UEBabyPram::InsightParser
 
 	////////////////////////////////////////////////////////////////////////////////////////////////////
 
-	void FCpuProfilerAnalyzer::OnAnalysisEnd()
+	void CPUScopeAnalyzer::OnAnalysisEnd()
 	{
 
 		for (auto& KV : ThreadStatesMap)
@@ -97,7 +94,7 @@ namespace UEBabyPram::InsightParser
 
 	////////////////////////////////////////////////////////////////////////////////////////////////////
 
-	bool FCpuProfilerAnalyzer::OnEvent(uint16 RouteId, EStyle Style, const FOnEventContext& Context)
+	bool CPUScopeAnalyzer::OnEvent(uint16 RouteId, EStyle Style, const FOnEventContext& Context)
 	{
 
 		const auto& EventData = Context.EventData;
@@ -131,7 +128,6 @@ namespace UEBabyPram::InsightParser
 			{
 				ensure(Cycle >= ThreadState.LastCycle);
 				double Timestamp = Context.EventTime.AsSeconds(Cycle);
-				Session.UpdateDurationSeconds(Timestamp);
 				EndOpenEvents(ThreadState, Timestamp);
 			}
 
@@ -159,12 +155,6 @@ namespace UEBabyPram::InsightParser
 			const uint8* BufferPtr = DataView.GetData();
 
 			ProcessBufferV2(Context.EventTime, ThreadState, BufferPtr, BufferSize, RouteId == RouteId_EventBatchV3 ? 3 : 2);
-			if (ThreadState.LastCycle != 0)
-			{
-				double Timestamp = Context.EventTime.AsSeconds(ThreadState.LastCycle);
-
-				Session.UpdateDurationSeconds(Timestamp);
-			}
 
 			TotalEventSize += BufferSize;
 			break;
@@ -194,15 +184,9 @@ namespace UEBabyPram::InsightParser
 				if (ThreadState.LastCycle != 0)
 				{
 					double Timestamp = Context.EventTime.AsSeconds(ThreadState.LastCycle);
-					Session.UpdateDurationSeconds(Timestamp);
 					EndOpenEvents(ThreadState, Timestamp);
 				}
 				ThreadState.LastCycle = ~0ull;
-			}
-			else if (ThreadState.LastCycle != 0)
-			{
-				double Timestamp = Context.EventTime.AsSeconds(ThreadState.LastCycle);
-				Session.UpdateDurationSeconds(Timestamp);
 			}
 
 			TotalEventSize += BufferSize;
@@ -238,13 +222,13 @@ namespace UEBabyPram::InsightParser
 				const uint32* FoundMetadataTimerId = MetadataIdToTimerIdMap.Find(MetadataId);
 				if (FoundMetadataTimerId == nullptr)
 				{
-					TimerId = EditableTimingProfilerProvider.AddMetadata(TimerId, MoveTemp(Metadata));
+					TimerId = AnaContext.AddMetadata(TimerId, MoveTemp(Metadata));
 					MetadataIdToTimerIdMap.Add(MetadataId, TimerId);
 				}
 				else
 				{
 					// Replace the placeholder metadata added if we received a timing event with this metadata first.
-					EditableTimingProfilerProvider.SetMetadata(*FoundMetadataTimerId, MoveTemp(Metadata), TimerId);
+					AnaContext.SetMetadata(*FoundMetadataTimerId, MoveTemp(Metadata), TimerId);
 				}
 			}
 			break;
@@ -257,7 +241,7 @@ namespace UEBabyPram::InsightParser
 
 	////////////////////////////////////////////////////////////////////////////////////////////////////
 
-	void FCpuProfilerAnalyzer::ProcessBuffer(const FEventTime& EventTime, FThreadState& ThreadState, const uint8* BufferPtr, uint32 BufferSize)
+	void CPUScopeAnalyzer::ProcessBuffer(const FEventTime& EventTime, FThreadState& ThreadState, const uint8* BufferPtr, uint32 BufferSize)
 	{
 
 		uint64 LastCycle = ThreadState.LastCycle;
@@ -338,7 +322,7 @@ namespace UEBabyPram::InsightParser
 
 	////////////////////////////////////////////////////////////////////////////////////////////////////
 
-	void FCpuProfilerAnalyzer::ProcessBufferV2(const FEventTime& EventTime, FThreadState& ThreadState, const uint8* BufferPtr, uint32 BufferSize, int32 Version)
+	void CPUScopeAnalyzer::ProcessBufferV2(const FEventTime& EventTime, FThreadState& ThreadState, const uint8* BufferPtr, uint32 BufferSize, int32 Version)
 	{
 
 		uint64 LastCycle = ThreadState.LastCycle;
@@ -402,7 +386,7 @@ namespace UEBabyPram::InsightParser
 							CborWriter.WriteValue("C", 1); // continuation?
 							CborWriter.WriteValue(false);
 						}
-						uint32 MetadataTimerId = EditableTimingProfilerProvider.AddMetadata(CoroutineTimerId, MoveTemp(CborData));
+						uint32 MetadataTimerId = AnaContext.AddMetadata(CoroutineTimerId, MoveTemp(CborData));
 
 						FEventScopeState& ScopeState = ThreadState.ScopeStack.AddDefaulted_GetRef();
 						ScopeState.StartCycle = ActualCycle;
@@ -457,7 +441,7 @@ namespace UEBabyPram::InsightParser
 						if (ThreadState.ScopeStack.Num() > 0)
 						{
 							uint32 MetadataTimerId = ThreadState.ScopeStack.Top().EventTypeId;
-							TArrayView<uint8> Metadata = EditableTimingProfilerProvider.GetEditableMetadata(MetadataTimerId);
+							TArrayView<uint8> Metadata = AnaContext.GetEditableMetadata(MetadataTimerId);
 							if (ensure(Metadata.Num() > 0))
 							{
 								// Change the last byte in metadata to "true".
@@ -501,7 +485,7 @@ namespace UEBabyPram::InsightParser
 								}
 
 								// Add an empty placeholder metadata so we obtain a MetadataId to use as the TimerId. Will be replaced with the actual metadata if the metadata event arrives later.
-								TimerId = EditableTimingProfilerProvider.AddMetadata(MetadataUnknownTimerId, TArray<uint8>());
+								TimerId = AnaContext.AddMetadata(MetadataUnknownTimerId, TArray<uint8>());
 								MetadataIdToTimerIdMap.Add(MetadataId, TimerId);
 							}
 							else
@@ -562,7 +546,7 @@ namespace UEBabyPram::InsightParser
 
 	////////////////////////////////////////////////////////////////////////////////////////////////////
 
-	void FCpuProfilerAnalyzer::DispatchPendingEvents(
+	void CPUScopeAnalyzer::DispatchPendingEvents(
 		uint64& LastCycle,
 		uint64 CurrentCycle,
 		FThreadState& ThreadState,
@@ -628,7 +612,7 @@ namespace UEBabyPram::InsightParser
 
 	////////////////////////////////////////////////////////////////////////////////////////////////////
 
-	void FCpuProfilerAnalyzer::DispatchRemainingPendingEvents(FThreadState& ThreadState)
+	void CPUScopeAnalyzer::DispatchRemainingPendingEvents(FThreadState& ThreadState)
 	{
 		int32 RemainingPending = ThreadState.PendingEvents.Num();
 		if (RemainingPending > 0)
@@ -643,7 +627,7 @@ namespace UEBabyPram::InsightParser
 
 	////////////////////////////////////////////////////////////////////////////////////////////////////
 
-	void FCpuProfilerAnalyzer::EndOpenEvents(FThreadState& ThreadState, double Timestamp)
+	void CPUScopeAnalyzer::EndOpenEvents(FThreadState& ThreadState, double Timestamp)
 	{
 		while (ThreadState.ScopeStack.Num())
 		{
@@ -654,7 +638,7 @@ namespace UEBabyPram::InsightParser
 
 	////////////////////////////////////////////////////////////////////////////////////////////////////
 
-	void FCpuProfilerAnalyzer::OnCpuScopeEnter(const FOnEventContext& Context)
+	void CPUScopeAnalyzer::OnCpuScopeEnter(const FOnEventContext& Context)
 	{
 		if (Context.EventTime.GetTimestamp() == 0)
 		{
@@ -688,7 +672,7 @@ namespace UEBabyPram::InsightParser
 		Context.EventData.SerializeToCbor(CborData);
 		if (ensure(CborData.Num() > 0))
 		{
-			TimerId = EditableTimingProfilerProvider.AddMetadata(TimerId, MoveTemp(CborData));
+			TimerId = AnaContext.AddMetadata(TimerId, MoveTemp(CborData));
 		}
 
 		uint64 Cycle = Context.EventTime.AsCycle64();
@@ -703,7 +687,7 @@ namespace UEBabyPram::InsightParser
 
 	////////////////////////////////////////////////////////////////////////////////////////////////////
 
-	void FCpuProfilerAnalyzer::OnCpuScopeLeave(const FOnEventContext& Context)
+	void CPUScopeAnalyzer::OnCpuScopeLeave(const FOnEventContext& Context)
 	{
 		if (Context.EventTime.GetTimestamp() == 0)
 		{
@@ -730,7 +714,7 @@ namespace UEBabyPram::InsightParser
 
 	////////////////////////////////////////////////////////////////////////////////////////////////////
 
-	void FCpuProfilerAnalyzer::OnEventSpec(const FOnEventContext& Context)
+	void CPUScopeAnalyzer::OnEventSpec(const FOnEventContext& Context)
 	{
 		const auto& EventData = Context.EventData;
 
@@ -776,13 +760,13 @@ namespace UEBabyPram::InsightParser
 		}
 		const TCHAR* FileName = !File.IsEmpty() ? *File : nullptr;
 
-		const TCHAR* StoredTimerName = Session.StoreString(TimerName);
+		const TCHAR* StoredTimerName = AnaContext.StoreString(TimerName);
 		DefineMergedTimer(SpecId, StoredTimerName, FileName, Line);
 	}
 
 	////////////////////////////////////////////////////////////////////////////////////////////////////
 
-	void FCpuProfilerAnalyzer::OnMetadataSpec(const FOnEventContext& Context)
+	void CPUScopeAnalyzer::OnMetadataSpec(const FOnEventContext& Context)
 	{
 		const auto& EventData = Context.EventData;
 
@@ -841,7 +825,7 @@ namespace UEBabyPram::InsightParser
 				}
 				else
 				{
-					Name = Session.StoreString(TEXT("Unknown"));
+					Name = AnaContext.StoreString(TEXT("Unknown"));
 				}
 			}
 		}
@@ -849,7 +833,7 @@ namespace UEBabyPram::InsightParser
 		FMetadataSpec Spec;
 		if (!NameFormat.IsEmpty())
 		{
-			Spec.Format = Session.StoreString(NameFormat);
+			Spec.Format = AnaContext.StoreString(NameFormat);
 		}
 
 		if (FieldNames.Num() > 0)
@@ -863,7 +847,7 @@ namespace UEBabyPram::InsightParser
 				if (CborContext.MajorType() == ECborCode::TextString)
 				{
 					FString Field = CborContext.AsString();
-					Spec.FieldNames.Add(Session.StoreString(Field));
+					Spec.FieldNames.Add(AnaContext.StoreString(Field));
 				}
 			}
 		}
@@ -882,9 +866,9 @@ namespace UEBabyPram::InsightParser
 
 		if (Spec.FieldNames.Num() > 0 || Spec.Format != nullptr)
 		{
-			uint32 MetadataSpecId = EditableTimingProfilerProvider.AddMetadataSpec(MoveTemp(Spec));
+			uint32 MetadataSpecId = AnaContext.AddMetadataSpec(MoveTemp(Spec));
 
-			const ITimingProfilerProvider* TimingProfilerProvider = EditableTimingProfilerProvider.GetReadProvider();
+			const ITimingProfilerProvider* TimingProfilerProvider = AnaContext.GetReadProvider();
 			if (TimingProfilerProvider)
 			{
 				FTimingProfilerTimer PreviousTimer;
@@ -914,13 +898,13 @@ namespace UEBabyPram::InsightParser
 				}
 			}
 
-			EditableTimingProfilerProvider.SetMetadataSpec(TimerId, MetadataSpecId);
+			AnaContext.SetMetadataSpec(TimerId, MetadataSpecId);
 		}
 	}
 
 	////////////////////////////////////////////////////////////////////////////////////////////////////
 
-	uint32 FCpuProfilerAnalyzer::GetOrAddTimer(uint32 SpecId)
+	uint32 CPUScopeAnalyzer::GetOrAddTimer(uint32 SpecId)
 	{
 		if (const uint32* FoundTimerIdBySpecId = SpecIdToTimerIdMap.Find(SpecId))
 		{
@@ -935,12 +919,10 @@ namespace UEBabyPram::InsightParser
 
 	////////////////////////////////////////////////////////////////////////////////////////////////////
 
-	uint32 FCpuProfilerAnalyzer::AddCpuTimer(uint32 SpecId, const TCHAR* TimerName, const TCHAR* File, uint32 Line)
+	uint32 CPUScopeAnalyzer::AddCpuTimer(uint32 SpecId, const TCHAR* TimerName, const TCHAR* File, uint32 Line)
 	{
-		Session.WriteAccessCheck();
-
 		// Add a new CPU timer.
-		uint32 TimerId = EditableTimingProfilerProvider.AddCpuTimer(TimerName, File, Line);
+		uint32 TimerId = AnaContext.AddCpuTimer(TimerName, File, Line);
 
 		// Map the SpecId to the timer.
 		SpecIdToTimerIdMap.Add(SpecId, TimerId);
@@ -950,7 +932,7 @@ namespace UEBabyPram::InsightParser
 
 	////////////////////////////////////////////////////////////////////////////////////////////////////
 
-	uint32 FCpuProfilerAnalyzer::DefineMergedTimer(uint32 SpecId, const TCHAR* StoredTimerName, const TCHAR* File, uint32 Line)
+	uint32 CPUScopeAnalyzer::DefineMergedTimer(uint32 SpecId, const TCHAR* StoredTimerName, const TCHAR* File, uint32 Line)
 	{
 		// Expected: StoredTimerName is already a pointer in a string store.
 
@@ -975,7 +957,7 @@ namespace UEBabyPram::InsightParser
 
 				// Update name for mapped timer.
 				SetTimerName(SpecId, TimerId, StoredTimerName);
-				EditableTimingProfilerProvider.SetTimerLocation(TimerId, File, Line);
+				AnaContext.SetTimerLocation(TimerId, File, Line);
 
 				// In this case, we do not remap the SpecId to the previously defined timer with same name.
 				// This is because the two timers are already used in timelines.
@@ -1006,7 +988,7 @@ namespace UEBabyPram::InsightParser
 
 	////////////////////////////////////////////////////////////////////////////////////////////////////
 
-	uint32 FCpuProfilerAnalyzer::DefineUniqueTimer(uint32 SpecId, const TCHAR* TimerName, const TCHAR* File, uint32 Line)
+	uint32 CPUScopeAnalyzer::DefineUniqueTimer(uint32 SpecId, const TCHAR* TimerName, const TCHAR* File, uint32 Line)
 	{
 		uint32 TimerId;
 
@@ -1018,7 +1000,7 @@ namespace UEBabyPram::InsightParser
 
 			// Update name for the mapped timer.
 			SetTimerName(SpecId, TimerId, TimerName);
-			EditableTimingProfilerProvider.SetTimerLocation(TimerId, File, Line);
+			AnaContext.SetTimerLocation(TimerId, File, Line);
 		}
 		else
 		{
@@ -1031,10 +1013,10 @@ namespace UEBabyPram::InsightParser
 
 	////////////////////////////////////////////////////////////////////////////////////////////////////
 
-	const TCHAR* FCpuProfilerAnalyzer::GetTimerName(uint32 TimerId) const
+	const TCHAR* CPUScopeAnalyzer::GetTimerName(uint32 TimerId) const
 	{
 		const TCHAR* TimerName = nullptr;
-		const ITimingProfilerProvider* TimingProfilerProvider = EditableTimingProfilerProvider.GetReadProvider();
+		const ITimingProfilerProvider* TimingProfilerProvider = AnaContext.GetReadProvider();
 		if (TimingProfilerProvider)
 		{
 			TimingProfilerProvider->ReadTimers(
@@ -1053,43 +1035,26 @@ namespace UEBabyPram::InsightParser
 
 	////////////////////////////////////////////////////////////////////////////////////////////////////
 
-	void FCpuProfilerAnalyzer::SetTimerName(uint32 SpecId, uint32 TimerId, const TCHAR* TimerName)
+	void CPUScopeAnalyzer::SetTimerName(uint32 SpecId, uint32 TimerId, const TCHAR* TimerName)
 	{
-#if CPUPROFILER_DETECT_TIMER_NAME_CHANGE
-		const TCHAR* PrevTimerName = GetTimerName(TimerId);
-#endif
-
-		Session.WriteAccessCheck();
-		EditableTimingProfilerProvider.SetTimerName(TimerId, TimerName);
-
-#if CPUPROFILER_DETECT_TIMER_NAME_CHANGE
-		const TCHAR* NewTimerName = GetTimerName(TimerId);
-		if (PrevTimerName != nullptr && PrevTimerName != NewTimerName && PrevTimerName[0] != TEXT('<'))
-		{
-			UE_LOG(LogTraceServices, Warning, TEXT("[CpuProfiler] --> SetTimerName(SpecId=%u, TimerId=%u, Name=\"%s\") : name was \"%s\" !!!"), SpecId, TimerId, TimerName, PrevTimerName);
-		}
-		else
-		{
-			CPUPROFILER_LOG_API_L2(TEXT("[CpuProfiler] --> SetTimerName(SpecId=%u, TimerId=%u, Name=\"%s\""), SpecId, TimerId, TimerName);
-		}
-#endif
+		AnaContext.SetTimerName(TimerId, TimerName);
 	}
 
 	////////////////////////////////////////////////////////////////////////////////////////////////////
 
-	FCpuProfilerAnalyzer::FThreadState& FCpuProfilerAnalyzer::GetOrAddThreadState(uint32 ThreadId)
+	CPUScopeAnalyzer::FThreadState& CPUScopeAnalyzer::GetOrAddThreadState(uint32 ThreadId)
 	{
 		FThreadState* ThreadState = ThreadStatesMap.FindRef(ThreadId);
 		if (!ThreadState)
 		{
 			ThreadState = new FThreadState();
 			ThreadState->ThreadId = ThreadId;
-			ThreadState->Timeline = &EditableTimingProfilerProvider.GetCpuThreadEditableTimeline(ThreadId);
+			ThreadState->Timeline = &AnaContext.GetCpuThreadEditableTimeline(ThreadId);
 			ThreadStatesMap.Add(ThreadId, ThreadState);
 
 			// Just in case the rest of Insight's reporting/analysis doesn't know about
 			// this thread, we'll explicitly add it. For fault tolerance.
-			EditableThreadProvider.AddThread(ThreadId, nullptr, TPri_Normal);
+			AnaContext.AddThread(ThreadId, nullptr, TPri_Normal);
 		}
 		return *ThreadState;
 	}

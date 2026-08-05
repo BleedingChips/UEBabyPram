@@ -18,6 +18,7 @@ export namespace UEBabyPram::InsightParser
 		using FSummarizeCpuScopeAnalyzer::EScopeEventType;
 		using FSummarizeCpuScopeAnalyzer::FScope;
 		using FSummarizeCpuScopeAnalyzer::FScopeEvent;
+		using FSummarizeCpuScopeAnalyzer::ContextSwitchEvent;
 
 		virtual void OnCpuScopeName(uint32 ScopeId, std::wstring_view ScopeName) {}
 		virtual void OnCpuScopeEnter(const FScopeEvent& ScopeEnter, std::wstring_view ScopeName) {};
@@ -81,10 +82,51 @@ export namespace UEBabyPram::InsightParser
 		Potato::Document::DocumentReader& reader;
 	};
 
-	void Test(Potato::Document::DocumentReader& Resource, ScopeAnalyzer& Analyzer)
+	struct ParserInterface : private BaseParser
+	{
+		virtual bool IsThreadRequired(std::wstring_view thread_name) const { return true; }
+		virtual bool IsContextSwitchRequired() const override { return true; }
+		virtual void ContextSwitchEvent(uint32 thread_id, uint32 core_name, uint32 start_time, uint32 end_time) override {}
+		virtual void OnThreadDiscoverd(uint32 thread_id, std::wstring_view thread_name) {}
+		virtual void OnCPUScopeEventDiscoverd(uint32 event_id, std::wstring_view thread_name) {}
+		virtual void OnCPUScopeEventEnter(uint32 event_id, uint32 thread_id, double time) override {}
+		virtual void OnCPUScopeEventEnd(uint32 thread_id, double time) override {}
+
+		static std::wstring_view CoverStringView(wchar_t const* ScopeName, std::size_t ScopeNameLen)
+		{
+			if (ScopeName != nullptr && ScopeNameLen > 0)
+			{
+				if (ScopeName[ScopeNameLen - 1] == 0)
+				{
+					return std::wstring_view{ ScopeName, ScopeNameLen - 1 };
+				}
+				return std::wstring_view{ ScopeName, ScopeNameLen };
+			}
+			return {};
+		}
+
+	private:
+
+		virtual bool IsThreadRequired(wchar_t const* thread_name, std::size_t thread_name_len) {
+			return IsThreadRequired(CoverStringView(thread_name, thread_name_len));
+		}
+		virtual void OnThreadDiscoverd(uint32 thread_id, wchar_t const* thread_name, std::size_t thread_name_len) 
+		{
+			return OnThreadDiscoverd(thread_id, CoverStringView(thread_name, thread_name_len));
+		}
+		
+		virtual void OnCPUScopeEventDiscoverd(uint32 event_id, wchar_t const* event_name, std::size_t event_name_len) 
+		{
+			return OnCPUScopeEventDiscoverd(event_id, CoverStringView(event_name, event_name_len));
+		}
+	
+		friend void ExecuteParser(Potato::Document::DocumentReader& Resource, ParserInterface& Parser);
+	};
+
+	void ExecuteParser(Potato::Document::DocumentReader& Resource, ParserInterface& Parser)
 	{
 		DcomentWrapper ResourceWrapper(Resource);
-		TestImp(ResourceWrapper, Analyzer);
+		ExecuteParser(ResourceWrapper, Parser);
 	}
 }
 

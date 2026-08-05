@@ -4,8 +4,10 @@
 #include "Trace/Analyzer.h"
 #include "ProfilingDebugging/MiscTrace.h"
 
+#include "UEBabyPramInsightParserInterface.h"
 #include "UEBabyPramInsightParserAnalysisInterface.h"
 #include "UEBabyPramInsightParserAnalysisSession.h"
+
 
 namespace UEBabyPram::InsightParser
 {
@@ -14,7 +16,7 @@ namespace UEBabyPram::InsightParser
 		: public UE::Trace::IAnalyzer
 	{
 	public:
-		FPlatformEventTraceAnalyzer(IAnalysisSession& Session);
+		FPlatformEventTraceAnalyzer(IAnalysisSession& Session, BaseParser& Parser);
 		virtual void OnAnalysisBegin(const FOnAnalysisContext& Context) override;
 		virtual void OnAnalysisEnd() override;
 		virtual bool OnEvent(uint16 RouteId, EStyle Style, const FOnEventContext& Context) override;
@@ -30,6 +32,6 @@ namespace UEBabyPram::InsightParser
 		};
 
 		IAnalysisSession& Session;
+		BaseParser& Parser;
 	};
-
 } // namespace TraceServices

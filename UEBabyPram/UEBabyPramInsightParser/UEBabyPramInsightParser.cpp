@@ -13,6 +13,8 @@
 #include "UEBabyPramInsightParserAnalysisSession.h"
 #include "UEBabyPramInsightParserInterface.h"
 #include "UEBabyPramInsightParserPlatformAnalysis.h"
+#include "UEBabyPramInsightParserCPUAnalysisNewVersion.h"
+#include "UEBabyPramInsightParserAnalysisContext.h"
 
 namespace UEBabyPram::InsightParser
 {
@@ -376,26 +378,33 @@ namespace UEBabyPram::InsightParser
 		void operator()(T const* Ptr) {}
 	};
 
-	void TestImp(DataResourceInterface& Resource, FSummarizeCpuScopeAnalyzer& Analyzer)
+	void ExecuteParser(DataResourceInterface& resource, BaseParser& parser)
 	{
 		InsightReciver Interface;
 
 		FSummarizeCpuProfilerProvider provider;
 
+		/*
 		provider.AddCpuScopeAnalyzer(
 			TSharedPtr<FSummarizeCpuScopeAnalyzer>(&Analyzer, NoneDeleter<FSummarizeCpuScopeAnalyzer>{})
 		);
+		*/
 
 		FAnalysisSession seesion{1, L"asdasd"};
 
-		FCpuProfilerAnalyzer analyzer{ seesion, provider, provider };
-		FPlatformEventTraceAnalyzer Analyzer2{ seesion };
+		FCpuProfilerAnalyzer analyzer{ seesion, provider, provider, parser };
+
+		AnalysisContext ana_context;
+
+		CPUScopeAnalyzer analyzer2{ ana_context };
+
+		FPlatformEventTraceAnalyzer Analyzer2{ seesion,  parser };
 		//TSharedPtr<TraceServices::IAnalysisSession> Session = TraceServices::CreateAnalysisSession(0, nullptr, {});
 
 		//FSummarizeCpuProfilerProvider CpuProfilerProvider;
 		//TSharedPtr<UE::Trace::IAnalyzer> CpuProfilerAnalyzer = TraceServices::CreateCpuProfilerAnalyzer(*Session, CpuProfilerProvider, CpuProfilerProvider);
 
-		TArray<UE::Trace::IAnalyzer*> List = { &analyzer, &Analyzer2 };
+		TArray<UE::Trace::IAnalyzer*> List = { &analyzer2, &Analyzer2 };
 		UE::Trace::FMessageDelegate Delegate;
 		UE::Trace::FAnalysisEngine engine{ std::move(List), std::move(Delegate) };
 
@@ -407,7 +416,7 @@ namespace UEBabyPram::InsightParser
 
 			int32 BytesRead = Buffer.Fill([&](uint8* Out, uint32 Size)
 				{
-					return Resource.Read(Out, Size);
+					return resource.Read(Out, Size);
 				});
 
 			if (BytesRead <= 0)

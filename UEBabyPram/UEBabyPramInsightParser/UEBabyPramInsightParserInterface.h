@@ -41,6 +41,14 @@ namespace UEBabyPram::InsightParser
 			double ExitTimestamp;  // As Seconds
 		};
 
+		struct ContextSwitchEvent
+		{
+			uint32 ThreadId;
+			uint32 CoreNumber;
+			double StartTime;
+			double EndTime;
+		};
+
 	public:
 		virtual ~FSummarizeCpuScopeAnalyzer() = default;
 
@@ -64,11 +72,24 @@ namespace UEBabyPram::InsightParser
 		/** Invoked when the trace stream has been fully consumed/processed. */
 		virtual void OnCpuScopeAnalysisEnd() {};
 
+		virtual void OnContextSwitchEvent(const ContextSwitchEvent& Event) {};
+
 		static constexpr uint32 CoroutineSpecId = (1u << 31u) - 1u;
 		static constexpr uint32 CoroutineUnknownSpecId = (1u << 31u) - 2u;
 	};
 
-	void TestImp(DataResourceInterface& Resource, FSummarizeCpuScopeAnalyzer& resource);
+	struct BaseParser
+	{
+		virtual bool IsThreadRequired(wchar_t const* thread_name, std::size_t thread_name_len) { return true; }
+		virtual bool IsContextSwitchRequired() const { return false; }
+		virtual void ContextSwitchEvent(uint32 thread_id, uint32 core_name, uint32 start_time, uint32 end_time) {}
+		virtual void OnThreadDiscoverd(uint32 thread_id, wchar_t const* thread_name, std::size_t thread_name_len) {}
+		virtual void OnCPUScopeEventDiscoverd(uint32 event_id, wchar_t const* event_name, std::size_t event_name_len) {}
+		virtual void OnCPUScopeEventEnter(uint32 event_id, uint32 thread_id, double time) {}
+		virtual void OnCPUScopeEventEnd(uint32 thread_id, double time) {}
+	};
+
+	void ExecuteParser(DataResourceInterface& resource, BaseParser& parser);
 }
 
 

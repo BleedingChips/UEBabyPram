@@ -9,8 +9,8 @@
 namespace UEBabyPram::InsightParser
 {
 
-	FPlatformEventTraceAnalyzer::FPlatformEventTraceAnalyzer(IAnalysisSession& InSession)
-		: Session(InSession)
+	FPlatformEventTraceAnalyzer::FPlatformEventTraceAnalyzer(IAnalysisSession& InSession, BaseParser& Parser)
+		: Session(InSession), Parser(Parser)
 	{
 	}
 
@@ -18,10 +18,13 @@ namespace UEBabyPram::InsightParser
 	{
 		auto& Builder = Context.InterfaceBuilder;
 
-		Builder.RouteEvent(RouteId_Settings, "PlatformEvent", "Settings");
-		Builder.RouteEvent(RouteId_ContextSwitch, "PlatformEvent", "ContextSwitch");
-		Builder.RouteEvent(RouteId_StackSample, "PlatformEvent", "StackSample");
-		Builder.RouteEvent(RouteId_ThreadName, "PlatformEvent", "ThreadName");
+		if (Parser.IsContextSwitchRequired())
+		{
+			//Builder.RouteEvent(RouteId_Settings, "PlatformEvent", "Settings");
+			Builder.RouteEvent(RouteId_ContextSwitch, "PlatformEvent", "ContextSwitch");
+			//Builder.RouteEvent(RouteId_StackSample, "PlatformEvent", "StackSample");
+			//Builder.RouteEvent(RouteId_ThreadName, "PlatformEvent", "ThreadName");
+		}
 	}
 
 	void FPlatformEventTraceAnalyzer::OnAnalysisEnd()
@@ -55,6 +58,14 @@ namespace UEBabyPram::InsightParser
 
 		case RouteId_ContextSwitch:
 		{
+			FSummarizeCpuScopeAnalyzer::ContextSwitchEvent Event;
+			const auto& EventData = Context.EventData;
+			Event.StartTime = Context.EventTime.AsSeconds(EventData.GetValue<uint64>("StartTime"));
+			Event.EndTime = Context.EventTime.AsSeconds(EventData.GetValue<uint64>("EndTime"));
+			Event.ThreadId = EventData.GetValue<uint32>("ThreadId");
+			Event.CoreNumber = EventData.GetValue<uint8>("CoreNumber");
+
+			Parser.ContextSwitchEvent(Event.ThreadId, Event.CoreNumber, Event.StartTime, Event.EndTime);
 			/*
 			const auto& EventData = Context.EventData;
 			double Start = Context.EventTime.AsSeconds(EventData.GetValue<uint64>("StartTime"));

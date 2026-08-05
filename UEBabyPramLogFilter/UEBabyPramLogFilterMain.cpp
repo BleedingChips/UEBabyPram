@@ -155,7 +155,7 @@ int main(int argc, char* argv[])
 					{
 						writter.Open(temporary_output_path, Potato::Document::DocumentWriter::OpenMode::CREATE_OR_EMPTY);
 					}
-					Potato::Document::PlainTextWritter::Config writer_config;
+					Potato::Document::PlainTextWriter::Config writer_config;
 					config.bom = Potato::Document::BomT::UTF8;
 					Potato::Document::PlainTextWriter plain_writer(writter, writer_config);
 

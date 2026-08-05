@@ -3,9 +3,8 @@ import Potato;
 import std;
 import UEBabyPramInsightParser;
 
-struct ScopeAnayzer : public UEBabyPram::InsightParser::ScopeAnalyzer
+struct Parser : public UEBabyPram::InsightParser::ParserInterface
 {
-
 };
 
 
@@ -41,8 +40,8 @@ int main(int argc, char* argv[])
 	if (!insight_path.empty() && std::filesystem::exists(insight_path))
 	{
 		Potato::Document::DocumentReader Reader(insight_path);
-		ScopeAnayzer Ana;
-		UEBabyPram::InsightParser::Test(Reader, Ana);
+		Parser Ana;
+		UEBabyPram::InsightParser::ExecuteParser(Reader, Ana);
 	}
 
 	return 0;

@@ -12,18 +12,18 @@
 #include "TraceServices/Model/TimingProfiler.h"
 #include "TraceServices/Model/Threads.h"
 
-#include "UEBabyPramInsightParserInterface.h"
+#include "UEBabyPramInsightParserAnalysisContext.h"
 #include "UEBabyPramInsightParserAnalysisInterface.h"
 
 namespace UEBabyPram::InsightParser
 {
 
-	class FCpuProfilerAnalyzer
+	class CPUScopeAnalyzer
 		: public UE::Trace::IAnalyzer
 	{
 	public:
-		FCpuProfilerAnalyzer(IAnalysisSession& Session, IEditableTimingProfilerProvider& InEditableTimingProfilerProvider, IEditableThreadProvider& InEditableThreadProvider, BaseParser& Parser);
-		~FCpuProfilerAnalyzer();
+		CPUScopeAnalyzer(AnalysisContext& Parser);
+		~CPUScopeAnalyzer();
 		virtual void OnAnalysisBegin(const FOnAnalysisContext& Context) override;
 		virtual void OnAnalysisEnd(/*const FOnAnalysisEndContext& Context*/) override;
 		virtual bool OnEvent(uint16 RouteId, EStyle Style, const FOnEventContext& Context) override;
@@ -93,10 +93,8 @@ namespace UEBabyPram::InsightParser
 		FThreadState& GetOrAddThreadState(uint32 ThreadId);
 
 	private:
-		IAnalysisSession& Session;
-		IEditableTimingProfilerProvider& EditableTimingProfilerProvider;
-		IEditableThreadProvider& EditableThreadProvider;
-		BaseParser& Parser;
+
+		AnalysisContext& AnaContext;
 
 		TMap<uint32, FThreadState*> ThreadStatesMap;
 		TMap<uint32, uint32> SpecIdToTimerIdMap; // SpecId --> TimerId
