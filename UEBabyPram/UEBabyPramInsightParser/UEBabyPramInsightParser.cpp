@@ -394,7 +394,7 @@ namespace UEBabyPram::InsightParser
 
 		FCpuProfilerAnalyzer analyzer{ seesion, provider, provider, parser };
 
-		AnalysisContext ana_context;
+		AnalysisContext ana_context{parser};
 
 		CPUScopeAnalyzer analyzer2{ ana_context };
 

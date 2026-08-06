@@ -89,6 +89,7 @@ export namespace UEBabyPram::InsightParser
 		virtual void ContextSwitchEvent(uint32 thread_id, uint32 core_name, uint32 start_time, uint32 end_time) override {}
 		virtual void OnThreadDiscoverd(uint32 thread_id, std::wstring_view thread_name) {}
 		virtual void OnCPUScopeEventDiscoverd(uint32 event_id, std::wstring_view thread_name) {}
+		
 		virtual void OnCPUScopeEventEnter(uint32 event_id, uint32 thread_id, double time) override {}
 		virtual void OnCPUScopeEventEnd(uint32 thread_id, double time) override {}
 

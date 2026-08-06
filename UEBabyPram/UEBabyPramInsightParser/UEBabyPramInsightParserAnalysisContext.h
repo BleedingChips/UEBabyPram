@@ -10,6 +10,7 @@
 #include "AnalysisServicePrivate.h"
 
 #include "UEBabyPramInsightParserAnalysisInterface.h"
+#include "UEBabyPramInsightParserInterface.h"
 
 namespace UEBabyPram::InsightParser
 {
@@ -50,16 +51,27 @@ namespace UEBabyPram::InsightParser
 		virtual void SetMetadata(uint32 MetadataTimerId, TArray<uint8>&& Metadata, uint32 NewTimerId) {}
 		virtual void SetMetadataSpec(uint32 TimerId, uint32 MetadataSpecId) {}
 		uint32 AddMetadataSpec(FMetadataSpec&& Metadata) { return 0; }
-		virtual uint32 AddCpuTimer(FStringView Name, const TCHAR* File, uint32 Line) { return 0; }
-		virtual void SetTimerLocation(uint32 TimerId, const TCHAR* File, uint32 Line) {}
+		
+		uint32 AddCpuTimer(FStringView Name, const TCHAR* File, uint32 Line) { 
+			FStringView FileView(File);
+			return Parser.OnCPUScopeEventDiscoverd(Name.GetData(), Name.Len(), FileView.GetData(), FileView.Len(), Line);
+		}
+
+		void SetTimerLocation(uint32 TimerId, const TCHAR* File, uint32 Line) 
+		{
+			FStringView FileView(File);
+			return Parser.OverrideSPUScopeEventLocation(TimerId, FileView.GetData(), FileView.Len());
+		}
+
 		void SetTimerName(uint32 TimerId, FStringView Name) {}
 		virtual const ITimingProfilerProvider* GetReadProvider() const { return nullptr; }
 		IEditableTimeline<FTimingProfilerEvent>& GetCpuThreadEditableTimeline(uint32 ThreadId);
 		void AddThread(uint32 Id, const TCHAR* Name, EThreadPriority Priority);
-		AnalysisContext() : Allocator(32 << 20), StringStore(Allocator){}
+		AnalysisContext(BaseParser& Parser) : Allocator(32 << 20), StringStore(Allocator), Parser(Parser){}
 	protected:
 		FSlabAllocator Allocator;
 		FStringStore StringStore;
+		BaseParser& Parser;
 
 		// The state at any moment of the threads
 		TMap<uint32, TUniquePtr<ContextThreadWrapper>> Threads;
