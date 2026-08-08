@@ -78,16 +78,24 @@ namespace UEBabyPram::InsightParser
 		static constexpr uint32 CoroutineUnknownSpecId = (1u << 31u) - 2u;
 	};
 
+	struct ThreadTimeLineInterface
+	{
+		virtual void AppendBeginEvent(double StartTime, uint32 TimerId) = 0;
+		virtual void AppendEndEvent(double EndTime) = 0;
+		virtual ~ThreadTimeLineInterface() = default;
+	};
+
 	struct BaseParser
 	{
 		virtual bool IsThreadRequired(wchar_t const* thread_name, std::size_t thread_name_len) { return true; }
 		virtual bool IsContextSwitchRequired() const { return false; }
 		virtual void ContextSwitchEvent(uint32 thread_id, uint32 core_name, uint32 start_time, uint32 end_time) {}
 		virtual void OnThreadDiscoverd(uint32 thread_id, wchar_t const* thread_name, std::size_t thread_name_len) {}
-		virtual uint32 OnCPUScopeEventDiscoverd(wchar_t const* event_name, std::size_t event_name_len, wchar_t const* file, std::size_t file_name_len, std::size_t line) { return 0; }
-		virtual void OverrideSPUScopeEventLocation(uint32 event_id, wchar_t const* file_name, std::size_t file_name_len) {}
-		virtual void OnCPUScopeEventEnter(uint32 event_id, uint32 thread_id, double time) {}
-		virtual void OnCPUScopeEventEnd(uint32 thread_id, double time) {}
+		virtual uint32 OnCPUEventDiscoverd(wchar_t const* event_name, std::size_t event_name_len, wchar_t const* file, std::size_t file_name_len, std::size_t line) { return 0; }
+		virtual void OverrideCPUEventLocation(uint32 event_id, wchar_t const* file_name, std::size_t file_name_len) {}
+		virtual void OverrideCPUEventName(uint32 event_id, wchar_t const* event_name, std::size_t event_name_len) {}
+		virtual ThreadTimeLineInterface* GetThreadTimeLine(uint32 thread_id) = 0;
+		virtual void AddThread(uint32 thread_id, char const* thread_name) = 0;
 	};
 
 	void ExecuteParser(DataResourceInterface& resource, BaseParser& parser);

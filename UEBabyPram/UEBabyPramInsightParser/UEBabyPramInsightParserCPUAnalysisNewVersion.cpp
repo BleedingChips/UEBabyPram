@@ -111,7 +111,7 @@ namespace UEBabyPram::InsightParser
 		case RouteId_EndThread:
 		{
 			const uint32 ThreadId = TraceServices::FTraceAnalyzerUtils::GetThreadIdField(Context);
-			FThreadState& ThreadState = GetOrAddThreadState(ThreadId);
+			FThreadState& ThreadState = GetOrAddThreadState(ThreadId, nullptr);
 
 			if (ThreadState.LastCycle == ~0ull)
 			{
@@ -142,7 +142,8 @@ namespace UEBabyPram::InsightParser
 		case RouteId_EventBatchV2: // backward compatibility
 		{
 			const uint32 ThreadId = Context.ThreadInfo.GetId();
-			FThreadState& ThreadState = GetOrAddThreadState(ThreadId);
+			auto ThreadName = Context.ThreadInfo.GetName();
+			FThreadState& ThreadState = GetOrAddThreadState(ThreadId, ThreadName);
 
 			if (ThreadState.LastCycle == ~0ull)
 			{
@@ -164,7 +165,7 @@ namespace UEBabyPram::InsightParser
 		case RouteId_EndCapture: // backward compatibility
 		{
 			const uint32 ThreadId = TraceServices::FTraceAnalyzerUtils::GetThreadIdField(Context);
-			FThreadState& ThreadState = GetOrAddThreadState(ThreadId);
+			FThreadState& ThreadState = GetOrAddThreadState(ThreadId, nullptr);
 
 			if (ThreadState.LastCycle == ~0ull)
 			{
@@ -286,9 +287,7 @@ namespace UEBabyPram::InsightParser
 				ScopeState.StartCycle = ActualCycle;
 				ScopeState.EventTypeId = TimerId;
 
-				FTimingProfilerEvent Event;
-				Event.TimerIndex = TimerId;
-				ThreadState.Timeline->AppendBeginEvent(ActualTime, Event);
+				ThreadState.Timeline->AppendBeginEvent(ActualTime, TimerId);
 			}
 			else
 			{
@@ -392,9 +391,7 @@ namespace UEBabyPram::InsightParser
 						ScopeState.StartCycle = ActualCycle;
 						ScopeState.EventTypeId = MetadataTimerId;
 
-						FTimingProfilerEvent Event;
-						Event.TimerIndex = MetadataTimerId;
-						ThreadState.Timeline->AppendBeginEvent(ActualTime, Event);
+						ThreadState.Timeline->AppendBeginEvent(ActualTime, MetadataTimerId);
 					}
 
 					// Begins the CPU scoped timers (suspended in previous coroutine execution).
@@ -411,9 +408,7 @@ namespace UEBabyPram::InsightParser
 							ScopeState.StartCycle = ActualCycle;
 							ScopeState.EventTypeId = CoroutineUnknownTimerId;
 
-							FTimingProfilerEvent Event;
-							Event.TimerIndex = CoroutineUnknownTimerId;
-							ThreadState.Timeline->AppendBeginEvent(ActualTime, Event);
+							ThreadState.Timeline->AppendBeginEvent(ActualTime, CoroutineUnknownTimerId);
 						}
 					}
 				}
@@ -509,9 +504,7 @@ namespace UEBabyPram::InsightParser
 					ScopeState.StartCycle = ActualCycle;
 					ScopeState.EventTypeId = TimerId;
 
-					FTimingProfilerEvent Event;
-					Event.TimerIndex = TimerId;
-					ThreadState.Timeline->AppendBeginEvent(ActualTime, Event);
+					ThreadState.Timeline->AppendBeginEvent(ActualTime, TimerId);
 				}
 				else
 				{
@@ -597,9 +590,7 @@ namespace UEBabyPram::InsightParser
 
 			if (bEnter)
 			{
-				FTimingProfilerEvent Event;
-				Event.TimerIndex = PendingCursor->TimerId;
-				ThreadState.Timeline->AppendBeginEvent(PendingTime, Event);
+				ThreadState.Timeline->AppendBeginEvent(PendingTime, PendingCursor->TimerId);
 			}
 			else
 			{
@@ -646,7 +637,7 @@ namespace UEBabyPram::InsightParser
 		}
 
 		uint32 ThreadId = Context.ThreadInfo.GetId();
-		FThreadState& ThreadState = GetOrAddThreadState(ThreadId);
+		FThreadState& ThreadState = GetOrAddThreadState(ThreadId, Context.ThreadInfo.GetName());
 
 		if (ThreadState.bShouldIgnorePendingEvents)
 		{
@@ -695,7 +686,7 @@ namespace UEBabyPram::InsightParser
 		}
 
 		uint32 ThreadId = Context.ThreadInfo.GetId();
-		FThreadState& ThreadState = GetOrAddThreadState(ThreadId);
+		FThreadState& ThreadState = GetOrAddThreadState(ThreadId, Context.ThreadInfo.GetName());
 
 		if (ThreadState.bShouldIgnorePendingEvents)
 		{
@@ -1042,19 +1033,19 @@ namespace UEBabyPram::InsightParser
 
 	////////////////////////////////////////////////////////////////////////////////////////////////////
 
-	CPUScopeAnalyzer::FThreadState& CPUScopeAnalyzer::GetOrAddThreadState(uint32 ThreadId)
+	CPUScopeAnalyzer::FThreadState& CPUScopeAnalyzer::GetOrAddThreadState(uint32 ThreadId, ANSICHAR const* ThreadName)
 	{
 		FThreadState* ThreadState = ThreadStatesMap.FindRef(ThreadId);
 		if (!ThreadState)
 		{
 			ThreadState = new FThreadState();
 			ThreadState->ThreadId = ThreadId;
-			ThreadState->Timeline = &AnaContext.GetCpuThreadEditableTimeline(ThreadId);
+			ThreadState->Timeline = AnaContext.GetThreadTimeLine(ThreadId);
 			ThreadStatesMap.Add(ThreadId, ThreadState);
 
 			// Just in case the rest of Insight's reporting/analysis doesn't know about
 			// this thread, we'll explicitly add it. For fault tolerance.
-			AnaContext.AddThread(ThreadId, nullptr, TPri_Normal);
+			AnaContext.AddThread(ThreadId, ThreadName, TPri_Normal);
 		}
 		return *ThreadState;
 	}

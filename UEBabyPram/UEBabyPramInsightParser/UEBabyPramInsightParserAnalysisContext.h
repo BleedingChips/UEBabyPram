@@ -54,19 +54,27 @@ namespace UEBabyPram::InsightParser
 		
 		uint32 AddCpuTimer(FStringView Name, const TCHAR* File, uint32 Line) { 
 			FStringView FileView(File);
-			return Parser.OnCPUScopeEventDiscoverd(Name.GetData(), Name.Len(), FileView.GetData(), FileView.Len(), Line);
+			return Parser.OnCPUEventDiscoverd(Name.GetData(), Name.Len(), FileView.GetData(), FileView.Len(), Line);
 		}
 
 		void SetTimerLocation(uint32 TimerId, const TCHAR* File, uint32 Line) 
 		{
 			FStringView FileView(File);
-			return Parser.OverrideSPUScopeEventLocation(TimerId, FileView.GetData(), FileView.Len());
+			return Parser.OverrideCPUEventLocation(TimerId, FileView.GetData(), FileView.Len());
 		}
 
-		void SetTimerName(uint32 TimerId, FStringView Name) {}
+		void SetTimerName(uint32 TimerId, FStringView Name) {
+			return Parser.OverrideCPUEventName(TimerId, Name.GetData(), Name.Len());
+		}
 		virtual const ITimingProfilerProvider* GetReadProvider() const { return nullptr; }
-		IEditableTimeline<FTimingProfilerEvent>& GetCpuThreadEditableTimeline(uint32 ThreadId);
-		void AddThread(uint32 Id, const TCHAR* Name, EThreadPriority Priority);
+		ThreadTimeLineInterface* GetThreadTimeLine(uint32 ThreadId)
+		{
+			return Parser.GetThreadTimeLine(ThreadId);
+		}
+		void AddThread(uint32 Id, ANSICHAR const* Name, EThreadPriority Priority)
+		{
+			Parser.AddThread(Id, Name);
+		}
 		AnalysisContext(BaseParser& Parser) : Allocator(32 << 20), StringStore(Allocator), Parser(Parser){}
 	protected:
 		FSlabAllocator Allocator;

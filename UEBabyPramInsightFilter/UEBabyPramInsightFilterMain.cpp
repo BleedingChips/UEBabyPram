@@ -42,6 +42,7 @@ int main(int argc, char* argv[])
 		Potato::Document::DocumentReader Reader(insight_path);
 		Parser Ana;
 		UEBabyPram::InsightParser::ExecuteParser(Reader, Ana);
+		volatile int i = 0;
 	}
 
 	return 0;

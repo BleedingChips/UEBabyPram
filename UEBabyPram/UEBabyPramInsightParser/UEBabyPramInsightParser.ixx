@@ -82,45 +82,64 @@ export namespace UEBabyPram::InsightParser
 		Potato::Document::DocumentReader& reader;
 	};
 
+	struct ThreadCPUEvent
+	{
+		std::optional<std::size_t> event_id;
+		double time_as_second;
+		std::size_t depth;
+	};
+
+	struct ThreadCPUEventView
+	{
+		ThreadCPUEventView(std::size_t thread_id, std::span<ThreadCPUEvent const> view) : view(view), thread_id(thread_id) {}
+	protected:
+		std::span<ThreadCPUEvent const> view;
+		std::size_t thread_id;
+	};
+
+	struct ParserInterface;
+
+	struct ParserThreadTimeLine : public ThreadTimeLineInterface
+	{
+		ParserThreadTimeLine(std::size_t thread_id, ParserInterface& reference) : thread_id(thread_id), reference(reference) {}
+		virtual void AppendBeginEvent(double start_time, std::uint32_t event_id) override;
+		virtual void AppendEndEvent(double end_time) override;
+		std::size_t thread_id;
+		std::size_t depth = 0;
+		std::vector<ThreadCPUEvent> stacks;
+		ParserInterface& reference;
+		~ParserThreadTimeLine();
+	};
+
 	struct ParserInterface : private BaseParser
 	{
-		virtual bool IsThreadRequired(std::wstring_view thread_name) const { return true; }
+		virtual bool IsThreadRequired(std::string_view thread_name) const { return true; }
 		virtual bool IsContextSwitchRequired() const override { return true; }
 		virtual void ContextSwitchEvent(uint32 thread_id, uint32 core_name, uint32 start_time, uint32 end_time) override {}
-		virtual void OnThreadDiscoverd(uint32 thread_id, std::wstring_view thread_name) {}
+		virtual void OnThreadDiscoverd(uint32 thread_id, std::string_view thread_name) {}
 		virtual void OnCPUScopeEventDiscoverd(uint32 event_id, std::wstring_view thread_name) {}
-		
-		virtual void OnCPUScopeEventEnter(uint32 event_id, uint32 thread_id, double time) override {}
-		virtual void OnCPUScopeEventEnd(uint32 thread_id, double time) override {}
-
-		static std::wstring_view CoverStringView(wchar_t const* ScopeName, std::size_t ScopeNameLen)
-		{
-			if (ScopeName != nullptr && ScopeNameLen > 0)
-			{
-				if (ScopeName[ScopeNameLen - 1] == 0)
-				{
-					return std::wstring_view{ ScopeName, ScopeNameLen - 1 };
-				}
-				return std::wstring_view{ ScopeName, ScopeNameLen };
-			}
-			return {};
-		}
+		virtual void OnCPUStackTree(ThreadCPUEventView event_scope) {}
+		static std::wstring_view CoverStringView(wchar_t const* ScopeName, std::size_t ScopeNameLen);
 
 	private:
-
-		virtual bool IsThreadRequired(wchar_t const* thread_name, std::size_t thread_name_len) {
-			return IsThreadRequired(CoverStringView(thread_name, thread_name_len));
-		}
-		virtual void OnThreadDiscoverd(uint32 thread_id, wchar_t const* thread_name, std::size_t thread_name_len) 
-		{
-			return OnThreadDiscoverd(thread_id, CoverStringView(thread_name, thread_name_len));
-		}
 		
 		virtual void OnCPUScopeEventDiscoverd(uint32 event_id, wchar_t const* event_name, std::size_t event_name_len) 
 		{
 			return OnCPUScopeEventDiscoverd(event_id, CoverStringView(event_name, event_name_len));
 		}
+
+		virtual ParserThreadTimeLine* GetThreadTimeLine(uint32 thread_id) override;
 	
+		struct TimeLineTuple
+		{
+			std::size_t thread_id;
+			std::string thread_name;
+			std::unique_ptr<ParserThreadTimeLine> time_line;
+		};
+
+		std::vector<TimeLineTuple> thread_timelines;
+
+		virtual void AddThread(uint32 thread_id, char const* thread_name);
 		friend void ExecuteParser(Potato::Document::DocumentReader& Resource, ParserInterface& Parser);
 	};
 

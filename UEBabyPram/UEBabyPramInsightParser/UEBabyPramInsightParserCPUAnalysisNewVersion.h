@@ -47,7 +47,7 @@ namespace UEBabyPram::InsightParser
 			uint32 ThreadId = 0;
 			TArray<FEventScopeState> ScopeStack;
 			TArray<FPendingEvent> PendingEvents;
-			IEditableTimeline<FTimingProfilerEvent>* Timeline = nullptr;
+			ThreadTimeLineInterface* Timeline = nullptr;
 			uint64 LastCycle = 0;
 			bool bShouldIgnorePendingEvents = false; // becomes true when we detect first pending event with incorrect timestamp (i.e < LastCycle)
 			double LastPendingEventTime = 0;
@@ -90,7 +90,7 @@ namespace UEBabyPram::InsightParser
 		const TCHAR* GetTimerName(uint32 TimerId) const;
 		void SetTimerName(uint32 SpecId, uint32 TimerId, const TCHAR* TimerName);
 
-		FThreadState& GetOrAddThreadState(uint32 ThreadId);
+		FThreadState& GetOrAddThreadState(uint32 ThreadId, ANSICHAR const* ThreadName);
 
 	private:
 
