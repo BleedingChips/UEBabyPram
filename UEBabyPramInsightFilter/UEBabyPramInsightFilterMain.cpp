@@ -5,6 +5,21 @@ import UEBabyPramInsightParser;
 
 struct Parser : public UEBabyPram::InsightParser::ParserInterface
 {
+	virtual void OnThreadDiscoverd(uint32 thread_id, std::string_view thread_name)
+	{
+		if (thread_name.contains("GameThread"))
+		{
+			game_play_thread_id = thread_id;
+		}
+	}
+
+	virtual void OnCPUStackTree(UEBabyPram::InsightParser::ThreadCPUEventView event_scope)
+	{
+		volatile int i = 0;
+	}
+
+	//virtual void OnCPUScope
+	std::optional<std::size_t> game_play_thread_id;
 };
 
 

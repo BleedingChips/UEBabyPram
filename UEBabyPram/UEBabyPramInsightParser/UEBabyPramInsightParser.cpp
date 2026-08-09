@@ -92,4 +92,17 @@ namespace UEBabyPram::InsightParser
 		}
 		OnThreadDiscoverd(thread_id, thread_name_str);
 	}
+
+	uint32 ParserInterface::OnCPUEventDiscoverd(wchar_t const* event_name, std::size_t event_name_len, wchar_t const* file, std::size_t file_name_len, std::size_t line)
+	{
+		auto event_name = CoverStringView(event_name, event_name_len);
+		auto file_name = CoverStringView(file, file_name_len);
+		auto event_id = time_infos.size();
+		time_infos.emplace_back(
+			event_id,
+			event_name,
+			file_name
+		);
+		//OnCPUEventDiscoverd(event_id, event_name, file_name, )
+	}
 }

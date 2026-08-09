@@ -117,16 +117,13 @@ export namespace UEBabyPram::InsightParser
 		virtual bool IsContextSwitchRequired() const override { return true; }
 		virtual void ContextSwitchEvent(uint32 thread_id, uint32 core_name, uint32 start_time, uint32 end_time) override {}
 		virtual void OnThreadDiscoverd(uint32 thread_id, std::string_view thread_name) {}
-		virtual void OnCPUScopeEventDiscoverd(uint32 event_id, std::wstring_view thread_name) {}
 		virtual void OnCPUStackTree(ThreadCPUEventView event_scope) {}
+		virtual void OnCPUEventDiscoverd(std::size_t id, std::wstring_view event_name, std::wstring_view file_name, std::size_t file_line) {}
 		static std::wstring_view CoverStringView(wchar_t const* ScopeName, std::size_t ScopeNameLen);
 
 	private:
 		
-		virtual void OnCPUScopeEventDiscoverd(uint32 event_id, wchar_t const* event_name, std::size_t event_name_len) 
-		{
-			return OnCPUScopeEventDiscoverd(event_id, CoverStringView(event_name, event_name_len));
-		}
+		virtual uint32 OnCPUEventDiscoverd(wchar_t const* event_name, std::size_t event_name_len, wchar_t const* file, std::size_t file_name_len, std::size_t line) override;
 
 		virtual ParserThreadTimeLine* GetThreadTimeLine(uint32 thread_id) override;
 	
@@ -138,6 +135,16 @@ export namespace UEBabyPram::InsightParser
 		};
 
 		std::vector<TimeLineTuple> thread_timelines;
+		
+		struct TimerInfo
+		{
+			std::size_t id;
+			std::wstring_view event_name;
+			std::wstring_view file_name;
+			std::size_t file_line;
+		};
+		
+		std::vector<TimerInfo> time_infos;
 
 		virtual void AddThread(uint32 thread_id, char const* thread_name);
 		friend void ExecuteParser(Potato::Document::DocumentReader& Resource, ParserInterface& Parser);
