@@ -120,7 +120,9 @@ export namespace UEBabyPram::InsightParser
 		virtual void OnCPUStackTree(ThreadCPUEventView event_scope) {}
 		virtual void OnCPUEventDiscoverd(std::size_t id, std::wstring_view event_name, std::wstring_view file_name, std::size_t file_line) {}
 		static std::wstring_view CoverStringView(wchar_t const* ScopeName, std::size_t ScopeNameLen);
-
+		std::optional<std::wstring_view> GetCPUEventName(std::size_t event_id) const;
+		std::optional<std::string_view> GetThreadName(std::size_t thread_id) const;
+	
 	private:
 		
 		virtual uint32 OnCPUEventDiscoverd(wchar_t const* event_name, std::size_t event_name_len, wchar_t const* file, std::size_t file_name_len, std::size_t line) override;
@@ -135,12 +137,12 @@ export namespace UEBabyPram::InsightParser
 		};
 
 		std::vector<TimeLineTuple> thread_timelines;
-		
+
 		struct TimerInfo
 		{
 			std::size_t id;
-			std::wstring_view event_name;
-			std::wstring_view file_name;
+			std::wstring event_name;
+			std::wstring file_name;
 			std::size_t file_line;
 		};
 		
