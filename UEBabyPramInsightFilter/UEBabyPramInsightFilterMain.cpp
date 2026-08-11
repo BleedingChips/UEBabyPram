@@ -5,6 +5,14 @@ import UEBabyPramInsightParser;
 
 struct Parser : public UEBabyPram::InsightParser::ParserInterface
 {
+	void OnCPUEventDiscoverd(std::size_t id, std::wstring_view event_name, std::wstring_view file_name, std::size_t file_line)
+	{
+		// 4841 5607
+		if (event_name == L"Frame")
+		{
+			volatile int i = 0;
+		}
+	}
 };
 
 

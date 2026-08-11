@@ -50,7 +50,9 @@ namespace UEBabyPram::InsightParser
 		virtual TArrayView<uint8> GetEditableMetadata(uint32 TimerId) { return {}; }
 		virtual void SetMetadata(uint32 MetadataTimerId, TArray<uint8>&& Metadata, uint32 NewTimerId) {}
 		virtual void SetMetadataSpec(uint32 TimerId, uint32 MetadataSpecId) {}
-		uint32 AddMetadataSpec(FMetadataSpec&& Metadata) { return 0; }
+		uint32 AddMetadataSpec(FMetadataSpec&& Metadata) {
+			return Parser.AddMetaDataLayout(Metadata.Format, Metadata.FieldNames.GetData(), Metadata.FieldNames.Num());
+		}
 		
 		uint32 AddCpuTimer(FStringView Name, const TCHAR* File, uint32 Line) { 
 			FStringView FileView(File);

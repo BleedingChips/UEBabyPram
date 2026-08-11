@@ -122,12 +122,22 @@ export namespace UEBabyPram::InsightParser
 		static std::wstring_view CoverStringView(wchar_t const* ScopeName, std::size_t ScopeNameLen);
 		std::optional<std::wstring_view> GetCPUEventName(std::size_t event_id) const;
 		std::optional<std::string_view> GetThreadName(std::size_t thread_id) const;
-	
+
 	private:
 		
 		virtual uint32 OnCPUEventDiscoverd(wchar_t const* event_name, std::size_t event_name_len, wchar_t const* file, std::size_t file_name_len, std::size_t line) override;
 
 		virtual ParserThreadTimeLine* GetThreadTimeLine(uint32 thread_id) override;
+
+		uint32 AddMetaDataLayout(wchar_t const* format, wchar_t const* const* field_names, std::size_t field_names_len) override {
+			std::wstring_view format_view{format};
+			std::vector<std::wstring_view> field_namess;
+			for (std::size_t i = 0; i < field_names_len; ++i)
+			{
+				field_namess.emplace_back(field_names[i]);
+			}
+			return 0;
+		}
 	
 		struct TimeLineTuple
 		{
