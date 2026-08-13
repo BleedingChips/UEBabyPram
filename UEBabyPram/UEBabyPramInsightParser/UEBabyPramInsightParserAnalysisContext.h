@@ -49,7 +49,10 @@ namespace UEBabyPram::InsightParser
 		virtual uint32 AddMetadata(uint32 MasterTimerId, TArray<uint8>&& Metadata) { return 0; }
 		virtual TArrayView<uint8> GetEditableMetadata(uint32 TimerId) { return {}; }
 		virtual void SetMetadata(uint32 MetadataTimerId, TArray<uint8>&& Metadata, uint32 NewTimerId) {}
-		virtual void SetMetadataSpec(uint32 TimerId, uint32 MetadataSpecId) {}
+		virtual void SetMetadataSpec(uint32 TimerId, uint32 MetadataSpecId) 
+		{
+			Parser.SetMetadataSpec(TimerId, MetadataSpecId);
+		}
 		uint32 AddMetadataSpec(FMetadataSpec&& Metadata) {
 			return Parser.AddMetaDataLayout(Metadata.Format, Metadata.FieldNames.GetData(), Metadata.FieldNames.Num());
 		}

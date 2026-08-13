@@ -129,7 +129,7 @@ export namespace UEBabyPram::InsightParser
 
 		virtual ParserThreadTimeLine* GetThreadTimeLine(uint32 thread_id) override;
 
-		uint32 AddMetaDataLayout(wchar_t const* format, wchar_t const* const* field_names, std::size_t field_names_len) override {
+		virtual uint32 AddMetaDataLayout(wchar_t const* format, wchar_t const* const* field_names, std::size_t field_names_len) override {
 			std::wstring_view format_view{format};
 			std::vector<std::wstring_view> field_namess;
 			for (std::size_t i = 0; i < field_names_len; ++i)
@@ -137,6 +137,16 @@ export namespace UEBabyPram::InsightParser
 				field_namess.emplace_back(field_names[i]);
 			}
 			return 0;
+		}
+
+		virtual void SetMetadataSpec(uint32 event_id, uint32 metadata_space_id) override {
+			auto event_name = GetCPUEventName(event_id);
+			if (event_name.has_value() && event_name == L"Frame")
+			{
+				volatile int i2 = 0;
+			}
+
+			volatile int i = 0;
 		}
 	
 		struct TimeLineTuple
