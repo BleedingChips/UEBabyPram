@@ -101,6 +101,7 @@ namespace UEBabyPram::InsightParser
 		virtual void OverrideCPUEventName(uint32 event_id, wchar_t const* event_name, std::size_t event_name_len) {}
 		virtual ThreadTimeLineInterface* GetThreadTimeLine(uint32 thread_id) = 0;
 		virtual void AddThread(uint32 thread_id, char const* thread_name) = 0;
+		virtual void AddMetaData(uint32 TimerId, uint8 const* meta_data, std::size_t meta_data_len, uint32 ThreadId) {}
 	};
 
 	void ExecuteParser(DataResourceInterface& resource, BaseParser& parser);

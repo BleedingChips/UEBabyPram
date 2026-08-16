@@ -219,17 +219,18 @@ namespace UEBabyPram::InsightParser
 
 			if (ensure(Metadata.Num() > 0))
 			{
+				auto ThreadId = TraceServices::FTraceAnalyzerUtils::GetThreadIdField(Context);
 				// We don't know if this Metadata trace event or a timing event with metadata arrive first, so handle both cases.
 				const uint32* FoundMetadataTimerId = MetadataIdToTimerIdMap.Find(MetadataId);
 				if (FoundMetadataTimerId == nullptr)
 				{
-					TimerId = AnaContext.AddMetadata(TimerId, MoveTemp(Metadata));
+					TimerId = AnaContext.AddMetadata(TimerId, MoveTemp(Metadata), ThreadId);
 					MetadataIdToTimerIdMap.Add(MetadataId, TimerId);
 				}
 				else
 				{
 					// Replace the placeholder metadata added if we received a timing event with this metadata first.
-					AnaContext.SetMetadata(*FoundMetadataTimerId, MoveTemp(Metadata), TimerId);
+					AnaContext.SetMetadata(*FoundMetadataTimerId, MoveTemp(Metadata), TimerId, ThreadId);
 				}
 			}
 			break;
@@ -385,7 +386,7 @@ namespace UEBabyPram::InsightParser
 							CborWriter.WriteValue("C", 1); // continuation?
 							CborWriter.WriteValue(false);
 						}
-						uint32 MetadataTimerId = AnaContext.AddMetadata(CoroutineTimerId, MoveTemp(CborData));
+						uint32 MetadataTimerId = AnaContext.AddMetadata(CoroutineTimerId, MoveTemp(CborData), ThreadState.ThreadId);
 
 						FEventScopeState& ScopeState = ThreadState.ScopeStack.AddDefaulted_GetRef();
 						ScopeState.StartCycle = ActualCycle;
@@ -480,7 +481,7 @@ namespace UEBabyPram::InsightParser
 								}
 
 								// Add an empty placeholder metadata so we obtain a MetadataId to use as the TimerId. Will be replaced with the actual metadata if the metadata event arrives later.
-								TimerId = AnaContext.AddMetadata(MetadataUnknownTimerId, TArray<uint8>());
+								TimerId = AnaContext.AddMetadata(MetadataUnknownTimerId, TArray<uint8>(), ThreadState.ThreadId);
 								MetadataIdToTimerIdMap.Add(MetadataId, TimerId);
 							}
 							else
@@ -663,7 +664,7 @@ namespace UEBabyPram::InsightParser
 		Context.EventData.SerializeToCbor(CborData);
 		if (ensure(CborData.Num() > 0))
 		{
-			TimerId = AnaContext.AddMetadata(TimerId, MoveTemp(CborData));
+			TimerId = AnaContext.AddMetadata(TimerId, MoveTemp(CborData), ThreadId);
 		}
 
 		uint64 Cycle = Context.EventTime.AsCycle64();
