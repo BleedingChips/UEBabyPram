@@ -8,9 +8,11 @@
 #include "Common/StringStore.h"
 #include "AnalysisCache.h"
 #include "AnalysisServicePrivate.h"
+#include "Trace/Analyzer.h"
 
 #include "UEBabyPramInsightParserAnalysisInterface.h"
 #include "UEBabyPramInsightParserInterface.h"
+
 
 namespace UEBabyPram::InsightParser
 {
@@ -46,12 +48,14 @@ namespace UEBabyPram::InsightParser
 	{
 		virtual const TCHAR* StoreString(const TCHAR* String) { return StringStore.Store(String); }
 		virtual const TCHAR* StoreString(const FStringView& String) { return StringStore.Store(String); }
-		virtual uint32 AddMetadata(uint32 MasterTimerId, TArray<uint8>&& Metadata, uint32 ThreadId) { 
-			Parser.AddMetaData(MasterTimerId, Metadata.GetData(), Metadata.NumBytes(), ThreadId);
-			return 0; 
+		uint32 AddMetadata(uint32 MasterTimerId, TArrayView<const uint8> CborMetaData, uint32 ThreadId) { 
+			return Parser.AddMetaData(MasterTimerId, MetaDataFormat::CborData, CborMetaData.GetData(), CborMetaData.NumBytes(), ThreadId);
+		}
+		uint32 AddMetadata(uint32 MasterTimerId, UE::Trace::IAnalyzer::FEventData const& EventData, uint32 ThreadId) {
+			return Parser.AddMetaData(MasterTimerId, MetaDataFormat::EventData, reinterpret_cast<uint8 const*>(&EventData), EventData.GetSize(), ThreadId);
 		}
 		virtual TArrayView<uint8> GetEditableMetadata(uint32 TimerId) { return {}; }
-		virtual void SetMetadata(uint32 MetadataTimerId, TArray<uint8>&& Metadata, uint32 NewTimerId, uint32 ThreadId) {}
+		virtual void SetMetadata(uint32 MetadataTimerId, TArrayView<const uint8> Metadata, uint32 NewTimerId, uint32 ThreadId) {}
 		virtual void SetMetadataSpec(uint32 TimerId, uint32 MetadataSpecId) 
 		{
 			Parser.SetMetadataSpec(TimerId, MetadataSpecId);

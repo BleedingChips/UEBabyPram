@@ -91,10 +91,10 @@ export namespace UEBabyPram::InsightParser
 
 	struct ThreadCPUEventView
 	{
-		ThreadCPUEventView(std::size_t thread_id, std::span<ThreadCPUEvent const> view) : view(view), thread_id(thread_id) {}
-	protected:
+		ThreadCPUEventView(std::size_t thread_id, std::span<ThreadCPUEvent const> view, std::optional<std::size_t> frame_count) : view(view), thread_id(thread_id), frame_count(frame_count){}
 		std::span<ThreadCPUEvent const> view;
 		std::size_t thread_id;
+		std::optional<std::size_t> frame_count;
 	};
 
 	struct ParserInterface;
@@ -106,6 +106,7 @@ export namespace UEBabyPram::InsightParser
 		virtual void AppendEndEvent(double end_time) override;
 		std::size_t thread_id;
 		std::size_t depth = 0;
+		std::optional<std::size_t> frame_count;
 		std::vector<ThreadCPUEvent> stacks;
 		ParserInterface& reference;
 		~ParserThreadTimeLine();
@@ -148,6 +149,39 @@ export namespace UEBabyPram::InsightParser
 
 			volatile int i = 0;
 		}
+
+		virtual uint32 AddMetaData(uint32 event_id, MetaDataFormat format, uint8 const* data, std::size_t meta_data_len, uint32 thread_id) override
+		{
+			if (data != nullptr && meta_data_len != 0)
+			{
+				if (std::find(frame_event_id.begin(), frame_event_id.end(), event_id) != frame_event_id.end())
+				{
+					wchar_t const* frame_count = nullptr;
+					std::size_t frame_count_len = 0;
+					if (BaseParser::TryReadFromMetaData(format, data, meta_data_len, "Name", frame_count, frame_count_len) && frame_count != nullptr)
+					{
+						std::wstring_view frame_count_string = { frame_count, frame_count_len };
+						std::size_t frame_count_num = 0;
+						auto info = Potato::Format::DirectDeformat(frame_count_string, frame_count_num);
+						if (info)
+						{
+							auto find = std::find_if(
+								thread_timelines.begin(),
+								thread_timelines.end(),
+								[=](TimeLineTuple const& tuple) {
+									return tuple.thread_id == thread_id;
+								}
+							);
+							if (find != thread_timelines.end())
+							{
+								find->time_line->frame_count = frame_count_num;
+							}
+						}
+					}
+				}
+			}
+			return event_id;
+		}
 	
 		struct TimeLineTuple
 		{
@@ -167,6 +201,7 @@ export namespace UEBabyPram::InsightParser
 		};
 		
 		std::vector<TimerInfo> time_infos;
+		std::vector<uint32> frame_event_id;
 
 		virtual void AddThread(uint32 thread_id, char const* thread_name);
 		friend void ExecuteParser(Potato::Document::DocumentReader& Resource, ParserInterface& Parser);

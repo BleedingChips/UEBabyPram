@@ -9,6 +9,7 @@
 #include "CborWriter.h"
 #include "Serialization/MemoryReader.h"
 #include "CborReader.h"
+#include "Containers/ArrayView.h"
 
 #include "UEBabyPramInsightParserCPUAnalysisNewVersion.h"
 
@@ -213,7 +214,7 @@ namespace UEBabyPram::InsightParser
 		{
 			uint32 MetadataId = Context.EventData.GetValue<uint32>("Id");
 			uint32 SpecId = Context.EventData.GetValue<uint32>("SpecId");
-			TArray<uint8> Metadata(EventData.GetArrayView<uint8>("Metadata"));
+			auto Metadata = EventData.GetArrayView<uint8>("Metadata");
 
 			uint32 TimerId = GetOrAddTimer(SpecId);
 
@@ -224,13 +225,13 @@ namespace UEBabyPram::InsightParser
 				const uint32* FoundMetadataTimerId = MetadataIdToTimerIdMap.Find(MetadataId);
 				if (FoundMetadataTimerId == nullptr)
 				{
-					TimerId = AnaContext.AddMetadata(TimerId, MoveTemp(Metadata), ThreadId);
+					TimerId = AnaContext.AddMetadata(TimerId, Metadata, ThreadId);
 					MetadataIdToTimerIdMap.Add(MetadataId, TimerId);
 				}
 				else
 				{
 					// Replace the placeholder metadata added if we received a timing event with this metadata first.
-					AnaContext.SetMetadata(*FoundMetadataTimerId, MoveTemp(Metadata), TimerId, ThreadId);
+					AnaContext.SetMetadata(*FoundMetadataTimerId, Metadata, TimerId, ThreadId);
 				}
 			}
 			break;
@@ -386,7 +387,7 @@ namespace UEBabyPram::InsightParser
 							CborWriter.WriteValue("C", 1); // continuation?
 							CborWriter.WriteValue(false);
 						}
-						uint32 MetadataTimerId = AnaContext.AddMetadata(CoroutineTimerId, MoveTemp(CborData), ThreadState.ThreadId);
+						uint32 MetadataTimerId = AnaContext.AddMetadata(CoroutineTimerId, TArrayView<const uint8, int32>(CborData), ThreadState.ThreadId);
 
 						FEventScopeState& ScopeState = ThreadState.ScopeStack.AddDefaulted_GetRef();
 						ScopeState.StartCycle = ActualCycle;
@@ -438,7 +439,7 @@ namespace UEBabyPram::InsightParser
 						{
 							uint32 MetadataTimerId = ThreadState.ScopeStack.Top().EventTypeId;
 							TArrayView<uint8> Metadata = AnaContext.GetEditableMetadata(MetadataTimerId);
-							if (ensure(Metadata.Num() > 0))
+							if (Metadata.Num() > 0)
 							{
 								// Change the last byte in metadata to "true".
 								Metadata.GetData()[Metadata.Num() - 1] = (uint8)(ECborCode::Prim | ECborCode::True);
@@ -481,7 +482,7 @@ namespace UEBabyPram::InsightParser
 								}
 
 								// Add an empty placeholder metadata so we obtain a MetadataId to use as the TimerId. Will be replaced with the actual metadata if the metadata event arrives later.
-								TimerId = AnaContext.AddMetadata(MetadataUnknownTimerId, TArray<uint8>(), ThreadState.ThreadId);
+								TimerId = AnaContext.AddMetadata(MetadataUnknownTimerId, TArrayView<const uint8>(), ThreadState.ThreadId);
 								MetadataIdToTimerIdMap.Add(MetadataId, TimerId);
 							}
 							else
@@ -660,12 +661,16 @@ namespace UEBabyPram::InsightParser
 			TimerId = DefineUniqueTimer(SpecId, *ScopeName, nullptr, 0);
 		}
 
+		TimerId = AnaContext.AddMetadata(TimerId, Context.EventData, ThreadId);
+
+		/*
 		TArray<uint8> CborData;
 		Context.EventData.SerializeToCbor(CborData);
 		if (ensure(CborData.Num() > 0))
 		{
 			TimerId = AnaContext.AddMetadata(TimerId, MoveTemp(CborData), ThreadId);
 		}
+		*/
 
 		uint64 Cycle = Context.EventTime.AsCycle64();
 		double Time = Context.EventTime.AsSeconds();

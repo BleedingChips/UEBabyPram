@@ -13,6 +13,15 @@ struct Parser : public UEBabyPram::InsightParser::ParserInterface
 			volatile int i = 0;
 		}
 	}
+
+	void OnCPUStackTree(UEBabyPram::InsightParser::ThreadCPUEventView event_scope)
+	{
+		if (event_scope.frame_count.has_value())
+		{
+			volatile int i = 0;
+		}
+		volatile int i = 0;
+	}
 };
 
 

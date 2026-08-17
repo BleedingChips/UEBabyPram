@@ -31,9 +31,11 @@ namespace UEBabyPram::InsightParser
 		{
 			reference.OnCPUStackTree(ThreadCPUEventView{
 				thread_id,
-				std::span(stacks.data(), stacks.size())
+				std::span(stacks.data(), stacks.size()),
+				frame_count
 				});
 			stacks.clear();
+			frame_count.reset();
 		}
 	}
 
@@ -104,6 +106,10 @@ namespace UEBabyPram::InsightParser
 			std::wstring{ cur_file_name },
 			line
 		);
+		if (cur_event_name == L"Frame")
+		{
+			frame_event_id.push_back(event_id);
+		}
 		OnCPUEventDiscoverd(event_id, cur_event_name, cur_file_name, line);
 		return static_cast<uint32>(event_id);
 	}
