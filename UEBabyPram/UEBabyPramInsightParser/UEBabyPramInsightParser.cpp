@@ -44,6 +44,53 @@ namespace UEBabyPram::InsightParser
 		//assert(depth == 0);
 	}
 
+	auto ThreadCPUEventView::FindNextEvent(std::size_t event_id, EventIterator current, IteratorMode mode) const ->EventIterator
+	{
+		std::size_t iterator_index = 0;
+		if (current)
+		{
+			switch (mode)
+			{
+			case IteratorMode::Deeper:
+				iterator_index = current.exist_range.Begin() + 1;
+				break;
+			case IteratorMode::Shallower:
+				iterator_index = current.exist_range.End() + 1;
+				break;
+			default:
+				iterator_index = view.size();
+				break;
+			}
+		}
+
+		EventIterator result;
+		for (; iterator_index < view.size(); ++iterator_index)
+		{
+			auto& ref = view[iterator_index];
+			if (ref.event_id.has_value())
+			{
+				if (*ref.event_id == event_id)
+				{
+					result.exist_range.StartPoint = iterator_index;
+					result.exist_range.EndPoint = iterator_index;
+					result.exist_time_in_second.StartPoint = ref.time_as_second;
+					result.exist_time_in_second.EndPoint = ref.time_as_second;
+					result.depth = ref.depth;
+				}
+				else if (
+					result.exist_range.Begin() != 0
+					&& result.depth == ref.depth
+					)
+				{
+					result.exist_range.EndPoint = iterator_index;
+					result.exist_time_in_second.EndPoint = ref.time_as_second;
+					break;
+				}
+			}
+		}
+		return result;
+	}
+
 	std::wstring_view ParserInterface::CoverStringView(wchar_t const* ScopeName, std::size_t ScopeNameLen)
 	{
 		if (ScopeName != nullptr && ScopeNameLen > 0)
@@ -131,6 +178,68 @@ namespace UEBabyPram::InsightParser
 		if (find != thread_timelines.end())
 		{
 			return std::string_view{ find->thread_name };
+		}
+		return std::nullopt;
+	}
+
+	uint32 ParserInterface::AddMetaData(uint32 event_id, MetaDataFormat format, uint8 const* data, std::size_t meta_data_len, uint32 thread_id)
+	{
+		if (data != nullptr && meta_data_len != 0)
+		{
+			if (std::find(frame_event_id.begin(), frame_event_id.end(), event_id) != frame_event_id.end())
+			{
+				wchar_t const* frame_count = nullptr;
+				std::size_t frame_count_len = 0;
+				if (BaseParser::TryReadFromMetaData(format, data, meta_data_len, "Name", frame_count, frame_count_len) && frame_count != nullptr)
+				{
+					std::wstring_view frame_count_string = { frame_count, frame_count_len };
+					std::size_t frame_count_num = 0;
+					auto info = Potato::Format::DirectDeformat(frame_count_string, frame_count_num);
+					if (info)
+					{
+						auto find = std::find_if(
+							thread_timelines.begin(),
+							thread_timelines.end(),
+							[=](TimeLineTuple const& tuple) {
+								return tuple.thread_id == thread_id;
+							}
+						);
+						if (find != thread_timelines.end())
+						{
+							find->time_line->frame_count = frame_count_num;
+						}
+					}
+				}
+			}
+		}
+		return event_id;
+	}
+
+	auto ParserInterface::GetCPUEventInfo(std::size_t event_id) const ->std::optional<CPUEventInfo>
+	{
+		if (time_infos.size() > event_id)
+		{
+			auto& ref = time_infos[event_id];
+			return CPUEventInfo{
+				ref.id,
+				ref.event_name,
+				ref.file_name,
+				ref.file_line
+			};
+		}
+		return std::nullopt;
+	}
+
+	auto ParserInterface::GetThreadInfo(std::size_t thread_id) const ->std::optional<ThreadInfo>
+	{
+		auto find = std::find_if(thread_timelines.begin(), thread_timelines.end(), [=](TimeLineTuple const& ref) {
+			return ref.thread_id == thread_id;
+			});
+		if (find != thread_timelines.end())
+		{
+			return ThreadInfo{
+				find->thread_name
+			};
 		}
 		return std::nullopt;
 	}

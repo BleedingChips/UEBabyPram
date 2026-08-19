@@ -91,10 +91,44 @@ export namespace UEBabyPram::InsightParser
 
 	struct ThreadCPUEventView
 	{
-		ThreadCPUEventView(std::size_t thread_id, std::span<ThreadCPUEvent const> view, std::optional<std::size_t> frame_count) : view(view), thread_id(thread_id), frame_count(frame_count){}
-		std::span<ThreadCPUEvent const> view;
 		std::size_t thread_id;
+		std::span<ThreadCPUEvent const> view;
 		std::optional<std::size_t> frame_count;
+
+		struct EventIterator
+		{
+			Potato::Misc::IndexSpan<> exist_range;
+			Potato::Misc::IndexSpan<double> exist_time_in_second;
+			std::size_t depth = std::numeric_limits<std::size_t>::max();
+			operator bool() const { return exist_range.Size() != 0; }
+		};
+
+		enum class IteratorMode
+		{
+			Depper,
+			Shallower
+		};
+
+
+		EventIterator FindNextEvent(std::size_t event_id, EventIterator current = {}, IteratorMode mode = IteratorMode::Depper) const;
+		template<typename Func>
+			requires(std::is_invocable_r_v<bool, Func, EventIterator>)
+		std::size_t ForeachEvent(std::size_t event_id, Func&& func, IteratorMode mode = IteratorMode::Depper) const
+		{
+			std::size_t total_count = 0;
+			EventIterator current;
+			do {
+				current = FindNextEvent(event_id, current, mode);
+				if (current)
+				{
+					auto need_continue = func(current);
+					total_count += 1;
+					if (!need_continue)
+						return total_count;
+				}
+			} while (current);
+			return total_count;
+		}
 	};
 
 	struct ParserInterface;
@@ -124,64 +158,33 @@ export namespace UEBabyPram::InsightParser
 		std::optional<std::wstring_view> GetCPUEventName(std::size_t event_id) const;
 		std::optional<std::string_view> GetThreadName(std::size_t thread_id) const;
 
+		struct CPUEventInfo
+		{
+			std::size_t id;
+			std::wstring_view event_name;
+			std::wstring_view file_name;
+			std::size_t file_line;
+		};
+
+		struct ThreadInfo
+		{
+			std::string_view thread_name;
+		};
+
+		std::optional<CPUEventInfo> GetCPUEventInfo(std::size_t event_id) const;
+		std::optional<ThreadInfo> GetThreadInfo(std::size_t thread_id) const;
+
 	private:
 		
 		virtual uint32 OnCPUEventDiscoverd(wchar_t const* event_name, std::size_t event_name_len, wchar_t const* file, std::size_t file_name_len, std::size_t line) override;
 
 		virtual ParserThreadTimeLine* GetThreadTimeLine(uint32 thread_id) override;
 
-		virtual uint32 AddMetaDataLayout(wchar_t const* format, wchar_t const* const* field_names, std::size_t field_names_len) override {
-			std::wstring_view format_view{format};
-			std::vector<std::wstring_view> field_namess;
-			for (std::size_t i = 0; i < field_names_len; ++i)
-			{
-				field_namess.emplace_back(field_names[i]);
-			}
-			return 0;
-		}
+		virtual uint32 AddMetaDataLayout(wchar_t const* format, wchar_t const* const* field_names, std::size_t field_names_len) override {}
 
-		virtual void SetMetadataSpec(uint32 event_id, uint32 metadata_space_id) override {
-			auto event_name = GetCPUEventName(event_id);
-			if (event_name.has_value() && event_name == L"Frame")
-			{
-				volatile int i2 = 0;
-			}
+		virtual void SetMetadataSpec(uint32 event_id, uint32 metadata_space_id) override {}
 
-			volatile int i = 0;
-		}
-
-		virtual uint32 AddMetaData(uint32 event_id, MetaDataFormat format, uint8 const* data, std::size_t meta_data_len, uint32 thread_id) override
-		{
-			if (data != nullptr && meta_data_len != 0)
-			{
-				if (std::find(frame_event_id.begin(), frame_event_id.end(), event_id) != frame_event_id.end())
-				{
-					wchar_t const* frame_count = nullptr;
-					std::size_t frame_count_len = 0;
-					if (BaseParser::TryReadFromMetaData(format, data, meta_data_len, "Name", frame_count, frame_count_len) && frame_count != nullptr)
-					{
-						std::wstring_view frame_count_string = { frame_count, frame_count_len };
-						std::size_t frame_count_num = 0;
-						auto info = Potato::Format::DirectDeformat(frame_count_string, frame_count_num);
-						if (info)
-						{
-							auto find = std::find_if(
-								thread_timelines.begin(),
-								thread_timelines.end(),
-								[=](TimeLineTuple const& tuple) {
-									return tuple.thread_id == thread_id;
-								}
-							);
-							if (find != thread_timelines.end())
-							{
-								find->time_line->frame_count = frame_count_num;
-							}
-						}
-					}
-				}
-			}
-			return event_id;
-		}
+		virtual uint32 AddMetaData(uint32 event_id, MetaDataFormat format, uint8 const* data, std::size_t meta_data_len, uint32 thread_id) override;
 	
 		struct TimeLineTuple
 		{
@@ -192,7 +195,7 @@ export namespace UEBabyPram::InsightParser
 
 		std::vector<TimeLineTuple> thread_timelines;
 
-		struct TimerInfo
+		struct CPUEvent
 		{
 			std::size_t id;
 			std::wstring event_name;
@@ -200,7 +203,7 @@ export namespace UEBabyPram::InsightParser
 			std::size_t file_line;
 		};
 		
-		std::vector<TimerInfo> time_infos;
+		std::vector<CPUEvent> time_infos;
 		std::vector<uint32> frame_event_id;
 
 		virtual void AddThread(uint32 thread_id, char const* thread_name);
