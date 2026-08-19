@@ -109,6 +109,7 @@ namespace UEBabyPram::InsightParser
 		virtual void AddThread(uint32 thread_id, char const* thread_name) = 0;
 		virtual uint32 AddMetaData(uint32 TimerId, MetaDataFormat format, uint8 const* meta_data, std::size_t meta_data_len, uint32 ThreadId) { return 0; }
 		static bool TryReadFromMetaData(MetaDataFormat format, uint8 const* meta_data, std::size_t meta_data_len, char const* field_name, wchar_t const*& out_string, std::size_t& string_len);
+		virtual void AllAnalyzeDone() {};
 	};
 
 	void ExecuteParser(DataResourceInterface& resource, BaseParser& parser);

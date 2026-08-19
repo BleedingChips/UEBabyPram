@@ -431,6 +431,8 @@ namespace UEBabyPram::InsightParser
 		}
 
 		engine.End();
+
+		parser.AllAnalyzeDone();
 		
 	}
 

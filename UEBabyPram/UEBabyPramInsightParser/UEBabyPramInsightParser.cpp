@@ -44,22 +44,17 @@ namespace UEBabyPram::InsightParser
 		//assert(depth == 0);
 	}
 
-	auto ThreadCPUEventView::FindNextEvent(std::size_t event_id, EventIterator current, IteratorMode mode) const ->EventIterator
+	auto ThreadCPUEventView::FindNextEvent(std::span<std::size_t> event_id_span, EventIterator current, bool need_depper) const ->EventIterator
 	{
 		std::size_t iterator_index = 0;
 		if (current)
 		{
-			switch (mode)
+			if (need_depper)
 			{
-			case IteratorMode::Deeper:
 				iterator_index = current.exist_range.Begin() + 1;
-				break;
-			case IteratorMode::Shallower:
-				iterator_index = current.exist_range.End() + 1;
-				break;
-			default:
-				iterator_index = view.size();
-				break;
+			}
+			else {
+				iterator_index = current.exist_range.End();
 			}
 		}
 
@@ -69,23 +64,30 @@ namespace UEBabyPram::InsightParser
 			auto& ref = view[iterator_index];
 			if (ref.event_id.has_value())
 			{
-				if (*ref.event_id == event_id)
+				if (
+					result.event_id == std::numeric_limits<std::size_t>::max()
+					&& (
+						event_id_span.size() == 0
+						|| std::find(event_id_span.begin(), event_id_span.end(), *ref.event_id) != event_id_span.end()
+						)
+					)
 				{
 					result.exist_range.StartPoint = iterator_index;
 					result.exist_range.EndPoint = iterator_index;
 					result.exist_time_in_second.StartPoint = ref.time_as_second;
 					result.exist_time_in_second.EndPoint = ref.time_as_second;
 					result.depth = ref.depth;
+					result.event_id = *ref.event_id;
 				}
-				else if (
-					result.exist_range.Begin() != 0
-					&& result.depth == ref.depth
-					)
-				{
-					result.exist_range.EndPoint = iterator_index;
-					result.exist_time_in_second.EndPoint = ref.time_as_second;
-					break;
-				}
+			}
+			else if (
+				result.event_id != std::numeric_limits<std::size_t>::max()
+				&& result.depth == ref.depth
+				)
+			{
+				result.exist_range.EndPoint = iterator_index + 1;
+				result.exist_time_in_second.EndPoint = ref.time_as_second;
+				break;
 			}
 		}
 		return result;
@@ -242,5 +244,18 @@ namespace UEBabyPram::InsightParser
 			};
 		}
 		return std::nullopt;
+	}
+
+	void ParserInterface::AllAnalyzeDone()
+	{
+		for (auto& ite : thread_timelines)
+		{
+			while (ite.time_line->depth != 0 && ite.time_line->stacks.size() > 0)
+			{
+				ite.time_line->AppendEndEvent(
+					ite.time_line->stacks.rbegin()->time_as_second
+				);
+			}
+		}
 	}
 }

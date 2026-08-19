@@ -97,28 +97,24 @@ export namespace UEBabyPram::InsightParser
 
 		struct EventIterator
 		{
+			std::size_t event_id = std::numeric_limits<std::size_t>::max();
 			Potato::Misc::IndexSpan<> exist_range;
 			Potato::Misc::IndexSpan<double> exist_time_in_second;
 			std::size_t depth = std::numeric_limits<std::size_t>::max();
-			operator bool() const { return exist_range.Size() != 0; }
+			operator bool() const { return event_id != std::numeric_limits<std::size_t>::max() && exist_range.Size() != 0; }
 		};
 
-		enum class IteratorMode
-		{
-			Depper,
-			Shallower
-		};
-
-
-		EventIterator FindNextEvent(std::size_t event_id, EventIterator current = {}, IteratorMode mode = IteratorMode::Depper) const;
+		EventIterator FindNextEvent(std::span<std::size_t> event_id_span, EventIterator current = {}, bool need_depper = true) const;
+		
+		
 		template<typename Func>
 			requires(std::is_invocable_r_v<bool, Func, EventIterator>)
-		std::size_t ForeachEvent(std::size_t event_id, Func&& func, IteratorMode mode = IteratorMode::Depper) const
+		std::size_t ForeachEvent(std::span<std::size_t> event_id_span, Func&& func, bool need_depper = true) const
 		{
 			std::size_t total_count = 0;
 			EventIterator current;
 			do {
-				current = FindNextEvent(event_id, current, mode);
+				current = FindNextEvent(event_id_span, current, need_depper);
 				if (current)
 				{
 					auto need_continue = func(current);
@@ -154,6 +150,7 @@ export namespace UEBabyPram::InsightParser
 		virtual void OnThreadDiscoverd(uint32 thread_id, std::string_view thread_name) {}
 		virtual void OnCPUStackTree(ThreadCPUEventView event_scope) {}
 		virtual void OnCPUEventDiscoverd(std::size_t id, std::wstring_view event_name, std::wstring_view file_name, std::size_t file_line) {}
+		virtual	void AllAnalyzeDone() override;
 		static std::wstring_view CoverStringView(wchar_t const* ScopeName, std::size_t ScopeNameLen);
 		std::optional<std::wstring_view> GetCPUEventName(std::size_t event_id) const;
 		std::optional<std::string_view> GetThreadName(std::size_t thread_id) const;
@@ -180,7 +177,7 @@ export namespace UEBabyPram::InsightParser
 
 		virtual ParserThreadTimeLine* GetThreadTimeLine(uint32 thread_id) override;
 
-		virtual uint32 AddMetaDataLayout(wchar_t const* format, wchar_t const* const* field_names, std::size_t field_names_len) override {}
+		virtual uint32 AddMetaDataLayout(wchar_t const* format, wchar_t const* const* field_names, std::size_t field_names_len) override { return 0; }
 
 		virtual void SetMetadataSpec(uint32 event_id, uint32 metadata_space_id) override {}
 

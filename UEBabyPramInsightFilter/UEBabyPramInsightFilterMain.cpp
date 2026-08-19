@@ -8,9 +8,9 @@ struct Parser : public UEBabyPram::InsightParser::ParserInterface
 	void OnCPUEventDiscoverd(std::size_t id, std::wstring_view event_name, std::wstring_view file_name, std::size_t file_line)
 	{
 		// 4841 5607
-		if (event_name == L"Frame")
+		if (event_name.contains(L"UCharacterMovementComponent_TickComponent"))
 		{
-			volatile int i = 0;
+			movement_component_tick.emplace_back(id);
 		}
 	}
 
@@ -18,10 +18,24 @@ struct Parser : public UEBabyPram::InsightParser::ParserInterface
 	{
 		if (event_scope.frame_count.has_value())
 		{
-			volatile int i = 0;
+			UEBabyPram::InsightParser::ThreadCPUEventView::EventIterator iterator;
+			do {
+				iterator = event_scope.FindNextEvent(
+					std::span(movement_component_tick.data(), movement_component_tick.size()),
+					iterator
+				);
+				if (iterator)
+				{
+					total_time += iterator.exist_time_in_second.Size();
+					count += 1;
+				}
+			} while (iterator);
 		}
 		volatile int i = 0;
 	}
+	std::vector<std::size_t> movement_component_tick;
+	double total_time = 0.0f;
+	std::size_t count = 0;
 };
 
 
@@ -59,7 +73,7 @@ int main(int argc, char* argv[])
 		Potato::Document::DocumentReader Reader(insight_path);
 		Parser Ana;
 		UEBabyPram::InsightParser::ExecuteParser(Reader, Ana);
-		volatile int i = 0;
+		Potato::Log::Log<"sadasd", Potato::Log::LogLevel::Display, "{} {} {}">(Ana.total_time, Ana.count, Ana.total_time / Ana.count);
 	}
 
 	return 0;
