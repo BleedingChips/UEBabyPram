@@ -16,8 +16,8 @@
 namespace UEBabyPram::InsightParser
 {
 
-	CPUScopeAnalyzer::CPUScopeAnalyzer(AnalysisContext& AnaContext)
-		: AnaContext(AnaContext)
+	CPUScopeAnalyzer::CPUScopeAnalyzer(BaseParser& Parser, AnalysisContext& Context)
+		: Parser(Parser), AnaContext(Context)
 	{
 	}
 
@@ -225,13 +225,25 @@ namespace UEBabyPram::InsightParser
 				const uint32* FoundMetadataTimerId = MetadataIdToTimerIdMap.Find(MetadataId);
 				if (FoundMetadataTimerId == nullptr)
 				{
-					TimerId = AnaContext.AddMetadata(TimerId, Metadata, ThreadId);
+					TimerId = Parser.AddMetaData(TimerId, 
+						MetaDataFormat::CborData,
+						Metadata.GetData(),
+						Metadata.NumBytes(),
+						ThreadId
+					);
 					MetadataIdToTimerIdMap.Add(MetadataId, TimerId);
 				}
 				else
 				{
 					// Replace the placeholder metadata added if we received a timing event with this metadata first.
-					AnaContext.SetMetadata(*FoundMetadataTimerId, Metadata, TimerId, ThreadId);
+					Parser.SetMetadata(
+						*FoundMetadataTimerId,
+						MetaDataFormat::CborData,
+						Metadata.GetData(),
+						Metadata.Num(),
+						TimerId, 
+						ThreadId
+					);
 				}
 			}
 			break;
@@ -387,7 +399,7 @@ namespace UEBabyPram::InsightParser
 							CborWriter.WriteValue("C", 1); // continuation?
 							CborWriter.WriteValue(false);
 						}
-						uint32 MetadataTimerId = AnaContext.AddMetadata(CoroutineTimerId, TArrayView<const uint8, int32>(CborData), ThreadState.ThreadId);
+						uint32 MetadataTimerId = Parser.AddMetaData(CoroutineTimerId, MetaDataFormat::CborData, CborData.GetData(), CborData.Num(), ThreadState.ThreadId);
 
 						FEventScopeState& ScopeState = ThreadState.ScopeStack.AddDefaulted_GetRef();
 						ScopeState.StartCycle = ActualCycle;
@@ -438,12 +450,14 @@ namespace UEBabyPram::InsightParser
 						if (ThreadState.ScopeStack.Num() > 0)
 						{
 							uint32 MetadataTimerId = ThreadState.ScopeStack.Top().EventTypeId;
+							/*
 							TArrayView<uint8> Metadata = AnaContext.GetEditableMetadata(MetadataTimerId);
 							if (Metadata.Num() > 0)
 							{
 								// Change the last byte in metadata to "true".
 								Metadata.GetData()[Metadata.Num() - 1] = (uint8)(ECborCode::Prim | ECborCode::True);
 							}
+							*/
 						}
 					}
 
@@ -482,7 +496,7 @@ namespace UEBabyPram::InsightParser
 								}
 
 								// Add an empty placeholder metadata so we obtain a MetadataId to use as the TimerId. Will be replaced with the actual metadata if the metadata event arrives later.
-								TimerId = AnaContext.AddMetadata(MetadataUnknownTimerId, TArrayView<const uint8>(), ThreadState.ThreadId);
+								TimerId = Parser.AddMetaData(MetadataUnknownTimerId, MetaDataFormat::CborData, nullptr, 0, ThreadState.ThreadId);
 								MetadataIdToTimerIdMap.Add(MetadataId, TimerId);
 							}
 							else
@@ -661,7 +675,13 @@ namespace UEBabyPram::InsightParser
 			TimerId = DefineUniqueTimer(SpecId, *ScopeName, nullptr, 0);
 		}
 
-		TimerId = AnaContext.AddMetadata(TimerId, Context.EventData, ThreadId);
+		TimerId = Parser.AddMetaData(
+			TimerId, 
+			MetaDataFormat::EventData, 
+			reinterpret_cast<uint8 const*>(&Context.EventData), 
+			Context.EventData.GetSize(), 
+			ThreadId
+		);
 
 		/*
 		TArray<uint8> CborData;
@@ -863,7 +883,8 @@ namespace UEBabyPram::InsightParser
 
 		if (Spec.FieldNames.Num() > 0 || Spec.Format != nullptr)
 		{
-			uint32 MetadataSpecId = AnaContext.AddMetadataSpec(MoveTemp(Spec));
+			/*
+			uint32 MetadataSpecId = Parser.AddMetadataSpec(MoveTemp(Spec));
 
 			const ITimingProfilerProvider* TimingProfilerProvider = AnaContext.GetReadProvider();
 			if (TimingProfilerProvider)
@@ -896,6 +917,7 @@ namespace UEBabyPram::InsightParser
 			}
 
 			AnaContext.SetMetadataSpec(TimerId, MetadataSpecId);
+			*/
 		}
 	}
 
@@ -919,7 +941,9 @@ namespace UEBabyPram::InsightParser
 	uint32 CPUScopeAnalyzer::AddCpuTimer(uint32 SpecId, const TCHAR* TimerName, const TCHAR* File, uint32 Line)
 	{
 		// Add a new CPU timer.
-		uint32 TimerId = AnaContext.AddCpuTimer(TimerName, File, Line);
+		FStringView TimerNameView(TimerName);
+		FStringView FileNameView(File);
+		uint32 TimerId = Parser.OnCPUEventDiscoverd(TimerNameView.GetData(), TimerNameView.Len(), FileNameView.GetData(), FileNameView.Len(), Line);
 
 		// Map the SpecId to the timer.
 		SpecIdToTimerIdMap.Add(SpecId, TimerId);
@@ -954,7 +978,7 @@ namespace UEBabyPram::InsightParser
 
 				// Update name for mapped timer.
 				SetTimerName(SpecId, TimerId, StoredTimerName);
-				AnaContext.SetTimerLocation(TimerId, File, Line);
+				//Parser.SetTimerLocation(TimerId, File, Line);
 
 				// In this case, we do not remap the SpecId to the previously defined timer with same name.
 				// This is because the two timers are already used in timelines.
@@ -997,7 +1021,7 @@ namespace UEBabyPram::InsightParser
 
 			// Update name for the mapped timer.
 			SetTimerName(SpecId, TimerId, TimerName);
-			AnaContext.SetTimerLocation(TimerId, File, Line);
+			//AnaContext.SetTimerLocation(TimerId, File, Line);
 		}
 		else
 		{
@@ -1012,6 +1036,7 @@ namespace UEBabyPram::InsightParser
 
 	const TCHAR* CPUScopeAnalyzer::GetTimerName(uint32 TimerId) const
 	{
+		/*
 		const TCHAR* TimerName = nullptr;
 		const ITimingProfilerProvider* TimingProfilerProvider = AnaContext.GetReadProvider();
 		if (TimingProfilerProvider)
@@ -1028,13 +1053,15 @@ namespace UEBabyPram::InsightParser
 				});
 		}
 		return TimerName;
+		*/
+		return nullptr;
 	}
 
 	////////////////////////////////////////////////////////////////////////////////////////////////////
 
 	void CPUScopeAnalyzer::SetTimerName(uint32 SpecId, uint32 TimerId, const TCHAR* TimerName)
 	{
-		AnaContext.SetTimerName(TimerId, TimerName);
+		//AnaContext.SetTimerName(TimerId, TimerName);
 	}
 
 	////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1046,14 +1073,20 @@ namespace UEBabyPram::InsightParser
 		{
 			ThreadState = new FThreadState();
 			ThreadState->ThreadId = ThreadId;
-			ThreadState->Timeline = AnaContext.GetThreadTimeLine(ThreadId);
+			ThreadState->Timeline = Parser.GetThreadTimeLine(ThreadId);
 			ThreadStatesMap.Add(ThreadId, ThreadState);
 
 			// Just in case the rest of Insight's reporting/analysis doesn't know about
 			// this thread, we'll explicitly add it. For fault tolerance.
-			AnaContext.AddThread(ThreadId, ThreadName, TPri_Normal);
+			//Parser.OnThre(ThreadId, ThreadName, TPri_Normal);
 		}
 		return *ThreadState;
+	}
+
+	void CPUScopeAnalyzer::OnThreadInfo(const FThreadInfo& ThreadInfo)
+	{
+		FAnsiStringView ThreadName{ ThreadInfo.GetName()};
+		Parser.OnThreadDiscoverd(ThreadInfo.GetId(), ThreadInfo.GetSystemId(), ThreadName.GetData(), ThreadName.Len());
 	}
 }
 

@@ -3,9 +3,22 @@ import Potato;
 import std;
 import UEBabyPramInsightParser;
 
+using UEBabyPram::InsightParser::ThreadID;
+using UEBabyPram::InsightParser::ThreadSystemID;
+using UEBabyPram::InsightParser::EventID;
+
 struct Parser : public UEBabyPram::InsightParser::ParserInterface
 {
-	void OnCPUEventDiscoverd(std::size_t id, std::wstring_view event_name, std::wstring_view file_name, std::size_t file_line)
+	void ContextSwitchEvent(ThreadSystemID thread_id, uint32 core_name, Potato::Misc::IndexSpan<double> duration) override
+	{
+		auto thread_info = GetThreadInfo(thread_id);
+		if (thread_id == 2)
+		{
+			volatile int i = 0;
+		}
+	}
+
+	void OnCPUEventDiscoverd(EventID id, std::wstring_view event_name, std::wstring_view file_name, std::size_t file_line) override
 	{
 		// 4841 5607
 		if (event_name.contains(L"UCharacterMovementComponent_TickComponent"))
@@ -18,23 +31,21 @@ struct Parser : public UEBabyPram::InsightParser::ParserInterface
 	{
 		if (event_scope.frame_count.has_value())
 		{
-			UEBabyPram::InsightParser::ThreadCPUEventView::EventIterator iterator;
-			do {
-				iterator = event_scope.FindNextEvent(
-					std::span(movement_component_tick.data(), movement_component_tick.size()),
-					iterator
-				);
-				if (iterator)
-				{
+			event_scope.ForeachEvent(
+				std::span(movement_component_tick.data(), movement_component_tick.size()),
+				[this](UEBabyPram::InsightParser::ThreadCPUEventView::EventIterator const& iterator) -> bool {
 					total_time += iterator.exist_time_in_second.Size();
+					self_total_time += iterator.self_time_in_second;
 					count += 1;
+					return true;
 				}
-			} while (iterator);
+			);
 		}
-		volatile int i = 0;
 	}
-	std::vector<std::size_t> movement_component_tick;
-	double total_time = 0.0f;
+
+	std::vector<UEBabyPram::InsightParser::EventID> movement_component_tick;
+	double total_time = 0.0;
+	double self_total_time = 0.0;
 	std::size_t count = 0;
 };
 
@@ -73,7 +84,12 @@ int main(int argc, char* argv[])
 		Potato::Document::DocumentReader Reader(insight_path);
 		Parser Ana;
 		UEBabyPram::InsightParser::ExecuteParser(Reader, Ana);
-		Potato::Log::Log<"sadasd", Potato::Log::LogLevel::Display, "{} {} {}">(Ana.total_time, Ana.count, Ana.total_time / Ana.count);
+		Potato::Log::Log<"sadasd", Potato::Log::LogLevel::Display, "<{}> <{}> <{}> <{}>">(
+			Ana.total_time, 
+			Ana.count, 
+			Ana.total_time / Ana.count,
+			Ana.self_total_time
+		);
 	}
 
 	return 0;

@@ -65,7 +65,16 @@ namespace UEBabyPram::InsightParser
 			Event.ThreadId = EventData.GetValue<uint32>("ThreadId");
 			Event.CoreNumber = EventData.GetValue<uint8>("CoreNumber");
 
-			Parser.ContextSwitchEvent(Event.ThreadId, Event.CoreNumber, Event.StartTime, Event.EndTime);
+			auto RealThreadId = Event.ThreadId;
+
+			auto Result = ThreadMapping.FindByPredicate([=](ThreadIdMapping const& Mapping) {
+				return Mapping.ThreadSystemId == RealThreadId;
+				});
+
+			if (Result != nullptr)
+			{
+				Parser.ContextSwitchEvent(Result->ThreadId, Event.CoreNumber, Event.StartTime, Event.EndTime);
+			}
 			/*
 			const auto& EventData = Context.EventData;
 			double Start = Context.EventTime.AsSeconds(EventData.GetValue<uint64>("StartTime"));
@@ -103,7 +112,6 @@ namespace UEBabyPram::InsightParser
 			*/
 			break;
 		}
-
 		case RouteId_ThreadName:
 		{
 			/*
@@ -113,6 +121,7 @@ namespace UEBabyPram::InsightParser
 			FStringView Name;
 			if (EventData.GetString("Name", Name))
 			{
+				Parser.AddThread();
 				{
 					TraceServices::FProviderEditScopeLock ScopedLock(ContextSwitchesProvider);
 					ContextSwitchesProvider.AddThreadName(ThreadId, ProcessId, Name);
@@ -133,6 +142,9 @@ namespace UEBabyPram::InsightParser
 
 	void FPlatformEventTraceAnalyzer::OnThreadInfo(const FThreadInfo& ThreadInfo)
 	{
+		ThreadMapping.Add(
+			ThreadIdMapping{ ThreadInfo.GetId(), ThreadInfo.GetSystemId() }
+		);
 		/*
 		LLM_SCOPE_BYNAME(TEXT("Insights/FPlatformEventTraceAnalyzer"));
 

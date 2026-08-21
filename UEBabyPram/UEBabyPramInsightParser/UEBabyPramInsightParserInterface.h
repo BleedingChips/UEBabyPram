@@ -100,14 +100,15 @@ namespace UEBabyPram::InsightParser
 		virtual uint32 AddMetaDataLayout(wchar_t const* format, wchar_t const* const* field_names, std::size_t field_names_len) { return 0; }
 		virtual bool IsThreadRequired(wchar_t const* thread_name, std::size_t thread_name_len) { return true; }
 		virtual bool IsContextSwitchRequired() const { return false; }
-		virtual void ContextSwitchEvent(uint32 thread_id, uint32 core_name, uint32 start_time, uint32 end_time) {}
-		virtual void OnThreadDiscoverd(uint32 thread_id, wchar_t const* thread_name, std::size_t thread_name_len) {}
+		virtual void ContextSwitchEvent(uint32 thread_id, uint32 core_number, double start_time, double end_time) {}
+		virtual void OnThreadDiscoverd(uint32 thread_id, uint32 thread_system_id, char const* thread_name, std::size_t thread_name_len) {}
 		virtual uint32 OnCPUEventDiscoverd(wchar_t const* event_name, std::size_t event_name_len, wchar_t const* file, std::size_t file_name_len, std::size_t line) { return 0; }
 		virtual void OverrideCPUEventLocation(uint32 event_id, wchar_t const* file_name, std::size_t file_name_len) {}
 		virtual void OverrideCPUEventName(uint32 event_id, wchar_t const* event_name, std::size_t event_name_len) {}
 		virtual ThreadTimeLineInterface* GetThreadTimeLine(uint32 thread_id) = 0;
-		virtual void AddThread(uint32 thread_id, char const* thread_name) = 0;
+		//virtual void AddThread(uint32 thread_id, uint32 thread_system_id, char const* thread_name) = 0;
 		virtual uint32 AddMetaData(uint32 TimerId, MetaDataFormat format, uint8 const* meta_data, std::size_t meta_data_len, uint32 ThreadId) { return 0; }
+		virtual void SetMetadata(uint32 MetaDataId, MetaDataFormat format, uint8 const* meta_data, std::size_t meta_data_len, uint32 TimerId, uint32 ThreadId) {}
 		static bool TryReadFromMetaData(MetaDataFormat format, uint8 const* meta_data, std::size_t meta_data_len, char const* field_name, wchar_t const*& out_string, std::size_t& string_len);
 		virtual void AllAnalyzeDone() {};
 	};

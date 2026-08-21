@@ -394,9 +394,9 @@ namespace UEBabyPram::InsightParser
 
 		FCpuProfilerAnalyzer analyzer{ seesion, provider, provider, parser };
 
-		AnalysisContext ana_context{parser};
+		AnalysisContext ana_context{};
 
-		CPUScopeAnalyzer analyzer2{ ana_context };
+		CPUScopeAnalyzer analyzer2{ parser, ana_context };
 
 		FPlatformEventTraceAnalyzer Analyzer2{ seesion,  parser };
 		//TSharedPtr<TraceServices::IAnalysisSession> Session = TraceServices::CreateAnalysisSession(0, nullptr, {});

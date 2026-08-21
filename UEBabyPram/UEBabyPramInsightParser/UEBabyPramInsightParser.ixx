@@ -82,34 +82,60 @@ export namespace UEBabyPram::InsightParser
 		Potato::Document::DocumentReader& reader;
 	};
 
+	struct EventID
+	{
+		std::size_t id = std::numeric_limits<std::size_t>::max();
+		operator bool() const { return id != std::numeric_limits<std::size_t>::max(); }
+		std::strong_ordering operator<=>(EventID const&) const = default;
+		bool operator==(EventID const&) const = default;
+	};
+
+	struct ThreadID
+	{
+		std::size_t id = std::numeric_limits<std::size_t>::max();
+		operator bool() const { return id != std::numeric_limits<std::size_t>::max(); }
+		std::strong_ordering operator<=>(ThreadID const&) const = default;
+		bool operator==(ThreadID const&) const = default;
+	};
+
+	struct ThreadSystemID
+	{
+		std::size_t id = std::numeric_limits<std::size_t>::max();
+		operator bool() const { return id != std::numeric_limits<std::size_t>::max(); }
+		std::strong_ordering operator<=>(ThreadSystemID const&) const = default;
+		bool operator==(ThreadSystemID const&) const = default;
+	};
+
 	struct ThreadCPUEvent
 	{
-		std::optional<std::size_t> event_id;
+		EventID event_id;
 		double time_as_second;
 		std::size_t depth;
 	};
 
 	struct ThreadCPUEventView
 	{
-		std::size_t thread_id;
+		ThreadID thread_id;
+		ThreadSystemID system_thread_id;
 		std::span<ThreadCPUEvent const> view;
 		std::optional<std::size_t> frame_count;
 
 		struct EventIterator
 		{
-			std::size_t event_id = std::numeric_limits<std::size_t>::max();
+			EventID event_id;
 			Potato::Misc::IndexSpan<> exist_range;
 			Potato::Misc::IndexSpan<double> exist_time_in_second;
+			double self_time_in_second = 0.0;
 			std::size_t depth = std::numeric_limits<std::size_t>::max();
-			operator bool() const { return event_id != std::numeric_limits<std::size_t>::max() && exist_range.Size() != 0; }
+			operator bool() const { return event_id.id != std::numeric_limits<std::size_t>::max() && exist_range.Size() != 0; }
 		};
 
-		EventIterator FindNextEvent(std::span<std::size_t> event_id_span, EventIterator current = {}, bool need_depper = true) const;
+		EventIterator FindNextEvent(std::span<EventID const> event_id_span, EventIterator current = {}, bool need_depper = true) const;
 		
 		
 		template<typename Func>
 			requires(std::is_invocable_r_v<bool, Func, EventIterator>)
-		std::size_t ForeachEvent(std::span<std::size_t> event_id_span, Func&& func, bool need_depper = true) const
+		std::size_t ForeachEvent(std::span<EventID const> event_id_span, Func&& func, bool need_depper = true) const
 		{
 			std::size_t total_count = 0;
 			EventIterator current;
@@ -131,10 +157,12 @@ export namespace UEBabyPram::InsightParser
 
 	struct ParserThreadTimeLine : public ThreadTimeLineInterface
 	{
-		ParserThreadTimeLine(std::size_t thread_id, ParserInterface& reference) : thread_id(thread_id), reference(reference) {}
+		ParserThreadTimeLine(ThreadID thread_id, ThreadSystemID thread_system_id, ParserInterface& reference) 
+			: thread_id(thread_id), thread_system_id(thread_system_id), reference(reference) {}
 		virtual void AppendBeginEvent(double start_time, std::uint32_t event_id) override;
 		virtual void AppendEndEvent(double end_time) override;
-		std::size_t thread_id;
+		ThreadID thread_id;
+		ThreadSystemID thread_system_id;
 		std::size_t depth = 0;
 		std::optional<std::size_t> frame_count;
 		std::vector<ThreadCPUEvent> stacks;
@@ -146,18 +174,19 @@ export namespace UEBabyPram::InsightParser
 	{
 		virtual bool IsThreadRequired(std::string_view thread_name) const { return true; }
 		virtual bool IsContextSwitchRequired() const override { return true; }
-		virtual void ContextSwitchEvent(uint32 thread_id, uint32 core_name, uint32 start_time, uint32 end_time) override {}
-		virtual void OnThreadDiscoverd(uint32 thread_id, std::string_view thread_name) {}
+		virtual void ContextSwitchEvent(ThreadSystemID thread_id, uint32 core_name, Potato::Misc::IndexSpan<double> duration) {}
+		virtual void OnThreadDiscoverd(ThreadID thread_id, ThreadSystemID thread_system_id, std::string_view thread_name) {}
 		virtual void OnCPUStackTree(ThreadCPUEventView event_scope) {}
-		virtual void OnCPUEventDiscoverd(std::size_t id, std::wstring_view event_name, std::wstring_view file_name, std::size_t file_line) {}
+		virtual void OnCPUEventDiscoverd(EventID id, std::wstring_view event_name, std::wstring_view file_name, std::size_t file_line) {}
 		virtual	void AllAnalyzeDone() override;
 		static std::wstring_view CoverStringView(wchar_t const* ScopeName, std::size_t ScopeNameLen);
-		std::optional<std::wstring_view> GetCPUEventName(std::size_t event_id) const;
-		std::optional<std::string_view> GetThreadName(std::size_t thread_id) const;
+		std::optional<std::wstring_view> GetCPUEventName(EventID event_id) const;
+		std::optional<std::string_view> GetThreadName(ThreadID thread_id) const;
+		std::optional<std::string_view> GetThreadName(ThreadSystemID thread_id) const;
 
 		struct CPUEventInfo
 		{
-			std::size_t id;
+			EventID id;
 			std::wstring_view event_name;
 			std::wstring_view file_name;
 			std::size_t file_line;
@@ -182,10 +211,13 @@ export namespace UEBabyPram::InsightParser
 		virtual void SetMetadataSpec(uint32 event_id, uint32 metadata_space_id) override {}
 
 		virtual uint32 AddMetaData(uint32 event_id, MetaDataFormat format, uint8 const* data, std::size_t meta_data_len, uint32 thread_id) override;
-	
+		virtual void ContextSwitchEvent(uint32 thread_id, uint32 core_name, double start_time, double end_time) override {
+			return ContextSwitchEvent(ThreadSystemID{ thread_id }, core_name, Potato::Misc::IndexSpan<double>{start_time, end_time});
+		}
 		struct TimeLineTuple
 		{
-			std::size_t thread_id;
+			ThreadID thread_id;
+			ThreadSystemID thread_system_id;
 			std::string thread_name;
 			std::unique_ptr<ParserThreadTimeLine> time_line;
 		};
@@ -194,7 +226,7 @@ export namespace UEBabyPram::InsightParser
 
 		struct CPUEvent
 		{
-			std::size_t id;
+			EventID id;
 			std::wstring event_name;
 			std::wstring file_name;
 			std::size_t file_line;

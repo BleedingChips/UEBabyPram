@@ -8,7 +8,7 @@ namespace UEBabyPram::InsightParser
 	void ParserThreadTimeLine::AppendBeginEvent(double start_time, std::uint32_t event_id)
 	{
 		stacks.emplace_back(
-			event_id,
+			EventID{ event_id },
 			start_time,
 			depth
 		);
@@ -23,7 +23,7 @@ namespace UEBabyPram::InsightParser
 			--depth;
 		}
 		stacks.emplace_back(
-			std::nullopt,
+			EventID{},
 			end_time,
 			depth
 		);
@@ -31,6 +31,7 @@ namespace UEBabyPram::InsightParser
 		{
 			reference.OnCPUStackTree(ThreadCPUEventView{
 				thread_id,
+				thread_system_id,
 				std::span(stacks.data(), stacks.size()),
 				frame_count
 				});
@@ -44,7 +45,7 @@ namespace UEBabyPram::InsightParser
 		//assert(depth == 0);
 	}
 
-	auto ThreadCPUEventView::FindNextEvent(std::span<std::size_t> event_id_span, EventIterator current, bool need_depper) const ->EventIterator
+	auto ThreadCPUEventView::FindNextEvent(std::span<EventID const> event_id_span, EventIterator current, bool need_depper) const ->EventIterator
 	{
 		std::size_t iterator_index = 0;
 		if (current)
@@ -59,16 +60,18 @@ namespace UEBabyPram::InsightParser
 		}
 
 		EventIterator result;
+		double child_time_total = 0.0;
+		double child_time_start = 0.0;
 		for (; iterator_index < view.size(); ++iterator_index)
 		{
 			auto& ref = view[iterator_index];
-			if (ref.event_id.has_value())
+			if (ref.event_id)
 			{
 				if (
-					result.event_id == std::numeric_limits<std::size_t>::max()
+					!result.event_id
 					&& (
 						event_id_span.size() == 0
-						|| std::find(event_id_span.begin(), event_id_span.end(), *ref.event_id) != event_id_span.end()
+						|| std::find(event_id_span.begin(), event_id_span.end(), ref.event_id) != event_id_span.end()
 						)
 					)
 				{
@@ -77,18 +80,34 @@ namespace UEBabyPram::InsightParser
 					result.exist_time_in_second.StartPoint = ref.time_as_second;
 					result.exist_time_in_second.EndPoint = ref.time_as_second;
 					result.depth = ref.depth;
-					result.event_id = *ref.event_id;
+					result.event_id = ref.event_id;
+				}
+				else if (
+					result.event_id
+					&& ref.depth == result.depth + 1 
+					)
+				{
+					child_time_start = ref.time_as_second;
 				}
 			}
-			else if (
-				result.event_id != std::numeric_limits<std::size_t>::max()
-				&& result.depth == ref.depth
-				)
+			else if (result.event_id)
 			{
-				result.exist_range.EndPoint = iterator_index + 1;
-				result.exist_time_in_second.EndPoint = ref.time_as_second;
-				break;
+				if (result.depth == ref.depth)
+				{
+					result.exist_range.EndPoint = iterator_index + 1;
+					result.exist_time_in_second.EndPoint = ref.time_as_second;
+					break;
+				}
+				else if (ref.depth == result.depth + 1)
+				{
+					child_time_total += ref.time_as_second - child_time_start;
+					child_time_start = 0.0;
+				}
 			}
+		}
+		if (result.event_id)
+		{
+			result.self_time_in_second = result.exist_time_in_second.Size() - child_time_total;
 		}
 		return result;
 	}
@@ -109,20 +128,20 @@ namespace UEBabyPram::InsightParser
 	ParserThreadTimeLine* ParserInterface::GetThreadTimeLine(uint32 thread_id)
 	{
 		auto ite = std::find_if(thread_timelines.begin(), thread_timelines.end(), [thread_id](const auto& timeline) {
-			return timeline.thread_id == thread_id;
+			return timeline.thread_id.id == thread_id;
 			});
 		if (ite != thread_timelines.end())
-			return ite->time_line.get();
-		auto new_timeline = std::unique_ptr<ParserThreadTimeLine>(new ParserThreadTimeLine{ thread_id, *this });
-		if (new_timeline)
 		{
-			auto pointer = new_timeline.get();
-			thread_timelines.emplace_back(TimeLineTuple{ thread_id, {}, std::move(new_timeline) });
-			return pointer;
+			if (ite->time_line)
+				return ite->time_line.get();
+			ite->time_line = std::unique_ptr<ParserThreadTimeLine>(new ParserThreadTimeLine{ ite->thread_id, ite->thread_system_id, *this });
+			if (ite->time_line)
+				return ite->time_line.get();
 		}
 		return nullptr;
 	}
 
+	/*
 	void ParserInterface::AddThread(uint32 thread_id, char const* thread_name)
 	{
 		std::string_view thread_name_str;
@@ -143,6 +162,7 @@ namespace UEBabyPram::InsightParser
 		}
 		OnThreadDiscoverd(thread_id, thread_name_str);
 	}
+	*/
 
 	uint32 ParserInterface::OnCPUEventDiscoverd(wchar_t const* event_name, std::size_t event_name_len, wchar_t const* file, std::size_t file_name_len, std::size_t line)
 	{
@@ -150,7 +170,7 @@ namespace UEBabyPram::InsightParser
 		auto cur_file_name = CoverStringView(file, file_name_len);
 		auto event_id = time_infos.size();
 		time_infos.emplace_back(
-			event_id,
+			EventID{ event_id },
 			std::wstring{ cur_event_name },
 			std::wstring{ cur_file_name },
 			line
@@ -159,23 +179,35 @@ namespace UEBabyPram::InsightParser
 		{
 			frame_event_id.push_back(event_id);
 		}
-		OnCPUEventDiscoverd(event_id, cur_event_name, cur_file_name, line);
+		OnCPUEventDiscoverd(EventID{ event_id }, cur_event_name, cur_file_name, line);
 		return static_cast<uint32>(event_id);
 	}
 
-	std::optional<std::wstring_view> ParserInterface::GetCPUEventName(std::size_t event_id) const
+	std::optional<std::wstring_view> ParserInterface::GetCPUEventName(EventID event_id) const
 	{
-		if (event_id < time_infos.size())
+		if (event_id.id < time_infos.size())
 		{
 			return std::wstring_view{ time_infos[event_id].event_name };
 		}
 		return std::nullopt;
 	}
 
-	std::optional<std::string_view> ParserInterface::GetThreadName(std::size_t thread_id) const
+	std::optional<std::string_view> ParserInterface::GetThreadName(ThreadID thread_id) const
 	{
 		auto find = std::find_if(thread_timelines.begin(), thread_timelines.end(), [thread_id](const auto& timeline) {
 			return timeline.thread_id == thread_id;
+			});
+		if (find != thread_timelines.end())
+		{
+			return std::string_view{ find->thread_name };
+		}
+		return std::nullopt;
+	}
+
+	std::optional<std::string_view> ParserInterface::GetThreadName(ThreadSystemID thread_id) const
+	{
+		auto find = std::find_if(thread_timelines.begin(), thread_timelines.end(), [thread_id](const auto& timeline) {
+			return timeline.thread_system_id == thread_id;
 			});
 		if (find != thread_timelines.end())
 		{

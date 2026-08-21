@@ -33,5 +33,11 @@ namespace UEBabyPram::InsightParser
 
 		IAnalysisSession& Session;
 		BaseParser& Parser;
+		struct ThreadIdMapping
+		{
+			uint32 ThreadId = 0;
+			uint32 ThreadSystemId = 0;
+		};
+		TArray<ThreadIdMapping> ThreadMapping;
 	};
 } // namespace TraceServices

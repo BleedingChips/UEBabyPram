@@ -11,9 +11,9 @@
 #include "Model/MonotonicTimeline.h"
 #include "TraceServices/Model/TimingProfiler.h"
 #include "TraceServices/Model/Threads.h"
-
-#include "UEBabyPramInsightParserAnalysisContext.h"
+#include "UEBabyPramInsightParserInterface.h"
 #include "UEBabyPramInsightParserAnalysisInterface.h"
+#include "UEBabyPramInsightParserAnalysisContext.h"
 
 namespace UEBabyPram::InsightParser
 {
@@ -22,7 +22,7 @@ namespace UEBabyPram::InsightParser
 		: public UE::Trace::IAnalyzer
 	{
 	public:
-		CPUScopeAnalyzer(AnalysisContext& Parser);
+		CPUScopeAnalyzer(BaseParser& Parser, AnalysisContext& Context);
 		~CPUScopeAnalyzer();
 		virtual void OnAnalysisBegin(const FOnAnalysisContext& Context) override;
 		virtual void OnAnalysisEnd(/*const FOnAnalysisEndContext& Context*/) override;
@@ -95,6 +95,7 @@ namespace UEBabyPram::InsightParser
 	private:
 
 		AnalysisContext& AnaContext;
+		BaseParser& Parser;
 
 		TMap<uint32, FThreadState*> ThreadStatesMap;
 		TMap<uint32, uint32> SpecIdToTimerIdMap; // SpecId --> TimerId
@@ -110,5 +111,7 @@ namespace UEBabyPram::InsightParser
 
 		uint32 NumTimerWarnings = 0;
 		static constexpr uint32 NumMaxWarnings = 100;
+
+		virtual void OnThreadInfo(const FThreadInfo& ThreadInfo) override;
 	};
 }
