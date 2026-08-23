@@ -38,6 +38,6 @@ namespace UEBabyPram::InsightParser
 			uint32 ThreadId = 0;
 			uint32 ThreadSystemId = 0;
 		};
-		TArray<ThreadIdMapping> ThreadMapping;
+		//TArray<ThreadIdMapping> ThreadMapping;
 	};
 } // namespace TraceServices

@@ -90,7 +90,7 @@ namespace UEBabyPram::InsightParser
 		const TCHAR* GetTimerName(uint32 TimerId) const;
 		void SetTimerName(uint32 SpecId, uint32 TimerId, const TCHAR* TimerName);
 
-		FThreadState& GetOrAddThreadState(uint32 ThreadId, ANSICHAR const* ThreadName);
+		FThreadState& GetOrAddThreadState(uint32 ThreadId, ANSICHAR const* ThreadName, uint32 ThreadSystemId);
 
 	private:
 

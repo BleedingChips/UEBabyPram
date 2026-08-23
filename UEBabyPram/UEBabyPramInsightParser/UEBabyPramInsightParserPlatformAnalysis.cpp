@@ -67,14 +67,18 @@ namespace UEBabyPram::InsightParser
 
 			auto RealThreadId = Event.ThreadId;
 
+			Parser.ContextSwitchEvent(RealThreadId, Event.CoreNumber, Event.StartTime, Event.EndTime);
+
+			/*
 			auto Result = ThreadMapping.FindByPredicate([=](ThreadIdMapping const& Mapping) {
 				return Mapping.ThreadSystemId == RealThreadId;
 				});
 
 			if (Result != nullptr)
 			{
-				Parser.ContextSwitchEvent(Result->ThreadId, Event.CoreNumber, Event.StartTime, Event.EndTime);
+				Parser.ContextSwitchEvent(RealThreadId, Event.CoreNumber, Event.StartTime, Event.EndTime);
 			}
+			*/
 			/*
 			const auto& EventData = Context.EventData;
 			double Start = Context.EventTime.AsSeconds(EventData.GetValue<uint64>("StartTime"));
@@ -142,9 +146,15 @@ namespace UEBabyPram::InsightParser
 
 	void FPlatformEventTraceAnalyzer::OnThreadInfo(const FThreadInfo& ThreadInfo)
 	{
+		if (ThreadInfo.GetSystemId() == 19980 || ThreadInfo.GetId() == 19980)
+		{
+			volatile int i = 0;
+		}
+		/*
 		ThreadMapping.Add(
 			ThreadIdMapping{ ThreadInfo.GetId(), ThreadInfo.GetSystemId() }
 		);
+		*/
 		/*
 		LLM_SCOPE_BYNAME(TEXT("Insights/FPlatformEventTraceAnalyzer"));
 

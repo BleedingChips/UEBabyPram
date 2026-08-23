@@ -164,7 +164,6 @@ export namespace UEBabyPram::InsightParser
 		ThreadID thread_id;
 		ThreadSystemID thread_system_id;
 		std::size_t depth = 0;
-		std::optional<std::size_t> frame_count;
 		std::vector<ThreadCPUEvent> stacks;
 		ParserInterface& reference;
 		~ParserThreadTimeLine();
@@ -180,6 +179,7 @@ export namespace UEBabyPram::InsightParser
 		virtual void OnCPUEventDiscoverd(EventID id, std::wstring_view event_name, std::wstring_view file_name, std::size_t file_line) {}
 		virtual	void AllAnalyzeDone() override;
 		static std::wstring_view CoverStringView(wchar_t const* ScopeName, std::size_t ScopeNameLen);
+		
 		std::optional<std::wstring_view> GetCPUEventName(EventID event_id) const;
 		std::optional<std::string_view> GetThreadName(ThreadID thread_id) const;
 		std::optional<std::string_view> GetThreadName(ThreadSystemID thread_id) const;
@@ -194,11 +194,14 @@ export namespace UEBabyPram::InsightParser
 
 		struct ThreadInfo
 		{
+			ThreadID thread_id;
+			ThreadSystemID thread_system_id;
 			std::string_view thread_name;
 		};
 
-		std::optional<CPUEventInfo> GetCPUEventInfo(std::size_t event_id) const;
-		std::optional<ThreadInfo> GetThreadInfo(std::size_t thread_id) const;
+		std::optional<CPUEventInfo> GetCPUEventInfo(EventID event_id) const;
+		std::optional<ThreadInfo> GetThreadInfo(ThreadID thread_id) const;
+		std::optional<ThreadInfo> GetThreadInfo(ThreadSystemID thread_system_id) const;
 
 	private:
 		
@@ -211,9 +214,12 @@ export namespace UEBabyPram::InsightParser
 		virtual void SetMetadataSpec(uint32 event_id, uint32 metadata_space_id) override {}
 
 		virtual uint32 AddMetaData(uint32 event_id, MetaDataFormat format, uint8 const* data, std::size_t meta_data_len, uint32 thread_id) override;
+		virtual void SetMetadata(uint32 MetaDataId, MetaDataFormat format, uint8 const* meta_data, std::size_t meta_data_len, uint32 TimerId, uint32 ThreadId) override;
 		virtual void ContextSwitchEvent(uint32 thread_id, uint32 core_name, double start_time, double end_time) override {
 			return ContextSwitchEvent(ThreadSystemID{ thread_id }, core_name, Potato::Misc::IndexSpan<double>{start_time, end_time});
 		}
+
+		virtual void OnThreadDiscoverd(uint32 thread_id, uint32 thread_system_id, char const* thread_name, std::size_t thread_name_len) override;
 		struct TimeLineTuple
 		{
 			ThreadID thread_id;
@@ -235,7 +241,7 @@ export namespace UEBabyPram::InsightParser
 		std::vector<CPUEvent> time_infos;
 		std::vector<uint32> frame_event_id;
 
-		virtual void AddThread(uint32 thread_id, char const* thread_name);
+		//virtual void AddThread(uint32 thread_id, char const* thread_name);
 		friend void ExecuteParser(Potato::Document::DocumentReader& Resource, ParserInterface& Parser);
 	};
 

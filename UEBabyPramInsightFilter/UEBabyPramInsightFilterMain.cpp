@@ -12,10 +12,22 @@ struct Parser : public UEBabyPram::InsightParser::ParserInterface
 	void ContextSwitchEvent(ThreadSystemID thread_id, uint32 core_name, Potato::Misc::IndexSpan<double> duration) override
 	{
 		auto thread_info = GetThreadInfo(thread_id);
-		if (thread_id == 2)
+		if (thread_info.has_value())
 		{
+			if (thread_info->thread_name.contains("GameFrame"))
+			{
+				volatile int i = 0;
+			}
+
+			if (thread_info->thread_name.contains("GameThread"))
+			{
+				volatile int i = 0;
+			}
+		}
+		else {
 			volatile int i = 0;
 		}
+
 	}
 
 	void OnCPUEventDiscoverd(EventID id, std::wstring_view event_name, std::wstring_view file_name, std::size_t file_line) override
@@ -29,18 +41,15 @@ struct Parser : public UEBabyPram::InsightParser::ParserInterface
 
 	void OnCPUStackTree(UEBabyPram::InsightParser::ThreadCPUEventView event_scope)
 	{
-		if (event_scope.frame_count.has_value())
-		{
-			event_scope.ForeachEvent(
-				std::span(movement_component_tick.data(), movement_component_tick.size()),
-				[this](UEBabyPram::InsightParser::ThreadCPUEventView::EventIterator const& iterator) -> bool {
-					total_time += iterator.exist_time_in_second.Size();
-					self_total_time += iterator.self_time_in_second;
-					count += 1;
-					return true;
-				}
-			);
-		}
+		event_scope.ForeachEvent(
+			std::span(movement_component_tick.data(), movement_component_tick.size()),
+			[this](UEBabyPram::InsightParser::ThreadCPUEventView::EventIterator const& iterator) -> bool {
+				total_time += iterator.exist_time_in_second.Size();
+				self_total_time += iterator.self_time_in_second;
+				count += 1;
+				return true;
+			}
+		);
 	}
 
 	std::vector<UEBabyPram::InsightParser::EventID> movement_component_tick;

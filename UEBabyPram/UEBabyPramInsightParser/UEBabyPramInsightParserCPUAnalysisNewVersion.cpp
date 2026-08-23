@@ -112,7 +112,7 @@ namespace UEBabyPram::InsightParser
 		case RouteId_EndThread:
 		{
 			const uint32 ThreadId = TraceServices::FTraceAnalyzerUtils::GetThreadIdField(Context);
-			FThreadState& ThreadState = GetOrAddThreadState(ThreadId, nullptr);
+			FThreadState& ThreadState = GetOrAddThreadState(ThreadId, Context.ThreadInfo.GetName(), Context.ThreadInfo.GetSystemId());
 
 			if (ThreadState.LastCycle == ~0ull)
 			{
@@ -144,7 +144,8 @@ namespace UEBabyPram::InsightParser
 		{
 			const uint32 ThreadId = Context.ThreadInfo.GetId();
 			auto ThreadName = Context.ThreadInfo.GetName();
-			FThreadState& ThreadState = GetOrAddThreadState(ThreadId, ThreadName);
+			const uint32 ThreadSystemId = Context.ThreadInfo.GetSystemId();
+			FThreadState& ThreadState = GetOrAddThreadState(ThreadId, ThreadName, ThreadSystemId);
 
 			if (ThreadState.LastCycle == ~0ull)
 			{
@@ -166,7 +167,7 @@ namespace UEBabyPram::InsightParser
 		case RouteId_EndCapture: // backward compatibility
 		{
 			const uint32 ThreadId = TraceServices::FTraceAnalyzerUtils::GetThreadIdField(Context);
-			FThreadState& ThreadState = GetOrAddThreadState(ThreadId, nullptr);
+			FThreadState& ThreadState = GetOrAddThreadState(ThreadId, Context.ThreadInfo.GetName(), Context.ThreadInfo.GetSystemId());
 
 			if (ThreadState.LastCycle == ~0ull)
 			{
@@ -653,7 +654,7 @@ namespace UEBabyPram::InsightParser
 		}
 
 		uint32 ThreadId = Context.ThreadInfo.GetId();
-		FThreadState& ThreadState = GetOrAddThreadState(ThreadId, Context.ThreadInfo.GetName());
+		FThreadState& ThreadState = GetOrAddThreadState(ThreadId, Context.ThreadInfo.GetName(), Context.ThreadInfo.GetSystemId());
 
 		if (ThreadState.bShouldIgnorePendingEvents)
 		{
@@ -712,7 +713,7 @@ namespace UEBabyPram::InsightParser
 		}
 
 		uint32 ThreadId = Context.ThreadInfo.GetId();
-		FThreadState& ThreadState = GetOrAddThreadState(ThreadId, Context.ThreadInfo.GetName());
+		FThreadState& ThreadState = GetOrAddThreadState(ThreadId, Context.ThreadInfo.GetName(), Context.ThreadInfo.GetSystemId());
 
 		if (ThreadState.bShouldIgnorePendingEvents)
 		{
@@ -1066,7 +1067,7 @@ namespace UEBabyPram::InsightParser
 
 	////////////////////////////////////////////////////////////////////////////////////////////////////
 
-	CPUScopeAnalyzer::FThreadState& CPUScopeAnalyzer::GetOrAddThreadState(uint32 ThreadId, ANSICHAR const* ThreadName)
+	CPUScopeAnalyzer::FThreadState& CPUScopeAnalyzer::GetOrAddThreadState(uint32 ThreadId, ANSICHAR const* ThreadName, uint32 ThreadSystemId)
 	{
 		FThreadState* ThreadState = ThreadStatesMap.FindRef(ThreadId);
 		if (!ThreadState)
@@ -1074,6 +1075,12 @@ namespace UEBabyPram::InsightParser
 			ThreadState = new FThreadState();
 			ThreadState->ThreadId = ThreadId;
 			ThreadState->Timeline = Parser.GetThreadTimeLine(ThreadId);
+			if (ThreadState->Timeline == nullptr)
+			{
+				FAnsiStringView StringView{ ThreadName };
+				Parser.OnThreadDiscoverd(ThreadId, ThreadSystemId, StringView.GetData(), StringView.Len());
+				ThreadState->Timeline = Parser.GetThreadTimeLine(ThreadId);
+			}
 			ThreadStatesMap.Add(ThreadId, ThreadState);
 
 			// Just in case the rest of Insight's reporting/analysis doesn't know about

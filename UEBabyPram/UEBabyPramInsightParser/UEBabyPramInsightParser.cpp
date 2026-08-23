@@ -32,11 +32,9 @@ namespace UEBabyPram::InsightParser
 			reference.OnCPUStackTree(ThreadCPUEventView{
 				thread_id,
 				thread_system_id,
-				std::span(stacks.data(), stacks.size()),
-				frame_count
+				std::span(stacks.data(), stacks.size())
 				});
 			stacks.clear();
-			frame_count.reset();
 		}
 	}
 
@@ -138,6 +136,7 @@ namespace UEBabyPram::InsightParser
 			if (ite->time_line)
 				return ite->time_line.get();
 		}
+
 		return nullptr;
 	}
 
@@ -183,41 +182,54 @@ namespace UEBabyPram::InsightParser
 		return static_cast<uint32>(event_id);
 	}
 
-	std::optional<std::wstring_view> ParserInterface::GetCPUEventName(EventID event_id) const
+	auto ParserInterface::GetCPUEventInfo(EventID event_id) const -> std::optional<ParserInterface::CPUEventInfo>
 	{
 		if (event_id.id < time_infos.size())
 		{
-			return std::wstring_view{ time_infos[event_id].event_name };
+			auto& ref = time_infos[event_id.id];
+			return CPUEventInfo{ ref.id, ref.event_name, ref.file_name, ref.file_line };
 		}
 		return std::nullopt;
 	}
 
-	std::optional<std::string_view> ParserInterface::GetThreadName(ThreadID thread_id) const
+	
+	auto ParserInterface::GetThreadInfo(ThreadID thread_id) const -> std::optional<ThreadInfo>
 	{
 		auto find = std::find_if(thread_timelines.begin(), thread_timelines.end(), [thread_id](const auto& timeline) {
 			return timeline.thread_id == thread_id;
 			});
 		if (find != thread_timelines.end())
 		{
-			return std::string_view{ find->thread_name };
+			return ThreadInfo{ find->thread_id, find->thread_system_id, find->thread_name };
 		}
 		return std::nullopt;
 	}
 
-	std::optional<std::string_view> ParserInterface::GetThreadName(ThreadSystemID thread_id) const
+	auto ParserInterface::GetThreadInfo(ThreadSystemID thread_id) const->std::optional<ThreadInfo>
 	{
 		auto find = std::find_if(thread_timelines.begin(), thread_timelines.end(), [thread_id](const auto& timeline) {
 			return timeline.thread_system_id == thread_id;
 			});
 		if (find != thread_timelines.end())
 		{
-			return std::string_view{ find->thread_name };
+			return ThreadInfo{ find->thread_id, find->thread_system_id, find->thread_name };
 		}
 		return std::nullopt;
 	}
 
+	void ParserInterface::SetMetadata(uint32 MetaDataId, MetaDataFormat format, uint8 const* meta_data, std::size_t meta_data_len, uint32 TimerId, uint32 ThreadId)
+	{
+		AddMetaData(TimerId, format, meta_data, meta_data_len, ThreadId);
+	}
+
 	uint32 ParserInterface::AddMetaData(uint32 event_id, MetaDataFormat format, uint8 const* data, std::size_t meta_data_len, uint32 thread_id)
 	{
+		return 0;
+		/*
+		if (thread_id == 1)
+		{
+			volatile int ui = 0;
+		}
 		if (data != nullptr && meta_data_len != 0)
 		{
 			if (std::find(frame_event_id.begin(), frame_event_id.end(), event_id) != frame_event_id.end())
@@ -247,46 +259,33 @@ namespace UEBabyPram::InsightParser
 			}
 		}
 		return event_id;
+		*/
 	}
 
-	auto ParserInterface::GetCPUEventInfo(std::size_t event_id) const ->std::optional<CPUEventInfo>
+	void ParserInterface::OnThreadDiscoverd(uint32 thread_id, uint32 thread_system_id, char const* thread_name, std::size_t thread_name_len)
 	{
-		if (time_infos.size() > event_id)
-		{
-			auto& ref = time_infos[event_id];
-			return CPUEventInfo{
-				ref.id,
-				ref.event_name,
-				ref.file_name,
-				ref.file_line
-			};
-		}
-		return std::nullopt;
-	}
-
-	auto ParserInterface::GetThreadInfo(std::size_t thread_id) const ->std::optional<ThreadInfo>
-	{
-		auto find = std::find_if(thread_timelines.begin(), thread_timelines.end(), [=](TimeLineTuple const& ref) {
-			return ref.thread_id == thread_id;
-			});
-		if (find != thread_timelines.end())
-		{
-			return ThreadInfo{
-				find->thread_name
-			};
-		}
-		return std::nullopt;
+		std::string_view thread_name_view{ thread_name, thread_name_len };
+		thread_timelines.emplace_back(
+			ThreadID{ thread_id },
+			ThreadSystemID{ thread_system_id },
+			std::string{ thread_name, thread_name_len },
+			std::unique_ptr<ParserThreadTimeLine>{}
+		);
+		OnThreadDiscoverd(ThreadID{ thread_id }, ThreadSystemID{ thread_system_id }, thread_name_view);
 	}
 
 	void ParserInterface::AllAnalyzeDone()
 	{
 		for (auto& ite : thread_timelines)
 		{
-			while (ite.time_line->depth != 0 && ite.time_line->stacks.size() > 0)
+			if (ite.time_line)
 			{
-				ite.time_line->AppendEndEvent(
-					ite.time_line->stacks.rbegin()->time_as_second
-				);
+				while (ite.time_line->depth != 0 && ite.time_line->stacks.size() > 0)
+				{
+					ite.time_line->AppendEndEvent(
+						ite.time_line->stacks.rbegin()->time_as_second
+					);
+				}
 			}
 		}
 	}
