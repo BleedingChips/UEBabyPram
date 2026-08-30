@@ -112,6 +112,10 @@ namespace UEBabyPram::InsightParser
 		case RouteId_EndThread:
 		{
 			const uint32 ThreadId = TraceServices::FTraceAnalyzerUtils::GetThreadIdField(Context);
+			if (!Parser.IsThreadRequired(ThreadId))
+			{
+				return true;
+			}
 			FThreadState& ThreadState = GetOrAddThreadState(ThreadId, Context.ThreadInfo.GetName(), Context.ThreadInfo.GetSystemId());
 
 			if (ThreadState.LastCycle == ~0ull)
@@ -143,6 +147,10 @@ namespace UEBabyPram::InsightParser
 		case RouteId_EventBatchV2: // backward compatibility
 		{
 			const uint32 ThreadId = Context.ThreadInfo.GetId();
+			if (!Parser.IsThreadRequired(ThreadId))
+			{
+				return true;
+			}
 			auto ThreadName = Context.ThreadInfo.GetName();
 			const uint32 ThreadSystemId = Context.ThreadInfo.GetSystemId();
 			FThreadState& ThreadState = GetOrAddThreadState(ThreadId, ThreadName, ThreadSystemId);
@@ -167,6 +175,10 @@ namespace UEBabyPram::InsightParser
 		case RouteId_EndCapture: // backward compatibility
 		{
 			const uint32 ThreadId = TraceServices::FTraceAnalyzerUtils::GetThreadIdField(Context);
+			if (!Parser.IsThreadRequired(ThreadId))
+			{
+				return true;
+			}
 			FThreadState& ThreadState = GetOrAddThreadState(ThreadId, Context.ThreadInfo.GetName(), Context.ThreadInfo.GetSystemId());
 
 			if (ThreadState.LastCycle == ~0ull)

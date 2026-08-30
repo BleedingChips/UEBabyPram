@@ -2,6 +2,7 @@
 import Potato;
 import std;
 import UEBabyPramInsightParser;
+import UEBabyPramInsightFilterGameStatic;
 
 using UEBabyPram::InsightParser::ThreadID;
 using UEBabyPram::InsightParser::ThreadSystemID;
@@ -41,6 +42,11 @@ struct Parser : public UEBabyPram::InsightParser::ParserInterface
 
 	void OnCPUStackTree(UEBabyPram::InsightParser::ThreadCPUEventView event_scope)
 	{
+		if (event_scope.thread_id.id == 2 && event_scope.view.size() > 8)
+		{
+			auto timer_info = GetCPUEventInfo(event_scope.view[0].event_id);
+			volatile int i = 0;
+		}
 		event_scope.ForeachEvent(
 			std::span(movement_component_tick.data(), movement_component_tick.size()),
 			[this](UEBabyPram::InsightParser::ThreadCPUEventView::EventIterator const& iterator) -> bool {
@@ -52,12 +58,25 @@ struct Parser : public UEBabyPram::InsightParser::ParserInterface
 		);
 	}
 
+	void OnThreadDiscoverd(ThreadID thread_id, ThreadSystemID thread_system_id, std::string_view thread_name)
+	{
+		if (thread_name.contains("GameThread"))
+		{
+			volatile int i = 0;
+		}
+		else if (thread_name.contains("GameFrame"))
+		{
+			volatile int i = 0;
+		}
+	}
+
 	std::vector<UEBabyPram::InsightParser::EventID> movement_component_tick;
 	double total_time = 0.0;
 	double self_total_time = 0.0;
 	std::size_t count = 0;
 };
 
+using namespace UEBabyPram::InsightFilter;
 
 int main(int argc, char* argv[])
 {
@@ -88,18 +107,29 @@ int main(int argc, char* argv[])
 		return -1;
 	}
 
+	auto start_time = std::chrono::system_clock::now();
+
 	if (!insight_path.empty() && std::filesystem::exists(insight_path))
 	{
 		Potato::Document::DocumentReader Reader(insight_path);
-		Parser Ana;
-		UEBabyPram::InsightParser::ExecuteParser(Reader, Ana);
+		GameThreadStatic game_thread_static;
+		//Parser Ana;
+		UEBabyPram::InsightParser::ExecuteParser(Reader, game_thread_static);
+		/*
 		Potato::Log::Log<"sadasd", Potato::Log::LogLevel::Display, "<{}> <{}> <{}> <{}>">(
 			Ana.total_time, 
 			Ana.count, 
 			Ana.total_time / Ana.count,
 			Ana.self_total_time
 		);
+		*/
 	}
+
+	auto end_time = std::chrono::system_clock::now();
+
+	Potato::Log::Log<"sadasd", Potato::Log::LogLevel::Display, "Duration Time: <{}> microseconds">(
+		std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time).count()
+	);
 
 	return 0;
 }

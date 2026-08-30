@@ -131,7 +131,21 @@ export namespace UEBabyPram::InsightParser
 		};
 
 		EventIterator FindNextEvent(std::span<EventID const> event_id_span, EventIterator current = {}, bool need_depper = true) const;
+		EventID GetTopEvent() const {
+			if (view.size() > 0)
+			{
+				return view[0].event_id;
+			}
+			return {};
+		}
 		
+		std::optional<Potato::Misc::IndexSpan<double>> GetTimeRange() const {
+			if (view.size() > 0)
+			{
+				return Potato::Misc::IndexSpan<double>{ view.begin()->time_as_second, view.rbegin()->time_as_second };
+			}
+			return std::nullopt;
+		}
 		
 		template<typename Func>
 			requires(std::is_invocable_r_v<bool, Func, EventIterator>)
@@ -178,6 +192,7 @@ export namespace UEBabyPram::InsightParser
 		virtual void OnCPUStackTree(ThreadCPUEventView event_scope) {}
 		virtual void OnCPUEventDiscoverd(EventID id, std::wstring_view event_name, std::wstring_view file_name, std::size_t file_line) {}
 		virtual	void AllAnalyzeDone() override;
+		virtual bool IsThreadRequired(ThreadID thread_id) const { return true; }
 		static std::wstring_view CoverStringView(wchar_t const* ScopeName, std::size_t ScopeNameLen);
 		
 		std::optional<std::wstring_view> GetCPUEventName(EventID event_id) const;
@@ -212,7 +227,7 @@ export namespace UEBabyPram::InsightParser
 		virtual uint32 AddMetaDataLayout(wchar_t const* format, wchar_t const* const* field_names, std::size_t field_names_len) override { return 0; }
 
 		virtual void SetMetadataSpec(uint32 event_id, uint32 metadata_space_id) override {}
-
+		virtual bool IsThreadRequired(uint32 thread_id) const { return IsThreadRequired(ThreadID(thread_id)); }
 		virtual uint32 AddMetaData(uint32 event_id, MetaDataFormat format, uint8 const* data, std::size_t meta_data_len, uint32 thread_id) override;
 		virtual void SetMetadata(uint32 MetaDataId, MetaDataFormat format, uint8 const* meta_data, std::size_t meta_data_len, uint32 TimerId, uint32 ThreadId) override;
 		virtual void ContextSwitchEvent(uint32 thread_id, uint32 core_name, double start_time, double end_time) override {
