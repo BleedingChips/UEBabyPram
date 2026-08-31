@@ -9,67 +9,7 @@ import Potato;
 export namespace UEBabyPram::InsightParser
 {
 	using UEBabyPram::InsightParser::DataResourceInterface;
-
-	struct ScopeAnalyzer : public FSummarizeCpuScopeAnalyzer
-	{
-		using FSummarizeCpuScopeAnalyzer::OnCpuScopeDiscovered;
-		using FSummarizeCpuScopeAnalyzer::OnCpuScopeAnalysisEnd;
-
-		using FSummarizeCpuScopeAnalyzer::EScopeEventType;
-		using FSummarizeCpuScopeAnalyzer::FScope;
-		using FSummarizeCpuScopeAnalyzer::FScopeEvent;
-		using FSummarizeCpuScopeAnalyzer::ContextSwitchEvent;
-
-		virtual void OnCpuScopeName(uint32 ScopeId, std::wstring_view ScopeName) {}
-		virtual void OnCpuScopeEnter(const FScopeEvent& ScopeEnter, std::wstring_view ScopeName) {};
-		virtual void OnCpuScopeExit(const FScope& Scope, std::wstring_view ScopeName) {};
-		virtual void OnCpuScopeTree(uint32 ThreadId, std::span<FSummarizeCpuScopeAnalyzer::FScopeEvent const> ScopeEvents, Potato::TMP::FunctionRef<std::wstring_view(std::uint32_t)> LookupScopeName) {};
-
-	protected:
-		
-		static std::wstring_view CoverStringView(wchar_t const* ScopeName, std::size_t ScopeNameLen)
-		{
-			if (ScopeName != nullptr && ScopeNameLen > 0)
-			{
-				if (ScopeName[ScopeNameLen - 1] == 0)
-				{
-					return std::wstring_view{ ScopeName, ScopeNameLen - 1};
-				}
-				return std::wstring_view{ ScopeName, ScopeNameLen };
-			}
-			return {};
-		}
-		/** Invoked when CPU scope specification is encountered in the trace stream. */
-		virtual void OnCpuScopeName(uint32 ScopeId, wchar_t const* ScopeName, std::size_t ScopeNameLen) {
-			OnCpuScopeName(ScopeId, CoverStringView(ScopeName, ScopeNameLen));
-		};
-
-		/** Invoked when a scope is entered. The scope name might not be known yet. */
-		virtual void OnCpuScopeEnter(const FScopeEvent& ScopeEnter, wchar_t const* ScopeName, std::size_t ScopeNameLen) {
-			OnCpuScopeEnter(ScopeEnter, CoverStringView(ScopeName, ScopeNameLen));
-		};
-
-		/** Invoked when a scope is exited. The scope name might not be known yet. */
-		virtual void OnCpuScopeExit(const FScope& Scope, wchar_t const* ScopeName, std::size_t ScopeNameLen) {
-			OnCpuScopeExit(Scope, CoverStringView(ScopeName, ScopeNameLen));
-		};
-
-		using ScopeNameFunction = bool(*)(void* Object, uint32, wchar_t const*& ScopeName, std::size_t& ScopeNameLen);
-
-		/** Invoked when a root event on the specified thread along with all child events down to the leaves are known. */
-		virtual void OnCpuScopeTree(uint32 ThreadId, FSummarizeCpuScopeAnalyzer::FScopeEvent const* ScopeEvents, std::size_t ScopeEventsLen, ScopeNameFunction func, void* Object) {
-			auto fun_object = [=](std::uint32_t ScopeID) -> std::wstring_view {
-				wchar_t const* OutString = nullptr;
-				std::size_t OutStringLen = 0;
-				if (func(Object, ScopeID, OutString, OutStringLen))
-				{
-					return CoverStringView(OutString, OutStringLen);
-				}
-				return {};
-			};
-			OnCpuScopeTree(ThreadId, std::span(ScopeEvents, ScopeEventsLen), fun_object);
-		};
-	};
+	using DurationT = std::chrono::duration<double, std::ratio<1, 1>>;
 
 	struct DcomentWrapper : public UEBabyPram::InsightParser::DataResourceInterface
 	{
@@ -109,7 +49,7 @@ export namespace UEBabyPram::InsightParser
 	struct ThreadCPUEvent
 	{
 		EventID event_id;
-		double time_as_second;
+		DurationT time;
 		std::size_t depth;
 	};
 
@@ -124,8 +64,8 @@ export namespace UEBabyPram::InsightParser
 		{
 			EventID event_id;
 			Potato::Misc::IndexSpan<> exist_range;
-			Potato::Misc::IndexSpan<double> exist_time_in_second;
-			double self_time_in_second = 0.0;
+			Potato::Misc::IndexSpan<DurationT> exist_time;
+			DurationT self_time_in_second = DurationT::zero();
 			std::size_t depth = std::numeric_limits<std::size_t>::max();
 			operator bool() const { return event_id.id != std::numeric_limits<std::size_t>::max() && exist_range.Size() != 0; }
 		};
@@ -139,10 +79,10 @@ export namespace UEBabyPram::InsightParser
 			return {};
 		}
 		
-		std::optional<Potato::Misc::IndexSpan<double>> GetTimeRange() const {
+		std::optional<Potato::Misc::IndexSpan<DurationT>> GetTimeRange() const {
 			if (view.size() > 0)
 			{
-				return Potato::Misc::IndexSpan<double>{ view.begin()->time_as_second, view.rbegin()->time_as_second };
+				return Potato::Misc::IndexSpan<DurationT>{ view.begin()->time, view.rbegin()->time };
 			}
 			return std::nullopt;
 		}
@@ -179,6 +119,7 @@ export namespace UEBabyPram::InsightParser
 		ThreadSystemID thread_system_id;
 		std::size_t depth = 0;
 		std::vector<ThreadCPUEvent> stacks;
+		DurationT last_time = DurationT::zero();
 		ParserInterface& reference;
 		~ParserThreadTimeLine();
 	};

@@ -9,8 +9,8 @@
 namespace UEBabyPram::InsightParser
 {
 
-	FPlatformEventTraceAnalyzer::FPlatformEventTraceAnalyzer(IAnalysisSession& InSession, BaseParser& Parser)
-		: Session(InSession), Parser(Parser)
+	FPlatformEventTraceAnalyzer::FPlatformEventTraceAnalyzer(BaseParser& Parser)
+		: Parser(Parser)
 	{
 	}
 
@@ -29,11 +29,6 @@ namespace UEBabyPram::InsightParser
 
 	void FPlatformEventTraceAnalyzer::OnAnalysisEnd()
 	{
-		double MaxEndTime = 0.0;
-		if (MaxEndTime > 0.0)
-		{
-			Session.UpdateDurationSeconds(MaxEndTime);
-		}
 	}
 
 	bool FPlatformEventTraceAnalyzer::OnEvent(uint16 RouteId, EStyle Style, const FOnEventContext& Context)
@@ -58,16 +53,13 @@ namespace UEBabyPram::InsightParser
 
 		case RouteId_ContextSwitch:
 		{
-			FSummarizeCpuScopeAnalyzer::ContextSwitchEvent Event;
 			const auto& EventData = Context.EventData;
-			Event.StartTime = Context.EventTime.AsSeconds(EventData.GetValue<uint64>("StartTime"));
-			Event.EndTime = Context.EventTime.AsSeconds(EventData.GetValue<uint64>("EndTime"));
-			Event.ThreadId = EventData.GetValue<uint32>("ThreadId");
-			Event.CoreNumber = EventData.GetValue<uint8>("CoreNumber");
+			auto StartTime = Context.EventTime.AsSeconds(EventData.GetValue<uint64>("StartTime"));
+			auto EndTime = Context.EventTime.AsSeconds(EventData.GetValue<uint64>("EndTime"));
+			auto ThreadId = EventData.GetValue<uint32>("ThreadId");
+			auto CoreNumber = EventData.GetValue<uint8>("CoreNumber");
 
-			auto RealThreadId = Event.ThreadId;
-
-			Parser.ContextSwitchEvent(RealThreadId, Event.CoreNumber, Event.StartTime, Event.EndTime);
+			Parser.ContextSwitchEvent(ThreadId, CoreNumber, StartTime, EndTime);
 
 			/*
 			auto Result = ThreadMapping.FindByPredicate([=](ThreadIdMapping const& Mapping) {
@@ -146,10 +138,6 @@ namespace UEBabyPram::InsightParser
 
 	void FPlatformEventTraceAnalyzer::OnThreadInfo(const FThreadInfo& ThreadInfo)
 	{
-		if (ThreadInfo.GetSystemId() == 19980 || ThreadInfo.GetId() == 19980)
-		{
-			volatile int i = 0;
-		}
 		/*
 		ThreadMapping.Add(
 			ThreadIdMapping{ ThreadInfo.GetId(), ThreadInfo.GetSystemId() }

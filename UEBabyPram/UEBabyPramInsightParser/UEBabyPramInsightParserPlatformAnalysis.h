@@ -6,7 +6,6 @@
 
 #include "UEBabyPramInsightParserInterface.h"
 #include "UEBabyPramInsightParserAnalysisInterface.h"
-#include "UEBabyPramInsightParserAnalysisSession.h"
 
 
 namespace UEBabyPram::InsightParser
@@ -16,7 +15,7 @@ namespace UEBabyPram::InsightParser
 		: public UE::Trace::IAnalyzer
 	{
 	public:
-		FPlatformEventTraceAnalyzer(IAnalysisSession& Session, BaseParser& Parser);
+		FPlatformEventTraceAnalyzer(BaseParser& Parser);
 		virtual void OnAnalysisBegin(const FOnAnalysisContext& Context) override;
 		virtual void OnAnalysisEnd() override;
 		virtual bool OnEvent(uint16 RouteId, EStyle Style, const FOnEventContext& Context) override;
@@ -31,7 +30,6 @@ namespace UEBabyPram::InsightParser
 			RouteId_ThreadName,
 		};
 
-		IAnalysisSession& Session;
 		BaseParser& Parser;
 		struct ThreadIdMapping
 		{

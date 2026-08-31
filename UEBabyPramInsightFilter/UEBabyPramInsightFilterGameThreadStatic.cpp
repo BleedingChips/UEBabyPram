@@ -24,7 +24,6 @@ namespace UEBabyPram::InsightFilter
 
 	bool GameThreadStatic::IsThreadRequired(ThreadID thread_id) const
 	{
-		//return true;
 		if (game_frame_thread_id)
 		{
 			return game_frame_thread_id == thread_id;
@@ -36,7 +35,8 @@ namespace UEBabyPram::InsightFilter
 	{
 		if (event_scope.GetTopEvent() == tick_event_id)
 		{
-
+			total_time += event_scope.GetTimeRange()->Size();
+			total_count += 1;
 		}
 	}
 }

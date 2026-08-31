@@ -7,16 +7,23 @@ namespace UEBabyPram::InsightParser
 {
 	void ParserThreadTimeLine::AppendBeginEvent(double start_time, std::uint32_t event_id)
 	{
+		auto start_time_duration = DurationT{ start_time };
 		stacks.emplace_back(
 			EventID{ event_id },
-			start_time,
+			start_time_duration,
 			depth
 		);
 		++depth;
+		last_time = start_time_duration;
 	}
 
 	void ParserThreadTimeLine::AppendEndEvent(double end_time)
 	{
+		DurationT current_time = DurationT{ end_time };
+		if (end_time == std::numeric_limits<double>::infinity())
+		{
+			current_time = last_time;
+		}
 		assert(depth > 0);
 		if (depth > 0)
 		{
@@ -24,9 +31,10 @@ namespace UEBabyPram::InsightParser
 		}
 		stacks.emplace_back(
 			EventID{},
-			end_time,
+			current_time,
 			depth
 		);
+		last_time = current_time;
 		if (depth == 0)
 		{
 			reference.OnCPUStackTree(ThreadCPUEventView{
@@ -35,6 +43,7 @@ namespace UEBabyPram::InsightParser
 				std::span(stacks.data(), stacks.size())
 				});
 			stacks.clear();
+			last_time = DurationT::zero();
 		}
 	}
 
@@ -58,8 +67,8 @@ namespace UEBabyPram::InsightParser
 		}
 
 		EventIterator result;
-		double child_time_total = 0.0;
-		double child_time_start = 0.0;
+		DurationT child_time_total = DurationT::zero();
+		DurationT child_time_start = DurationT::zero();
 		for (; iterator_index < view.size(); ++iterator_index)
 		{
 			auto& ref = view[iterator_index];
@@ -75,8 +84,8 @@ namespace UEBabyPram::InsightParser
 				{
 					result.exist_range.StartPoint = iterator_index;
 					result.exist_range.EndPoint = iterator_index;
-					result.exist_time_in_second.StartPoint = ref.time_as_second;
-					result.exist_time_in_second.EndPoint = ref.time_as_second;
+					result.exist_time.StartPoint = ref.time;
+					result.exist_time.EndPoint = ref.time;
 					result.depth = ref.depth;
 					result.event_id = ref.event_id;
 				}
@@ -85,7 +94,7 @@ namespace UEBabyPram::InsightParser
 					&& ref.depth == result.depth + 1 
 					)
 				{
-					child_time_start = ref.time_as_second;
+					child_time_start = ref.time;
 				}
 			}
 			else if (result.event_id)
@@ -93,19 +102,19 @@ namespace UEBabyPram::InsightParser
 				if (result.depth == ref.depth)
 				{
 					result.exist_range.EndPoint = iterator_index + 1;
-					result.exist_time_in_second.EndPoint = ref.time_as_second;
+					result.exist_time.EndPoint = ref.time;
 					break;
 				}
 				else if (ref.depth == result.depth + 1)
 				{
-					child_time_total += ref.time_as_second - child_time_start;
-					child_time_start = 0.0;
+					child_time_total = child_time_total + (ref.time - child_time_start);
+					child_time_start = DurationT::zero();
 				}
 			}
 		}
 		if (result.event_id)
 		{
-			result.self_time_in_second = result.exist_time_in_second.Size() - child_time_total;
+			result.self_time_in_second = result.exist_time.Size() - child_time_total;
 		}
 		return result;
 	}
@@ -283,7 +292,7 @@ namespace UEBabyPram::InsightParser
 				while (ite.time_line->depth != 0 && ite.time_line->stacks.size() > 0)
 				{
 					ite.time_line->AppendEndEvent(
-						ite.time_line->stacks.rbegin()->time_as_second
+						ite.time_line->last_time.count()
 					);
 				}
 			}

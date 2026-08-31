@@ -11,19 +11,19 @@
 #include "Model/MonotonicTimeline.h"
 #include "TraceServices/Model/TimingProfiler.h"
 #include "TraceServices/Model/Threads.h"
-
 #include "UEBabyPramInsightParserInterface.h"
 #include "UEBabyPramInsightParserAnalysisInterface.h"
+#include "UEBabyPramInsightParserAnalysisContext.h"
 
 namespace UEBabyPram::InsightParser
 {
 
-	class FCpuProfilerAnalyzer
+	class CPUScopeAnalyzer
 		: public UE::Trace::IAnalyzer
 	{
 	public:
-		FCpuProfilerAnalyzer(IAnalysisSession& Session, IEditableTimingProfilerProvider& InEditableTimingProfilerProvider, IEditableThreadProvider& InEditableThreadProvider, BaseParser& Parser);
-		~FCpuProfilerAnalyzer();
+		CPUScopeAnalyzer(BaseParser& Parser, AnalysisContext& Context);
+		~CPUScopeAnalyzer();
 		virtual void OnAnalysisBegin(const FOnAnalysisContext& Context) override;
 		virtual void OnAnalysisEnd(/*const FOnAnalysisEndContext& Context*/) override;
 		virtual bool OnEvent(uint16 RouteId, EStyle Style, const FOnEventContext& Context) override;
@@ -47,7 +47,7 @@ namespace UEBabyPram::InsightParser
 			uint32 ThreadId = 0;
 			TArray<FEventScopeState> ScopeStack;
 			TArray<FPendingEvent> PendingEvents;
-			IEditableTimeline<FTimingProfilerEvent>* Timeline = nullptr;
+			ThreadTimeLineInterface* Timeline = nullptr;
 			uint64 LastCycle = 0;
 			bool bShouldIgnorePendingEvents = false; // becomes true when we detect first pending event with incorrect timestamp (i.e < LastCycle)
 			double LastPendingEventTime = 0;
@@ -90,12 +90,11 @@ namespace UEBabyPram::InsightParser
 		const TCHAR* GetTimerName(uint32 TimerId) const;
 		void SetTimerName(uint32 SpecId, uint32 TimerId, const TCHAR* TimerName);
 
-		FThreadState& GetOrAddThreadState(uint32 ThreadId);
+		FThreadState& GetOrAddThreadState(uint32 ThreadId, ANSICHAR const* ThreadName, uint32 ThreadSystemId);
 
 	private:
-		IAnalysisSession& Session;
-		IEditableTimingProfilerProvider& EditableTimingProfilerProvider;
-		IEditableThreadProvider& EditableThreadProvider;
+
+		AnalysisContext& AnaContext;
 		BaseParser& Parser;
 
 		TMap<uint32, FThreadState*> ThreadStatesMap;
@@ -112,5 +111,7 @@ namespace UEBabyPram::InsightParser
 
 		uint32 NumTimerWarnings = 0;
 		static constexpr uint32 NumMaxWarnings = 100;
+
+		virtual void OnThreadInfo(const FThreadInfo& ThreadInfo) override;
 	};
 }
