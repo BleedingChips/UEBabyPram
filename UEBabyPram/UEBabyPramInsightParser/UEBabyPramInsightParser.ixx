@@ -128,7 +128,7 @@ export namespace UEBabyPram::InsightParser
 	{
 		virtual bool IsThreadRequired(std::string_view thread_name) const { return true; }
 		virtual bool IsContextSwitchRequired() const override { return true; }
-		virtual void ContextSwitchEvent(ThreadSystemID thread_id, uint32 core_name, Potato::Misc::IndexSpan<double> duration) {}
+		virtual void ContextSwitchEvent(ThreadSystemID thread_id, uint32 core_name, Potato::Misc::IndexSpan<DurationT> duration) {}
 		virtual void OnThreadDiscoverd(ThreadID thread_id, ThreadSystemID thread_system_id, std::string_view thread_name) {}
 		virtual void OnCPUStackTree(ThreadCPUEventView event_scope) {}
 		virtual void OnCPUEventDiscoverd(EventID id, std::wstring_view event_name, std::wstring_view file_name, std::size_t file_line) {}
@@ -172,7 +172,7 @@ export namespace UEBabyPram::InsightParser
 		virtual uint32 AddMetaData(uint32 event_id, MetaDataFormat format, uint8 const* data, std::size_t meta_data_len, uint32 thread_id) override;
 		virtual void SetMetadata(uint32 MetaDataId, MetaDataFormat format, uint8 const* meta_data, std::size_t meta_data_len, uint32 TimerId, uint32 ThreadId) override;
 		virtual void ContextSwitchEvent(uint32 thread_id, uint32 core_name, double start_time, double end_time) override {
-			return ContextSwitchEvent(ThreadSystemID{ thread_id }, core_name, Potato::Misc::IndexSpan<double>{start_time, end_time});
+			return ContextSwitchEvent(ThreadSystemID{ thread_id }, core_name, Potato::Misc::IndexSpan<DurationT>{DurationT{ start_time }, DurationT{ end_time }});
 		}
 
 		virtual void OnThreadDiscoverd(uint32 thread_id, uint32 thread_system_id, char const* thread_name, std::size_t thread_name_len) override;

@@ -45,17 +45,8 @@ int main(int argc, char* argv[])
 	{
 		Potato::Document::DocumentReader Reader(insight_path);
 		GameThreadStatic game_thread_static;
-		//Parser Ana;
 		UEBabyPram::InsightParser::ExecuteParser(Reader, game_thread_static);
-		
-		Potato::Log::Log<"Output", Potato::Log::LogLevel::Display, 
-			"Total GameThread Time: <{}s>, Total GameFram :<{}>, Avg GameThread Time: <{}s>"
-		>(
-			game_thread_static.total_time.count(),
-			game_thread_static.total_count,
-			game_thread_static.total_time.count() / game_thread_static.total_count
-		);
-
+		game_thread_static.PrintToLog();
 	}
 
 	auto end_time = std::chrono::system_clock::now();
