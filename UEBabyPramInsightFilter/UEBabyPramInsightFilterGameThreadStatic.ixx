@@ -2,6 +2,7 @@ module;
 
 export module UEBabyPramInsightFilterGameStatic;
 
+import UEBabyPramInsightFilterParser;
 import UEBabyPramInsightParser;
 import Potato;
 import std;
@@ -13,10 +14,6 @@ namespace UEBabyPram::InsightFilter
 
 export namespace UEBabyPram::InsightFilter
 {
-	struct Parser : public InsightParser::ParserInterface
-	{
-		virtual void PrintToLog(Potato::Log::LogPrinter& printer = *Potato::Log::GetLogPrinter()) {}
-	};
 
 	struct GameThreadStatic : public Parser
 	{
@@ -27,7 +24,7 @@ export namespace UEBabyPram::InsightFilter
 		virtual bool IsThreadRequired(ThreadID thread_id) const override;
 
 		void PrintToLog(Potato::Log::LogPrinter& printer = *Potato::Log::GetLogPrinter()) override;
-
+		GameThreadStatic();
 	protected:
 
 		struct EventIDRecord
@@ -40,7 +37,8 @@ export namespace UEBabyPram::InsightFilter
 		std::vector<EventIDRecord> event_records;
 		DurationT min_duration = DurationT::zero();
 		std::size_t max_record_frame = 10;
-
+		std::size_t top_event_id_count = 10;
+		std::array<std::size_t, 5> fps_frame_record = {0, 0, 0, 0, 0};
 		InsightParser::DurationT total_time = InsightParser::DurationT::zero();
 		std::size_t total_count = 0;
 		ThreadID game_frame_thread_id;

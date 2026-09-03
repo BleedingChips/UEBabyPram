@@ -2,6 +2,7 @@
 import Potato;
 import std;
 import UEBabyPramInsightParser;
+import UEBabyPramInsightFilterParser;
 import UEBabyPramInsightFilterGameStatic;
 
 using UEBabyPram::InsightParser::ThreadID;
@@ -28,7 +29,7 @@ int main(int argc, char* argv[])
 				break;
 			}
 			else {
-				std::cerr << "Error: No insight file path provided after " << arg << std::endl;
+				Potato::Log::Log<LogCategory, Potato::Log::LogLevel::Display, "Error: No insight file path provided after {}">(arg);
 				return -1;
 			}
 		}
@@ -51,7 +52,7 @@ int main(int argc, char* argv[])
 
 	auto end_time = std::chrono::system_clock::now();
 
-	Potato::Log::Log<"sadasd", Potato::Log::LogLevel::Display, "Duration Time: <{}> microseconds">(
+	Potato::Log::Log<LogCategory, Potato::Log::LogLevel::Display, "\nDone With Time: <{}> microseconds">(
 		std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time).count()
 	);
 
