@@ -29,9 +29,9 @@ namespace UEBabyPram::InsightFilter
 
 	void GameThreadStatic::OnCPUEventDiscoverd(EventID id, std::wstring_view event_name, std::wstring_view file_name, std::size_t file_line)
 	{
-		if (!tick_event_id && event_name == L"FEngineLoop::Tick")
+		if (event_name == L"FEngineLoop::Tick")
 		{
-			tick_event_id = id;
+			tick_event_id.push_back(id);
 		}
 	}
 
@@ -46,63 +46,66 @@ namespace UEBabyPram::InsightFilter
 
 	void GameThreadStatic::OnCPUStackTree(ThreadCPUEventView event_scope)
 	{
-		if (event_scope.GetTopEvent() == tick_event_id)
+		if (event_scope.thread_id == game_frame_thread_id)
 		{
-			auto duration = event_scope.GetTimeRange()->Size();
-			
+			auto result = event_scope.FindNextEvent({ tick_event_id.data(), tick_event_id.size() });
+			if (result)
 			{
-				std::size_t record_count = 0;
-				for (; record_count < fps_thresholds.size(); ++record_count)
-				{
-					if (duration <= fps_thresholds[record_count])
-						break;
-				}
-				fps_frame_record[record_count] += 1;
-			}
-			
-			if (duration > min_duration || event_records.size() < max_record_frame)
-			{
-				EventIDRecord records;
-				records.duration = duration;
-				records.frame_index = total_count;
-				records.event_ids.insert(records.event_ids.end(), event_scope.view.begin(), event_scope.view.end());
-				event_records.push_back(std::move(records));
+				auto duration = event_scope.GetTimeRange()->Size();
 
-				std::sort(event_records.begin(), event_records.end(), [](const EventIDRecord& a, const EventIDRecord& b) {
-					return a.duration > b.duration;
-					});
-
-				if (event_records.size() > max_record_frame)
 				{
-					event_records.pop_back();
+					std::size_t record_count = 0;
+					for (; record_count < fps_thresholds.size(); ++record_count)
+					{
+						if (duration <= fps_thresholds[record_count])
+							break;
+					}
+					fps_frame_record[record_count] += 1;
 				}
 
-				min_duration = event_records.rbegin()->duration;
+				if (duration > min_duration || event_records.size() < max_record_frame)
+				{
+					EventIDRecord records;
+					records.duration = duration;
+					records.frame_index = total_count;
+					records.event_ids.insert(records.event_ids.end(), event_scope.view.begin(), event_scope.view.end());
+					event_records.push_back(std::move(records));
+
+					std::sort(event_records.begin(), event_records.end(), [](const EventIDRecord& a, const EventIDRecord& b) {
+						return a.duration > b.duration;
+						});
+
+					if (event_records.size() > max_record_frame)
+					{
+						event_records.pop_back();
+					}
+
+					min_duration = event_records.rbegin()->duration;
+				}
+				total_count += 1;
+				total_time += duration;
 			}
-			total_count += 1;
-			total_time += duration;
 		}
 	}
 
-	void GameThreadStatic::PrintToLog(Potato::Log::LogPrinter& printer)
+	bool GameThreadStatic::PrintToLog(std::pmr::wstring& out_string)
 	{
-		Potato::Log::LogTo<OutputCategory, Potato::Log::LogLevel::Display,
-			"GameThreadStatic Output:"
-		>(printer);
+		std::format_to(
+			std::back_insert_iterator{ out_string },
+			L"GameThreadStatic Output:\n"
+		);
 
-		Potato::Log::LogTo<OutputCategory, Potato::Log::LogLevel::Display,
-			"\tTotal GameThread Time: <{}s>, Total GameFram :<{}>, Avg GameThread Time: <{}s>"
-		>(
-			printer,
+		std::format_to(
+			std::back_insert_iterator{ out_string },
+			L"\tTotal GameThread Time: <{}s>, Total GameFram :<{}>, Avg GameThread Time: <{}s>\n",
 			total_time.count(),
 			total_count,
 			total_time.count() / total_count
 		);
 
-		Potato::Log::LogTo<OutputCategory, Potato::Log::LogLevel::Display,
-			"\tFps: [{:.2f}%]>=120Fps, [{:.2f}%]>=60Fps, [{:.2f}%]>=30Fps, [{:.2f}%]>=15Fps, [{:.2f}%]<15FPS "
-		>(
-			printer,
+		std::format_to(
+			std::back_insert_iterator{ out_string },
+			L"\tFps: [{:.2f}%]>=120Fps, [{:.2f}%]>=60Fps, [{:.2f}%]>=30Fps, [{:.2f}%]>=15Fps, [{:.2f}%]<15FPS \n",
 			fps_frame_record[0] / static_cast<double>(total_count) * 100.0,
 			fps_frame_record[1] / static_cast<double>(total_count) * 100.0,
 			fps_frame_record[2] / static_cast<double>(total_count) * 100.0,
@@ -110,9 +113,11 @@ namespace UEBabyPram::InsightFilter
 			fps_frame_record[4] / static_cast<double>(total_count) * 100.0
 		);
 
-		Potato::Log::LogTo<OutputCategory, Potato::Log::LogLevel::Display,
-			"\tTop <{}> GameThread :"
-		>(printer, max_record_frame);
+		std::format_to(
+			std::back_insert_iterator{ out_string },
+			L"\tTop <{}> GameThread :\n",
+			max_record_frame
+		);
 
 		std::size_t count = 0;
 		for (auto& ite : event_records)
@@ -121,16 +126,27 @@ namespace UEBabyPram::InsightFilter
 			ThreadCPUEventView view;
 			view.view = std::span(ite.event_ids.data(), ite.event_ids.size());
 			auto range = *view.GetTimeRange();
-			Potato::Log::LogTo<OutputCategory, Potato::Log::LogLevel::Display,
-				"\t  {}. \tFrameIndex:<{}>, \tTotalDuration:<{}us>, \tTimeRange: [{:.7f}s, {:.7f}s]"
-			>(printer, 
-				count, 
-				ite.frame_index,
-				std::chrono::duration_cast<std::chrono::microseconds>(ite.duration).count(),
+
+			auto m1 = std::chrono::duration_cast<std::chrono::minutes>(ite.event_ids.begin()->time);
+			auto m2 = std::chrono::duration_cast<std::chrono::minutes>(ite.event_ids.rbegin()->time);
+
+			std::format_to(
+				std::back_insert_iterator{ out_string },
+				L"\t{:}. \tTotalDuration:<{:.4f}ms>, \tTimeRange: [{:.7f}s, {:.7f}s] Display: [{:}m{:.4f}s, {}m{:.4f}s]\n",
+				count,
+				std::chrono::duration_cast<
+					std::chrono::duration<double, std::milli>
+				>(ite.duration).count(),
 				ite.event_ids.begin()->time.count(),
-				ite.event_ids.rbegin()->time.count()
+				ite.event_ids.rbegin()->time.count(),
+				m1.count(),
+				(ite.event_ids.begin()->time - m1).count(),
+				m2.count(),
+				(ite.event_ids.rbegin()->time - m2).count()
 			);
 		}
+
+		return true;
 	}
 
 	void GameThreadStatic::ContextSwitchEvent(ThreadSystemID thread_id, uint32 core_name, Potato::Misc::IndexSpan<DurationT> duration)

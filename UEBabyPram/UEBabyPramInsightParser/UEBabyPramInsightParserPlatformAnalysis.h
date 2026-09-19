@@ -15,6 +15,7 @@ namespace UEBabyPram::InsightParser
 		: public UE::Trace::IAnalyzer
 	{
 	public:
+
 		FPlatformEventTraceAnalyzer(BaseParser& Parser);
 		virtual void OnAnalysisBegin(const FOnAnalysisContext& Context) override;
 		virtual void OnAnalysisEnd() override;
@@ -22,6 +23,7 @@ namespace UEBabyPram::InsightParser
 		virtual void OnThreadInfo(const FThreadInfo& ThreadInfo) override;
 
 	private:
+
 		enum : uint16
 		{
 			RouteId_Settings,

@@ -23,7 +23,7 @@ export namespace UEBabyPram::InsightFilter
 		void ContextSwitchEvent(ThreadSystemID thread_id, uint32 core_name, Potato::Misc::IndexSpan<DurationT> duration) override;
 		virtual bool IsThreadRequired(ThreadID thread_id) const override;
 
-		void PrintToLog(Potato::Log::LogPrinter& printer = *Potato::Log::GetLogPrinter()) override;
+		bool PrintToLog(std::pmr::wstring& out_string) override;
 		GameThreadStatic();
 	protected:
 
@@ -43,6 +43,6 @@ export namespace UEBabyPram::InsightFilter
 		std::size_t total_count = 0;
 		ThreadID game_frame_thread_id;
 		ThreadSystemID game_frame_thread_system_id;
-		EventID tick_event_id;
+		std::vector<EventID> tick_event_id;
 	};
 }

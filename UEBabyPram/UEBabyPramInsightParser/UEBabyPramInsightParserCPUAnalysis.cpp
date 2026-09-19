@@ -228,7 +228,16 @@ namespace UEBabyPram::InsightParser
 			uint32 MetadataId = Context.EventData.GetValue<uint32>("Id");
 			uint32 SpecId = Context.EventData.GetValue<uint32>("SpecId");
 			auto Metadata = EventData.GetArrayView<uint8>("Metadata");
+			if (Metadata.Num() > 0)
+			{
+				Parser.AddMetaData(SpecId, MetadataId, MetaDataFormat::CborData,
+					Metadata.GetData(),
+					Metadata.NumBytes(),
+					TraceServices::FTraceAnalyzerUtils::GetThreadIdField(Context)
+				);
+			}
 
+			/*
 			uint32 TimerId = GetOrAddTimer(SpecId);
 
 			if (ensure(Metadata.Num() > 0))
@@ -259,6 +268,7 @@ namespace UEBabyPram::InsightParser
 					);
 				}
 			}
+			*/
 			break;
 		}
 
@@ -308,13 +318,12 @@ namespace UEBabyPram::InsightParser
 			if (DecodedCycle & 1ull)
 			{
 				uint32 SpecId = IntCastChecked<uint32>(TraceServices::FTraceAnalyzerUtils::Decode7bit(BufferPtr));
-				uint32 TimerId = GetOrAddTimer(SpecId);
 
 				FEventScopeState& ScopeState = ThreadState.ScopeStack.AddDefaulted_GetRef();
 				ScopeState.StartCycle = ActualCycle;
-				ScopeState.EventTypeId = TimerId;
+				ScopeState.EventTypeId = SpecId;
 
-				ThreadState.Timeline->AppendBeginEvent(ActualTime, TimerId);
+				ThreadState.Timeline->AppendBeginEvent(ActualTime, SpecId);
 			}
 			else
 			{
@@ -394,12 +403,10 @@ namespace UEBabyPram::InsightParser
 					uint64 CoroutineId = TraceServices::FTraceAnalyzerUtils::Decode7bit(BufferPtr);
 					uint32 TimerScopeDepth = IntCastChecked<uint32>(TraceServices::FTraceAnalyzerUtils::Decode7bit(BufferPtr));
 
+					FStringView CoroutineName = TEXT("Coroutine");
+					AddCpuTimer(CoroutineId, TEXT("Coroutine"), nullptr, 0);
 					// Begins a "CoroTask" scoped timer.
 					{
-						if (CoroutineTimerId == ~0u)
-						{
-							CoroutineTimerId = AddCpuTimer(CoroutineSpecId, TEXT("Coroutine"));
-						}
 
 						TArray<uint8> CborData;
 						{
@@ -412,21 +419,20 @@ namespace UEBabyPram::InsightParser
 							CborWriter.WriteValue("C", 1); // continuation?
 							CborWriter.WriteValue(false);
 						}
-						uint32 MetadataTimerId = Parser.AddMetaData(CoroutineTimerId, MetaDataFormat::CborData, CborData.GetData(), CborData.Num(), ThreadState.ThreadId);
+
+						Parser.AddMetaData(CoroutineTimerId, 0, MetaDataFormat::CborData, CborData.GetData(), CborData.Num(), ThreadState.ThreadId);
 
 						FEventScopeState& ScopeState = ThreadState.ScopeStack.AddDefaulted_GetRef();
 						ScopeState.StartCycle = ActualCycle;
-						ScopeState.EventTypeId = MetadataTimerId;
+						ScopeState.EventTypeId = CoroutineId;
 
-						ThreadState.Timeline->AppendBeginEvent(ActualTime, MetadataTimerId);
+						ThreadState.Timeline->AppendBeginEvent(ActualTime, CoroutineId);
 					}
 
 					// Begins the CPU scoped timers (suspended in previous coroutine execution).
 					{
-						if (CoroutineUnknownTimerId == ~0u)
-						{
-							CoroutineUnknownTimerId = AddCpuTimer(CoroutineUnknownSpecId, TEXT("<unknown>"));
-						}
+						FStringView CoroutineUnknowName = TEXT("Coroutine <unknown>");
+						AddCpuTimer(CoroutineId, TEXT("Coroutine <unknown>"), nullptr, 0);
 
 						//TODO: Restore the saved stack of CPU scoped timers for this CoroutineId.
 						for (uint32 i = 0; i < TimerScopeDepth; ++i)
@@ -491,8 +497,6 @@ namespace UEBabyPram::InsightParser
 				if (DecodedCycle & 1ull)
 				{
 					uint32 SpecId = IntCastChecked<uint32>(TraceServices::FTraceAnalyzerUtils::Decode7bit(BufferPtr));
-
-					uint32 TimerId = 0;
 					if (Version == 3)
 					{
 						if (SpecId & 1u) // The last bit is set if this is a metadata id.
@@ -503,37 +507,32 @@ namespace UEBabyPram::InsightParser
 							if (TimerIdPtr == nullptr)
 							{
 								constexpr uint32 MetadataUnknownSpecId = (1u << 31u) - 3u;
-								if (MetadataUnknownTimerId == ~0u)
-								{
-									MetadataUnknownTimerId = AddCpuTimer(MetadataUnknownSpecId, TEXT("<unknown>"));
-								}
+								AddCpuTimer(MetadataUnknownSpecId, TEXT("Coroutine <unknown>"), nullptr, 0);
 
 								// Add an empty placeholder metadata so we obtain a MetadataId to use as the TimerId. Will be replaced with the actual metadata if the metadata event arrives later.
-								TimerId = Parser.AddMetaData(MetadataUnknownTimerId, MetaDataFormat::CborData, nullptr, 0, ThreadState.ThreadId);
-								MetadataIdToTimerIdMap.Add(MetadataId, TimerId);
+								//TimerId = Parser.AddMetaData(MetadataUnknownTimerId, MetaDataFormat::CborData, nullptr, 0, ThreadState.ThreadId);
+								//MetadataIdToTimerIdMap.Add(MetadataId, TimerId);
 							}
 							else
 							{
-								TimerId = *TimerIdPtr;
+								//TimerId = *TimerIdPtr;
 							}
 						}
 						else
 						{
 							// Get the actual Spec Id.
 							SpecId = SpecId >> 1;
-							TimerId = GetOrAddTimer(SpecId);
 						}
 					}
 					else
 					{
-						TimerId = GetOrAddTimer(SpecId);
 					}
 
 					FEventScopeState& ScopeState = ThreadState.ScopeStack.AddDefaulted_GetRef();
 					ScopeState.StartCycle = ActualCycle;
-					ScopeState.EventTypeId = TimerId;
+					ScopeState.EventTypeId = SpecId;
 
-					ThreadState.Timeline->AppendBeginEvent(ActualTime, TimerId);
+					ThreadState.Timeline->AppendBeginEvent(ActualTime, SpecId);
 				}
 				else
 				{
@@ -676,7 +675,9 @@ namespace UEBabyPram::InsightParser
 		uint32 SpecId = Context.EventData.GetTypeInfo().GetId();
 		SpecId = ~SpecId; // to keep out of the way of normal spec IDs.
 
+		/*
 		uint32 TimerId;
+		Parser
 		if (const uint32* FoundTimerIdBySpecId = SpecIdToTimerIdMap.Find(SpecId))
 		{
 			TimerId = *FoundTimerIdBySpecId;
@@ -689,12 +690,13 @@ namespace UEBabyPram::InsightParser
 		}
 
 		TimerId = Parser.AddMetaData(
-			TimerId, 
+			SpecId,
 			MetaDataFormat::EventData, 
 			reinterpret_cast<uint8 const*>(&Context.EventData), 
 			Context.EventData.GetSize(), 
 			ThreadId
 		);
+		*/
 
 		/*
 		TArray<uint8> CborData;
@@ -712,7 +714,7 @@ namespace UEBabyPram::InsightParser
 		check(ThreadState.LastPendingEventTime <= Time);
 		ThreadState.LastPendingEventTime = Time;
 
-		ThreadState.PendingEvents.Add({ Cycle, Time, TimerId });
+		ThreadState.PendingEvents.Add({ Cycle, Time, SpecId });
 	}
 
 	////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -789,15 +791,14 @@ namespace UEBabyPram::InsightParser
 			Line = EventData.GetValue<uint32>("Line");
 		}
 		const TCHAR* FileName = !File.IsEmpty() ? *File : nullptr;
-
-		const TCHAR* StoredTimerName = AnaContext.StoreString(TimerName);
-		DefineMergedTimer(SpecId, StoredTimerName, FileName, Line);
+		AddCpuTimer(SpecId, TimerName, FileName, Line);
 	}
 
 	////////////////////////////////////////////////////////////////////////////////////////////////////
 
 	void CPUScopeAnalyzer::OnMetadataSpec(const FOnEventContext& Context)
 	{
+		/*
 		const auto& EventData = Context.EventData;
 
 		uint32 SpecId = EventData.GetValue<uint32>("Id");
@@ -896,7 +897,6 @@ namespace UEBabyPram::InsightParser
 
 		if (Spec.FieldNames.Num() > 0 || Spec.Format != nullptr)
 		{
-			/*
 			uint32 MetadataSpecId = Parser.AddMetadataSpec(MoveTemp(Spec));
 
 			const ITimingProfilerProvider* TimingProfilerProvider = AnaContext.GetReadProvider();
@@ -930,12 +930,13 @@ namespace UEBabyPram::InsightParser
 			}
 
 			AnaContext.SetMetadataSpec(TimerId, MetadataSpecId);
-			*/
 		}
+		*/
 	}
 
 	////////////////////////////////////////////////////////////////////////////////////////////////////
 
+	/*
 	uint32 CPUScopeAnalyzer::GetOrAddTimer(uint32 SpecId)
 	{
 		if (const uint32* FoundTimerIdBySpecId = SpecIdToTimerIdMap.Find(SpecId))
@@ -948,24 +949,21 @@ namespace UEBabyPram::InsightParser
 		// might be updated when an EventSpec event is received (for this SpecId).
 		return AddCpuTimer(SpecId, *FString::Printf(TEXT("<unknown %u>"), SpecId));
 	}
+	*/
 
 	////////////////////////////////////////////////////////////////////////////////////////////////////
 
-	uint32 CPUScopeAnalyzer::AddCpuTimer(uint32 SpecId, const TCHAR* TimerName, const TCHAR* File, uint32 Line)
+	void CPUScopeAnalyzer::AddCpuTimer(uint32 SpecId, const TCHAR* TimerName, const TCHAR* File, uint32 Line)
 	{
 		// Add a new CPU timer.
 		FStringView TimerNameView(TimerName);
 		FStringView FileNameView(File);
-		uint32 TimerId = Parser.OnCPUEventDiscoverd(TimerNameView.GetData(), TimerNameView.Len(), FileNameView.GetData(), FileNameView.Len(), Line);
-
-		// Map the SpecId to the timer.
-		SpecIdToTimerIdMap.Add(SpecId, TimerId);
-
-		return TimerId;
+		Parser.OnCPUEventDiscoverd(SpecId, TimerNameView.GetData(), TimerNameView.Len(), FileNameView.GetData(), FileNameView.Len(), Line);
 	}
 
 	////////////////////////////////////////////////////////////////////////////////////////////////////
 
+	/*
 	uint32 CPUScopeAnalyzer::DefineMergedTimer(uint32 SpecId, const TCHAR* StoredTimerName, const TCHAR* File, uint32 Line)
 	{
 		// Expected: StoredTimerName is already a pointer in a string store.
@@ -1019,9 +1017,11 @@ namespace UEBabyPram::InsightParser
 
 		return TimerId;
 	}
+	*/
 
 	////////////////////////////////////////////////////////////////////////////////////////////////////
 
+	/*
 	uint32 CPUScopeAnalyzer::DefineUniqueTimer(uint32 SpecId, const TCHAR* TimerName, const TCHAR* File, uint32 Line)
 	{
 		uint32 TimerId;
@@ -1044,6 +1044,7 @@ namespace UEBabyPram::InsightParser
 
 		return TimerId;
 	}
+	*/
 
 	////////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -1072,10 +1073,12 @@ namespace UEBabyPram::InsightParser
 
 	////////////////////////////////////////////////////////////////////////////////////////////////////
 
+	/*
 	void CPUScopeAnalyzer::SetTimerName(uint32 SpecId, uint32 TimerId, const TCHAR* TimerName)
 	{
 		//AnaContext.SetTimerName(TimerId, TimerName);
 	}
+	*/
 
 	////////////////////////////////////////////////////////////////////////////////////////////////////
 

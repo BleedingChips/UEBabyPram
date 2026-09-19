@@ -12,7 +12,7 @@ export namespace UEBabyPram::InsightFilter
 	
 	struct Parser : public InsightParser::ParserInterface
 	{
-		virtual void PrintToLog(Potato::Log::LogPrinter& printer = *Potato::Log::GetLogPrinter()) {}
+		virtual bool PrintToLog(std::pmr::wstring& out_string) { return false; }
 	};
 
 	constexpr auto LogCategory = Potato::TMP::TypeString("FilterLog");

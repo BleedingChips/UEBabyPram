@@ -83,10 +83,10 @@ namespace UEBabyPram::InsightParser
 		void OnEventSpec(const FOnEventContext& Context);
 		void OnMetadataSpec(const FOnEventContext& Context);
 
-		uint32 GetOrAddTimer(uint32 SpecId);
-		uint32 AddCpuTimer(uint32 SpecId, const TCHAR* TimerName, const TCHAR* File = nullptr, uint32 Line = 0); // returns the TimerId
-		uint32 DefineMergedTimer(uint32 SpecId, const TCHAR* TimerName, const TCHAR* File, uint32 Line); // returns the TimerId
-		uint32 DefineUniqueTimer(uint32 SpecId, const TCHAR* TimerName, const TCHAR* File, uint32 Line); // returns the TimerId
+		//uint32 GetOrAddTimer(uint32 SpecId);
+		void AddCpuTimer(uint32 SpecId, const TCHAR* TimerName, const TCHAR* File = nullptr, uint32 Line = 0); // returns the TimerId
+		//uint32 DefineMergedTimer(uint32 SpecId, const TCHAR* TimerName, const TCHAR* File, uint32 Line); // returns the TimerId
+		//uint32 DefineUniqueTimer(uint32 SpecId, const TCHAR* TimerName, const TCHAR* File, uint32 Line); // returns the TimerId
 		const TCHAR* GetTimerName(uint32 TimerId) const;
 		void SetTimerName(uint32 SpecId, uint32 TimerId, const TCHAR* TimerName);
 

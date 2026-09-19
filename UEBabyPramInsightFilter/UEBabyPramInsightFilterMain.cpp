@@ -44,10 +44,17 @@ int main(int argc, char* argv[])
 
 	if (!insight_path.empty() && std::filesystem::exists(insight_path))
 	{
+		Potato::Log::Log<LogCategory, Potato::Log::LogLevel::Display, L"Start With UTrace File {}">(insight_path.generic_wstring());
+		std::pmr::wstring output_string;
 		Potato::Document::DocumentReader Reader(insight_path);
 		GameThreadStatic game_thread_static;
 		UEBabyPram::InsightParser::ExecuteParser(Reader, game_thread_static);
-		game_thread_static.PrintToLog();
+		
+		game_thread_static.PrintToLog(output_string);
+
+		Potato::Log::Log<LogCategory, Potato::Log::LogLevel::Display, L"{}">(
+			std::wstring_view{ output_string }
+		);
 	}
 
 	auto end_time = std::chrono::system_clock::now();

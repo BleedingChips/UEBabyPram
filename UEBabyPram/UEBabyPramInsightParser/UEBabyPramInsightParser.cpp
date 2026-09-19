@@ -172,6 +172,7 @@ namespace UEBabyPram::InsightParser
 	}
 	*/
 
+	/*
 	uint32 ParserInterface::OnCPUEventDiscoverd(wchar_t const* event_name, std::size_t event_name_len, wchar_t const* file, std::size_t file_name_len, std::size_t line)
 	{
 		auto cur_event_name = CoverStringView(event_name, event_name_len);
@@ -190,6 +191,7 @@ namespace UEBabyPram::InsightParser
 		OnCPUEventDiscoverd(EventID{ event_id }, cur_event_name, cur_file_name, line);
 		return static_cast<uint32>(event_id);
 	}
+	*/
 
 	auto ParserInterface::GetCPUEventInfo(EventID event_id) const -> std::optional<ParserInterface::CPUEventInfo>
 	{
@@ -226,15 +228,17 @@ namespace UEBabyPram::InsightParser
 		return std::nullopt;
 	}
 
+	/*
 	void ParserInterface::SetMetadata(uint32 MetaDataId, MetaDataFormat format, uint8 const* meta_data, std::size_t meta_data_len, uint32 TimerId, uint32 ThreadId)
 	{
 		AddMetaData(TimerId, format, meta_data, meta_data_len, ThreadId);
 	}
 
+
 	uint32 ParserInterface::AddMetaData(uint32 event_id, MetaDataFormat format, uint8 const* data, std::size_t meta_data_len, uint32 thread_id)
 	{
 		return 0;
-		/*
+
 		if (thread_id == 1)
 		{
 			volatile int ui = 0;
@@ -268,8 +272,8 @@ namespace UEBabyPram::InsightParser
 			}
 		}
 		return event_id;
-		*/
 	}
+	*/
 
 	void ParserInterface::OnThreadDiscoverd(uint32 thread_id, uint32 thread_system_id, char const* thread_name, std::size_t thread_name_len)
 	{
