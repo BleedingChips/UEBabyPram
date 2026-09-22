@@ -1,4 +1,4 @@
-module;
+﻿module;
 #include <cassert>
 module UEBabyPramInsightParser;
 
@@ -52,71 +52,137 @@ namespace UEBabyPram::InsightParser
 		//assert(depth == 0);
 	}
 
-	auto ThreadCPUEventView::FindNextEvent(std::span<EventID const> event_id_span, EventIterator current, bool need_depper) const ->EventIterator
+	void ContextSwitchEventList::AddContextSwitchEvent(ThreadSystemID thread_id, std::size_t active_core, Potato::Misc::IndexSpan<DurationT> active_time)
 	{
-		std::size_t iterator_index = 0;
-		if (current)
+		auto find = thread_list.find(thread_id);
+		if (find == thread_list.end())
 		{
-			if (need_depper)
-			{
-				iterator_index = current.exist_range.Begin() + 1;
-			}
-			else {
-				iterator_index = current.exist_range.End();
-			}
+			ThreadList list;
+			list.thread_system_id = thread_id;
+			find = std::get<0>(thread_list.insert(std::pair(thread_id, std::move(list))));
 		}
+		find->second.events.emplace_back(active_core, active_time);
+		if ((find->second.events.size() % fast_check_point_count) == 0)
+		{
+			find->second.fast_check_point.emplace_back(active_time.Begin());
+		}
+	}
 
-		EventIterator result;
-		DurationT child_time_total = DurationT::zero();
-		DurationT child_time_start = DurationT::zero();
-		for (; iterator_index < view.size(); ++iterator_index)
+	std::size_t ContextSwitchEventList::ThreadList::FastLocateFirstEventIndex(DurationT target_point, std::size_t fast_check_point_count) const
+	{
+		std::size_t start_index = 0;
+		for (; start_index < fast_check_point.size(); ++start_index)
 		{
-			auto& ref = view[iterator_index];
-			if (ref.event_id)
+			if (fast_check_point[start_index] > target_point)
+				break;
+		}
+		return start_index * fast_check_point_count;
+	}
+	std::size_t ContextSwitchEventList::ThreadList::LocateFirstEventIndex(DurationT target_point, std::size_t index_offset) const
+	{
+		for (; index_offset < events.size(); ++index_offset)
+		{
+			if (events[index_offset].active_time_range.End() > target_point)
 			{
-				if (
-					!result.event_id
-					&& (
-						event_id_span.size() == 0
-						|| std::find(event_id_span.begin(), event_id_span.end(), ref.event_id) != event_id_span.end()
-						)
-					)
-				{
-					result.exist_range.StartPoint = iterator_index;
-					result.exist_range.EndPoint = iterator_index;
-					result.exist_time.StartPoint = ref.time;
-					result.exist_time.EndPoint = ref.time;
-					result.depth = ref.depth;
-					result.event_id = ref.event_id;
-				}
-				else if (
-					result.event_id
-					&& ref.depth == result.depth + 1 
-					)
-				{
-					child_time_start = ref.time;
-				}
-			}
-			else if (result.event_id)
-			{
-				if (result.depth == ref.depth)
-				{
-					result.exist_range.EndPoint = iterator_index + 1;
-					result.exist_time.EndPoint = ref.time;
-					break;
-				}
-				else if (ref.depth == result.depth + 1)
-				{
-					child_time_total = child_time_total + (ref.time - child_time_start);
-					child_time_start = DurationT::zero();
-				}
+				break;
 			}
 		}
-		if (result.event_id)
+		return index_offset;
+	}
+
+	auto ContextSwitchEventList::GetContextSwitchStatic(ThreadSystemID thread_id, Potato::Misc::IndexSpan<DurationT> time_range) const ->Static
+	{
+		auto find = thread_list.find(thread_id);
+		if (find != thread_list.end())
 		{
-			result.self_time_in_second = result.exist_time.Size() - child_time_total;
+			auto fast_start = find->second.FastLocateFirstEventIndex(time_range.Begin(), fast_check_point_count);
+			auto start = find->second.LocateFirstEventIndex(time_range.Begin(), fast_start);
+			auto end = find->second.LocateFirstEventIndex(time_range.End(), start);
+
+			std::size_t active_count = 0;
+			DurationT iterator_begin_duration = time_range.Begin();
+
+
 		}
-		return result;
+		return {};
+	}
+
+	auto ThreadCPUEventView::FindFirstEventID(std::span<EventID const> event_ids, Potato::Misc::IndexSpan<> index_range) const -> FindResult
+	{
+		std::size_t end = std::min(index_range.End(), view.size());
+		for (std::size_t index = index_range.Begin(); index < end; ++index)
+		{
+			auto& ref = view[index];
+			if (std::find(event_ids.begin(), event_ids.end(), ref.event_id) != event_ids.end())
+			{
+				return FindResult{ ref.event_id, index, ref.depth, ref.time };
+			}
+		}
+		return {};
+	}
+
+	auto ThreadCPUEventView::FindFirstDepth(std::size_t depth, Potato::Misc::IndexSpan<> index_range) const -> FindResult
+	{
+		std::size_t end = std::min(index_range.End(), view.size());
+		for (std::size_t index = index_range.Begin(); index < end; ++index)
+		{
+			auto& ref = view[index];
+			if (depth == ref.depth)
+			{
+				return FindResult{ ref.event_id, index, ref.depth, ref.time };
+			}
+		}
+		return {};
+	}
+
+	EventID ThreadCPUEventView::GetTopEvent() const {
+		if (view.size() > 0)
+		{
+			return view[0].event_id;
+		}
+		return {};
+	}
+
+	auto ThreadCPUEventView::FindNextEvent(std::span<EventID const> event_id_span, Potato::Misc::IndexSpan<> index_range) const -> EventView
+	{
+		std::size_t edge = std::min(index_range.End(), view.size());
+
+		auto first = FindFirstEventID(event_id_span, index_range);
+
+		if (!first)
+			return {};
+
+		auto end = FindFirstDepth(first.depth, first.index_offset + 1);
+
+		assert(end);
+
+		return {
+			first.event_id,
+			{first.index_offset, end.index_offset + 1},
+			{first.time_point, end.time_point},
+			first.depth
+		};
+	}
+
+	std::optional<DurationT> ThreadCPUEventView::GetExcludeTime(EventView view) const
+	{
+		if (view)
+		{
+			auto child_durations = DurationT::zero();
+			auto target_depth = view.depth + 1;
+			std::size_t offset = view.index_range.Begin() + 1;
+			while (true)
+			{
+				auto next_depth = FindFirstDepth(target_depth, offset);
+				if (!next_depth)
+					return view.time_range.Size() - child_durations;
+				auto next_end_depth = FindFirstDepth(target_depth, next_depth.index_offset + 1);
+				assert(next_end_depth);
+				child_durations += next_end_depth.time_point - next_depth.time_point;
+				offset = next_end_depth.index_offset + 1;
+			}
+		}
+		return std::nullopt;
 	}
 
 	std::wstring_view ParserInterface::CoverStringView(wchar_t const* ScopeName, std::size_t ScopeNameLen)

@@ -51,6 +51,7 @@ namespace UEBabyPram::InsightFilter
 			auto result = event_scope.FindNextEvent({ tick_event_id.data(), tick_event_id.size() });
 			if (result)
 			{
+				auto k = event_scope.GetExcludeTime(result);
 				auto duration = event_scope.GetTimeRange()->Size();
 
 				{
@@ -132,7 +133,7 @@ namespace UEBabyPram::InsightFilter
 
 			std::format_to(
 				std::back_insert_iterator{ out_string },
-				L"\t{:}. \tTotalDuration:<{:.4f}ms>, \tTimeRange: [{:.7f}s, {:.7f}s] Display: [{:}m{:.4f}s, {}m{:.4f}s]\n",
+				L"\t{:}. \tTotalDuration:<{:.4f}ms>, \tTimeRange: [{:}m{:.4f}s, {}m{:.4f}s]\n",
 				count,
 				std::chrono::duration_cast<
 					std::chrono::duration<double, std::milli>
