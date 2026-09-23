@@ -57,7 +57,7 @@ namespace UEBabyPram::InsightParser
 		auto find = thread_list.find(thread_id);
 		if (find == thread_list.end())
 		{
-			ThreadList list;
+			ThreadList list{thread_id, fast_check_point_count};
 			list.thread_system_id = thread_id;
 			find = std::get<0>(thread_list.insert(std::pair(thread_id, std::move(list))));
 		}
@@ -68,7 +68,7 @@ namespace UEBabyPram::InsightParser
 		}
 	}
 
-	std::size_t ContextSwitchEventList::ThreadList::FastLocateFirstEventIndex(DurationT target_point, std::size_t fast_check_point_count) const
+	std::size_t ContextSwitchEventList::ThreadList::FastLocateFirstEventIndex(DurationT target_point) const
 	{
 		std::size_t start_index = 0;
 		for (; start_index < fast_check_point.size(); ++start_index)
@@ -90,19 +90,54 @@ namespace UEBabyPram::InsightParser
 		return index_offset;
 	}
 
+	auto ContextSwitchEventList::ThreadList::GetContextSwitchStatic(Potato::Misc::IndexSpan<DurationT> time_range) const ->Static
+	{
+		auto fast_start = FastLocateFirstEventIndex(time_range.Begin());
+		auto start = LocateFirstEventIndex(time_range.Begin(), fast_start);
+		auto end = LocateFirstEventIndex(time_range.End(), start);
+
+		std::size_t active_count = 0;
+		DurationT active_time = DurationT::zero();
+
+		DurationT overlapping_time = DurationT::zero();
+
+		auto start_time = events[start].active_time_range.Begin();
+		auto end_time_range = events[end].active_time_range;
+
+		if(start_time < time_range.Begin())
+			overlapping_time += time_range.Begin() - start_time;
+
+		if (time_range.End() < end_time_range.Begin())
+		{
+			active_count -= 1;
+			overlapping_time += end_time_range.Size();
+		}
+		else {
+			overlapping_time += time_range.End() - end_time_range.Begin();
+		}
+
+		auto total_duration = DurationT::zero();
+
+		for (auto i : Potato::Misc::IndexSpan<>(start, end + 1))
+		{
+			total_duration += events[i].active_time_range.Size();
+		}
+
+		total_duration -= overlapping_time;
+
+		return Static{
+			total_duration,
+			active_count
+		};
+
+	}
+
 	auto ContextSwitchEventList::GetContextSwitchStatic(ThreadSystemID thread_id, Potato::Misc::IndexSpan<DurationT> time_range) const ->Static
 	{
 		auto find = thread_list.find(thread_id);
 		if (find != thread_list.end())
 		{
-			auto fast_start = find->second.FastLocateFirstEventIndex(time_range.Begin(), fast_check_point_count);
-			auto start = find->second.LocateFirstEventIndex(time_range.Begin(), fast_start);
-			auto end = find->second.LocateFirstEventIndex(time_range.End(), start);
-
-			std::size_t active_count = 0;
-			DurationT iterator_begin_duration = time_range.Begin();
-
-
+			return find->second.GetContextSwitchStatic(time_range);
 		}
 		return {};
 	}

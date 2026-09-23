@@ -121,6 +121,9 @@ namespace UEBabyPram::InsightFilter
 		);
 
 		std::size_t count = 0;
+
+
+
 		for (auto& ite : event_records)
 		{
 			++count;
@@ -128,22 +131,25 @@ namespace UEBabyPram::InsightFilter
 			view.view = std::span(ite.event_ids.data(), ite.event_ids.size());
 			auto range = *view.GetTimeRange();
 
-			auto m1 = std::chrono::duration_cast<std::chrono::minutes>(ite.event_ids.begin()->time);
-			auto m2 = std::chrono::duration_cast<std::chrono::minutes>(ite.event_ids.rbegin()->time);
+			auto context_switch_static = context_switch_list.GetContextSwitchStatic(game_frame_thread_system_id, range);
+
+			DisplayDuration start_duration{ range.Begin() };
+			DisplayDuration end_duration{ range.End() };
 
 			std::format_to(
 				std::back_insert_iterator{ out_string },
-				L"\t{:}. \tTotalDuration:<{:.4f}ms>, \tTimeRange: [{:}m{:.4f}s, {}m{:.4f}s]\n",
+				L"\t{:}. \tTotalDuration:<{:.3f}ms>, ContextSwitchTime:<{:.3f}ms> \tTimeRange: [{:}m{:.6f}s, {}m{:.6f}s]\n",
 				count,
 				std::chrono::duration_cast<
 					std::chrono::duration<double, std::milli>
 				>(ite.duration).count(),
-				ite.event_ids.begin()->time.count(),
-				ite.event_ids.rbegin()->time.count(),
-				m1.count(),
-				(ite.event_ids.begin()->time - m1).count(),
-				m2.count(),
-				(ite.event_ids.rbegin()->time - m2).count()
+				std::chrono::duration_cast<
+					std::chrono::duration<double, std::milli>
+				>(ite.duration - context_switch_static.active_time).count(),
+				start_duration.minutes.count(),
+				start_duration.seconds.count(),
+				end_duration.minutes.count(),
+				end_duration.seconds.count()
 			);
 		}
 
@@ -152,6 +158,6 @@ namespace UEBabyPram::InsightFilter
 
 	void GameThreadStatic::ContextSwitchEvent(ThreadSystemID thread_id, uint32 core_name, Potato::Misc::IndexSpan<DurationT> duration)
 	{
-		
+		context_switch_list.AddContextSwitchEvent(thread_id, core_name, duration);
 	}
 }

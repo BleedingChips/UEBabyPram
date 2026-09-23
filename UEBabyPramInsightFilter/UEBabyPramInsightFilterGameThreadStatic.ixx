@@ -22,7 +22,7 @@ export namespace UEBabyPram::InsightFilter
 		void OnCPUStackTree(ThreadCPUEventView event_scope) override;
 		void ContextSwitchEvent(ThreadSystemID thread_id, uint32 core_name, Potato::Misc::IndexSpan<DurationT> duration) override;
 		virtual bool IsThreadRequired(ThreadID thread_id) const override;
-
+		virtual bool IsContextSwitchRequired() const override { return true; }
 		bool PrintToLog(std::pmr::wstring& out_string) override;
 		GameThreadStatic();
 	protected:
@@ -44,5 +44,6 @@ export namespace UEBabyPram::InsightFilter
 		ThreadID game_frame_thread_id;
 		ThreadSystemID game_frame_thread_system_id;
 		std::vector<EventID> tick_event_id;
+		ContextSwitchEventList context_switch_list;
 	};
 }

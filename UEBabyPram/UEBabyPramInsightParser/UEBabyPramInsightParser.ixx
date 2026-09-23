@@ -59,8 +59,8 @@ export namespace UEBabyPram::InsightParser
 		std::chrono::minutes minutes = std::chrono::minutes::zero();
 		DurationT seconds = DurationT::zero();
 		DisplayDuration(DurationT duration)
-			: minutes(std::chrono::duration_cast<std::chrono::minutes>(minutes))
 		{
+			minutes = std::chrono::duration_cast<std::chrono::minutes>(duration);
 			seconds = duration - minutes;
 		}
 	};
@@ -80,6 +80,12 @@ export namespace UEBabyPram::InsightParser
 	protected:
 		struct ThreadList
 		{
+			ThreadList(ThreadSystemID thread_id, std::size_t fast_check_point_count) :
+				thread_system_id(thread_id), fast_check_point_count(fast_check_point_count)
+			{ }
+			ThreadList(ThreadList const& list) = default;
+			ThreadList(ThreadList&&) = default;
+
 			ThreadSystemID thread_system_id;
 			struct Event
 			{
@@ -88,8 +94,10 @@ export namespace UEBabyPram::InsightParser
 			};
 			std::vector<Event> events;
 			std::vector<DurationT> fast_check_point;
-			std::size_t FastLocateFirstEventIndex(DurationT target_point, std::size_t fast_check_point_count) const;
+			std::size_t FastLocateFirstEventIndex(DurationT target_point) const;
 			std::size_t LocateFirstEventIndex(DurationT target_point, std::size_t index_offset) const;
+			Static GetContextSwitchStatic(Potato::Misc::IndexSpan<DurationT> time_range) const;
+			const std::size_t fast_check_point_count;
 		};
 		std::unordered_map<ThreadSystemID, ThreadList> thread_list;
 		const std::size_t fast_check_point_count = 300;
