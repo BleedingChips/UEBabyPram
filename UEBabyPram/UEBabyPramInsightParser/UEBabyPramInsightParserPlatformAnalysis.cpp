@@ -18,7 +18,7 @@ namespace UEBabyPram::InsightParser
 	{
 		auto& Builder = Context.InterfaceBuilder;
 
-		if (Parser.IsContextSwitchRequired())
+		if (Parser.IsParserRequire(ParserRequireFlag::CONTEXT_SWITCH))
 		{
 			//Builder.RouteEvent(RouteId_Settings, "PlatformEvent", "Settings");
 			Builder.RouteEvent(RouteId_ContextSwitch, "PlatformEvent", "ContextSwitch");

@@ -23,12 +23,20 @@ namespace UEBabyPram::InsightParser
 		EventData
 	};
 
+	enum class ParserRequireFlag : std::size_t
+	{
+		CPU_EVENT = 1 << 1,
+		EVENT_SPEC = 1 << 2,
+		CONTEXT_SWITCH = 1 << 3,
+		META_DATA,
+	};
+
 	struct BaseParser
 	{
 		static uint32 GetInvalidMetadataSpecId() { return (uint32)-1; }
 		virtual uint32 AddMetaDataLayout(wchar_t const* format, wchar_t const* const* field_names, std::size_t field_names_len) { return 0; }
-		virtual bool IsThreadRequired(uint32 thread_id) const { return true; }
-		virtual bool IsContextSwitchRequired() const { return false; }
+		virtual bool IsThreadRequire(uint32 thread_id) const { return true; }
+		virtual bool IsParserRequire(ParserRequireFlag mask) const { return true; }
 		virtual void ContextSwitchEvent(uint32 thread_id, uint32 active_core, double active_start_time, double active_end_time) {}
 		virtual void OnThreadDiscoverd(uint32 thread_id, uint32 thread_system_id, char const* thread_name, std::size_t thread_name_len) {}
 		virtual void OnCPUEventDiscoverd(uint32 space_id, wchar_t const* event_name, std::size_t event_name_len, wchar_t const* file, std::size_t file_name_len, std::size_t line) { }

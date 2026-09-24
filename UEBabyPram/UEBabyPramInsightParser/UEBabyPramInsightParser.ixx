@@ -197,9 +197,8 @@ export namespace UEBabyPram::InsightParser
 
 	struct ParserInterface : private BaseParser
 	{
-		virtual bool IsThreadRequired(std::string_view thread_name) const { return true; }
-		virtual bool IsContextSwitchRequired() const override { return false; }
-		virtual void ContextSwitchEvent(ThreadSystemID thread_id, uint32 core_name, Potato::Misc::IndexSpan<DurationT> duration) {}
+		virtual bool IsParserRequire(ParserRequireFlag flag) const override { return true; }
+		virtual void ContextSwitchEvent(ThreadSystemID thread_id, std::size_t core_name, Potato::Misc::IndexSpan<DurationT> duration) {}
 		virtual void OnThreadDiscoverd(ThreadID thread_id, ThreadSystemID thread_system_id, std::string_view thread_name) {}
 		virtual void OnCPUStackTree(ThreadCPUEventView event_scope) {}
 		virtual void OnCPUEventDiscoverd(EventID id, std::wstring_view event_name, std::wstring_view file_name, std::size_t file_line) {}

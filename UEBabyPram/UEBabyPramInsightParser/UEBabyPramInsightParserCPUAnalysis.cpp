@@ -38,16 +38,31 @@ namespace UEBabyPram::InsightParser
 	{
 		auto& Builder = Context.InterfaceBuilder;
 
-		Builder.RouteEvent(RouteId_EventSpec, "CpuProfiler", "EventSpec");
+		if (Parser.IsParserRequire(ParserRequireFlag::EVENT_SPEC))
+		{
+			Builder.RouteEvent(RouteId_EventSpec, "CpuProfiler", "EventSpec");
+		}
+		
 		Builder.RouteEvent(RouteId_EndThread, "CpuProfiler", "EndThread");
-		Builder.RouteEvent(RouteId_EventBatchV3, "CpuProfiler", "EventBatchV3"); // added in UE 5.6
-		Builder.RouteEvent(RouteId_EventBatchV2, "CpuProfiler", "EventBatchV2"); // backward compatibility, added in UE 5.1, removed in 5.6
-		Builder.RouteEvent(RouteId_EventBatch, "CpuProfiler", "EventBatch"); // backward compatibility; removed in UE 5.1
-		Builder.RouteEvent(RouteId_EndCapture, "CpuProfiler", "EndCapture"); // backward compatibility; removed in UE 5.1
-		Builder.RouteEvent(RouteId_MetadataSpec, "CpuProfiler", "MetadataSpec");
-		Builder.RouteEvent(RouteId_Metadata, "CpuProfiler", "Metadata");
 
-		Builder.RouteLoggerEvents(RouteId_CpuScope, "Cpu", true); // scoped trace events
+		if (Parser.IsParserRequire(ParserRequireFlag::CPU_EVENT))
+		{
+			Builder.RouteEvent(RouteId_EventBatchV3, "CpuProfiler", "EventBatchV3"); // added in UE 5.6
+			Builder.RouteEvent(RouteId_EventBatchV2, "CpuProfiler", "EventBatchV2"); // backward compatibility, added in UE 5.1, removed in 5.6
+			Builder.RouteEvent(RouteId_EventBatch, "CpuProfiler", "EventBatch"); // backward compatibility; removed in UE 5.1
+			Builder.RouteEvent(RouteId_EndCapture, "CpuProfiler", "EndCapture"); // backward compatibility; removed in UE 5.1
+		}
+
+		if (Parser.IsParserRequire(ParserRequireFlag::META_DATA))
+		{
+			Builder.RouteEvent(RouteId_MetadataSpec, "CpuProfiler", "MetadataSpec");
+			Builder.RouteEvent(RouteId_Metadata, "CpuProfiler", "Metadata");
+		}
+
+		if (Parser.IsParserRequire(ParserRequireFlag::CPU_EVENT))
+		{
+			Builder.RouteLoggerEvents(RouteId_CpuScope, "Cpu", true); // scoped trace events
+		}
 	}
 
 	////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -112,7 +127,7 @@ namespace UEBabyPram::InsightParser
 		case RouteId_EndThread:
 		{
 			const uint32 ThreadId = TraceServices::FTraceAnalyzerUtils::GetThreadIdField(Context);
-			if (!Parser.IsThreadRequired(ThreadId))
+			if (!Parser.IsThreadRequire(ThreadId))
 			{
 				return true;
 			}
@@ -147,7 +162,7 @@ namespace UEBabyPram::InsightParser
 		case RouteId_EventBatchV2: // backward compatibility
 		{
 			const uint32 ThreadId = Context.ThreadInfo.GetId();
-			if (!Parser.IsThreadRequired(ThreadId))
+			if (!Parser.IsThreadRequire(ThreadId))
 			{
 				return true;
 			}
@@ -175,7 +190,7 @@ namespace UEBabyPram::InsightParser
 		case RouteId_EndCapture: // backward compatibility
 		{
 			const uint32 ThreadId = TraceServices::FTraceAnalyzerUtils::GetThreadIdField(Context);
-			if (!Parser.IsThreadRequired(ThreadId))
+			if (!Parser.IsThreadRequire(ThreadId))
 			{
 				return true;
 			}

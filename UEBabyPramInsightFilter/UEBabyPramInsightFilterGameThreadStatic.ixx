@@ -20,18 +20,19 @@ export namespace UEBabyPram::InsightFilter
 		void OnThreadDiscoverd(ThreadID thread_id, ThreadSystemID thread_system_id, std::string_view thread_name);
 		void OnCPUEventDiscoverd(EventID id, std::wstring_view event_name, std::wstring_view file_name, std::size_t file_line);
 		void OnCPUStackTree(ThreadCPUEventView event_scope) override;
-		void ContextSwitchEvent(ThreadSystemID thread_id, uint32 core_name, Potato::Misc::IndexSpan<DurationT> duration) override;
+		void ContextSwitchEvent(ThreadSystemID thread_id, std::size_t core_name, Potato::Misc::IndexSpan<DurationT> duration) override;
 		virtual bool IsThreadRequired(ThreadID thread_id) const override;
-		virtual bool IsContextSwitchRequired() const override { return true; }
+		virtual bool IsParserRequired(ParserRequireFlag flag) const { return true; }
+		virtual void AllAnalyzeDone();
 		bool PrintToLog(std::pmr::wstring& out_string) override;
 		GameThreadStatic();
+	
 	protected:
 
 		struct EventIDRecord
 		{
 			DurationT duration = DurationT::zero();
-			std::size_t frame_index = 0;
-			std::vector<ThreadCPUEvent> event_ids;
+			Potato::Misc::IndexSpan<DurationT> time_range;
 		};
 
 		std::vector<EventIDRecord> event_records;

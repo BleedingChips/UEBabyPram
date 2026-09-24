@@ -68,10 +68,11 @@ namespace UEBabyPram::InsightFilter
 				{
 					EventIDRecord records;
 					records.duration = duration;
-					records.frame_index = total_count;
-					records.event_ids.insert(records.event_ids.end(), event_scope.view.begin(), event_scope.view.end());
+					//records.event_ids.insert(records.event_ids.end(), event_scope.view.begin(), event_scope.view.end());
+					records.time_range = *event_scope.GetTimeRange();
 					event_records.push_back(std::move(records));
 
+					/*
 					std::sort(event_records.begin(), event_records.end(), [](const EventIDRecord& a, const EventIDRecord& b) {
 						return a.duration > b.duration;
 						});
@@ -80,13 +81,20 @@ namespace UEBabyPram::InsightFilter
 					{
 						event_records.pop_back();
 					}
-
+					*/
 					min_duration = event_records.rbegin()->duration;
 				}
 				total_count += 1;
 				total_time += duration;
 			}
 		}
+	}
+
+	void GameThreadStatic::AllAnalyzeDone()
+	{
+		std::sort(event_records.begin(), event_records.end(), [](const EventIDRecord& a, const EventIDRecord& b) {
+			return a.duration > b.duration;
+			});
 	}
 
 	bool GameThreadStatic::PrintToLog(std::pmr::wstring& out_string)
@@ -98,7 +106,7 @@ namespace UEBabyPram::InsightFilter
 
 		std::format_to(
 			std::back_insert_iterator{ out_string },
-			L"\tTotal GameThread Time: <{}s>, Total GameFram :<{}>, Avg GameThread Time: <{}s>\n",
+			L"   Total GameThread Time: <{}s>, Total GameFram :<{}>, Avg GameThread Time: <{}s>\n",
 			total_time.count(),
 			total_count,
 			total_time.count() / total_count
@@ -106,7 +114,7 @@ namespace UEBabyPram::InsightFilter
 
 		std::format_to(
 			std::back_insert_iterator{ out_string },
-			L"\tFps: [{:.2f}%]>=120Fps, [{:.2f}%]>=60Fps, [{:.2f}%]>=30Fps, [{:.2f}%]>=15Fps, [{:.2f}%]<15FPS \n",
+			L"    Fps: [{:.2f}%]>=120Fps, [{:.2f}%]>=60Fps, [{:.2f}%]>=30Fps, [{:.2f}%]>=15Fps, [{:.2f}%]<15FPS \n",
 			fps_frame_record[0] / static_cast<double>(total_count) * 100.0,
 			fps_frame_record[1] / static_cast<double>(total_count) * 100.0,
 			fps_frame_record[2] / static_cast<double>(total_count) * 100.0,
@@ -116,20 +124,18 @@ namespace UEBabyPram::InsightFilter
 
 		std::format_to(
 			std::back_insert_iterator{ out_string },
-			L"\tTop <{}> GameThread :\n",
+			L"    Top <{}> GameThread :\n",
 			max_record_frame
 		);
 
 		std::size_t count = 0;
 
-
-
 		for (auto& ite : event_records)
 		{
 			++count;
-			ThreadCPUEventView view;
-			view.view = std::span(ite.event_ids.data(), ite.event_ids.size());
-			auto range = *view.GetTimeRange();
+			//ThreadCPUEventView view;
+			//view.view = std::span(ite.event_ids.data(), ite.event_ids.size());
+			auto range = ite.time_range;
 
 			auto context_switch_static = context_switch_list.GetContextSwitchStatic(game_frame_thread_system_id, range);
 
@@ -138,7 +144,7 @@ namespace UEBabyPram::InsightFilter
 
 			std::format_to(
 				std::back_insert_iterator{ out_string },
-				L"\t{:}. \tTotalDuration:<{:.3f}ms>, ContextSwitchTime:<{:.3f}ms> \tTimeRange: [{:}m{:.6f}s, {}m{:.6f}s]\n",
+				L"      {:}. TotalDuration:<{:.3f}ms>, ContextSwitchTime:<{:.3f}ms>, TimeRange: [{:}m{:.6f}s, {}m{:.6f}s]\n",
 				count,
 				std::chrono::duration_cast<
 					std::chrono::duration<double, std::milli>
@@ -156,7 +162,7 @@ namespace UEBabyPram::InsightFilter
 		return true;
 	}
 
-	void GameThreadStatic::ContextSwitchEvent(ThreadSystemID thread_id, uint32 core_name, Potato::Misc::IndexSpan<DurationT> duration)
+	void GameThreadStatic::ContextSwitchEvent(ThreadSystemID thread_id, std::size_t core_name, Potato::Misc::IndexSpan<DurationT> duration)
 	{
 		context_switch_list.AddContextSwitchEvent(thread_id, core_name, duration);
 	}
