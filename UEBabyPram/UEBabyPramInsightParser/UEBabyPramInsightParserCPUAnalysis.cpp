@@ -53,7 +53,7 @@ namespace UEBabyPram::InsightParser
 			Builder.RouteEvent(RouteId_EndCapture, "CpuProfiler", "EndCapture"); // backward compatibility; removed in UE 5.1
 		}
 
-		if (Parser.IsParserRequire(ParserRequireFlag::META_DATA))
+		if (Parser.IsParserRequire(ParserRequireFlag::META_DATA) || true)
 		{
 			Builder.RouteEvent(RouteId_MetadataSpec, "CpuProfiler", "MetadataSpec");
 			Builder.RouteEvent(RouteId_Metadata, "CpuProfiler", "Metadata");
@@ -688,7 +688,10 @@ namespace UEBabyPram::InsightParser
 		}
 
 		uint32 SpecId = Context.EventData.GetTypeInfo().GetId();
+		auto new_spec = SpecId;
 		SpecId = ~SpecId; // to keep out of the way of normal spec IDs.
+
+
 
 		/*
 		uint32 TimerId;
@@ -813,6 +816,12 @@ namespace UEBabyPram::InsightParser
 
 	void CPUScopeAnalyzer::OnMetadataSpec(const FOnEventContext& Context)
 	{
+		const auto& EventData = Context.EventData;
+		uint32 SpecId = EventData.GetValue<uint32>("Id");
+
+		FString Name, NameFormat;
+		EventData.GetString("Name", Name);
+		EventData.GetString("NameFormat", NameFormat);
 		/*
 		const auto& EventData = Context.EventData;
 

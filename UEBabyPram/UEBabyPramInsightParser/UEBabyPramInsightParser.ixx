@@ -32,6 +32,8 @@ export namespace UEBabyPram::InsightParser
 		bool operator==(ThreadSystemID const&) const = default;
 	};
 
+	using DurationSec = std::chrono::duration<double, std::ratio<1, 1>>;
+
 }
 
 export namespace std
@@ -52,36 +54,43 @@ export namespace std
 export namespace UEBabyPram::InsightParser
 {
 	using UEBabyPram::InsightParser::DataResourceInterface;
-	using DurationT = std::chrono::duration<double, std::ratio<1, 1>>;
+	
 
 	struct DisplayDuration
 	{
 		std::chrono::minutes minutes = std::chrono::minutes::zero();
-		DurationT seconds = DurationT::zero();
-		DisplayDuration(DurationT duration)
-		{
-			minutes = std::chrono::duration_cast<std::chrono::minutes>(duration);
-			seconds = duration - minutes;
-		}
+		DurationSec seconds = DurationSec::zero();
+		DisplayDuration(DurationSec duration);
 	};
 
 	struct ContextSwitchEventList
 	{
-		void AddContextSwitchEvent(ThreadSystemID thread_id, std::size_t active_core, Potato::Misc::IndexSpan<DurationT> active_time);
 
-		struct Static
+		struct Config
 		{
-			DurationT active_time = DurationT::zero();
+			std::pmr::memory_resource* resource = std::pmr::get_default_resource();
+		};
+
+		void AddContextSwitchEvent(ThreadSystemID thread_id, std::size_t active_core, Potato::Misc::IndexSpan<DurationSec> active_time);
+		
+		struct Statis
+		{
+			DurationSec active_time = DurationSec::zero();
 			std::size_t switch_count = 0;
 		};
 
-		Static GetContextSwitchStatic(ThreadSystemID thread_id, Potato::Misc::IndexSpan<DurationT> time_range) const;
+		Statis GetContextSwitchStatis(ThreadSystemID thread_id, Potato::Misc::IndexSpan<DurationSec> time_range) const;
+
+		ContextSwitchEventList(Config config = {}) : resource(config.resource), thread_list(&resource) {}
 
 	protected:
+
+		std::pmr::unsynchronized_pool_resource resource;
+
 		struct ThreadList
 		{
-			ThreadList(ThreadSystemID thread_id, std::size_t fast_check_point_count) :
-				thread_system_id(thread_id), fast_check_point_count(fast_check_point_count)
+			ThreadList(ThreadSystemID thread_id, std::size_t fast_check_point_count, std::pmr::memory_resource* resource) :
+				thread_system_id(thread_id), fast_check_point_count(fast_check_point_count), events(resource), fast_check_point(resource)
 			{ }
 			ThreadList(ThreadList const& list) = default;
 			ThreadList(ThreadList&&) = default;
@@ -90,17 +99,69 @@ export namespace UEBabyPram::InsightParser
 			struct Event
 			{
 				std::size_t active_core = std::numeric_limits<std::size_t>::max();
-				Potato::Misc::IndexSpan<DurationT> active_time_range;
+				Potato::Misc::IndexSpan<DurationSec> active_time_range;
 			};
-			std::vector<Event> events;
-			std::vector<DurationT> fast_check_point;
-			std::size_t FastLocateFirstEventIndex(DurationT target_point) const;
-			std::size_t LocateFirstEventIndex(DurationT target_point, std::size_t index_offset) const;
-			Static GetContextSwitchStatic(Potato::Misc::IndexSpan<DurationT> time_range) const;
+			std::pmr::vector<Event> events;
+			std::pmr::vector<DurationSec> fast_check_point;
+			std::size_t FastLocateFirstEventIndex(DurationSec target_point) const;
+			std::size_t LocateFirstEventIndex(DurationSec target_point, std::size_t index_offset) const;
+			Statis GetContextSwitchStatis(Potato::Misc::IndexSpan<DurationSec> time_range) const;
 			const std::size_t fast_check_point_count;
 		};
-		std::unordered_map<ThreadSystemID, ThreadList> thread_list;
+		std::pmr::unordered_map<ThreadSystemID, ThreadList> thread_list;
 		const std::size_t fast_check_point_count = 300;
+	};
+
+	struct EventSpecManager
+	{
+		struct Config
+		{
+			std::size_t max_space_id_count = 8000;
+			bool need_file = true;
+			std::pmr::memory_resource* resource = std::pmr::get_default_resource();
+		};
+
+		EventSpecManager(Config config = {})
+			: string_storage(config.resource), events(config.resource), out_range_spec(config.resource), max_space_count(config.max_space_id_count), need_file(config.need_file)
+		{
+
+		}
+
+		EventSpecManager(EventSpecManager&&) = default;
+		EventSpecManager(EventSpecManager const&) = default;
+
+		struct EventSpecView
+		{
+			EventID id;
+			std::wstring_view name_view = L"UnknowSpecId";
+			std::wstring_view file_view;
+			std::size_t line = 0;
+			operator bool() const { return id; }
+		};
+
+		EventSpecView GetEventSpec(EventID id) const;
+
+		bool AddEvent(EventID id, std::wstring_view event_name, std::wstring_view file, std::size_t line);
+
+	protected:
+
+		struct Spec
+		{
+			EventID id;
+			Potato::Misc::IndexSpan<> name_index;
+			std::wstring_view debug_name_view;
+			Potato::Misc::IndexSpan<> file_index;
+			std::wstring_view debug_file;
+			std::size_t line;
+		};
+
+		const bool need_file;
+		const std::size_t max_space_count;
+		std::pmr::wstring string_storage;
+
+		std::pmr::vector<Spec> events;
+		std::pmr::unordered_map<EventID, Spec> out_range_spec;
+
 	};
 
 	struct DcomentWrapper : public UEBabyPram::InsightParser::DataResourceInterface
@@ -117,7 +178,7 @@ export namespace UEBabyPram::InsightParser
 	struct ThreadCPUEvent
 	{
 		EventID event_id;
-		DurationT time;
+		DurationSec time;
 		std::size_t depth;
 	};
 
@@ -133,7 +194,7 @@ export namespace UEBabyPram::InsightParser
 			EventID event_id;
 			std::size_t index_offset = std::numeric_limits<std::size_t>::max();
 			std::size_t depth;
-			DurationT time_point;
+			DurationSec time_point;
 			operator bool() const { return index_offset != std::numeric_limits<std::size_t>::max(); }
 		};
 
@@ -152,7 +213,7 @@ export namespace UEBabyPram::InsightParser
 		{
 			EventID event_id;
 			Potato::Misc::IndexSpan<> index_range;
-			Potato::Misc::IndexSpan<DurationT> time_range;
+			Potato::Misc::IndexSpan<DurationSec> time_range;
 			std::size_t depth = std::numeric_limits<std::size_t>::max();
 			operator bool() const { return event_id; }
 		};
@@ -164,14 +225,22 @@ export namespace UEBabyPram::InsightParser
 		
 		EventView FindNextEvent(std::span<EventID const> event_id_span, Potato::Misc::IndexSpan<> index_range) const;
 
-		std::optional<DurationT> GetExcludeTime(EventView view) const;
+		struct ExcludeTimeStatis
+		{
+			DurationSec active_time = DurationSec::zero();
+			DurationSec active_time_without_context_switch = DurationSec::zero();
+			std::size_t context_switch_count = 0;
+		};
+
+		std::optional<ExcludeTimeStatis> GetExcludeTime(EventView view) const;
+		std::optional<ExcludeTimeStatis> GetExcludeTime(EventView view, ContextSwitchEventList const& list) const;
 
 		EventID GetTopEvent() const;
 		
-		std::optional<Potato::Misc::IndexSpan<DurationT>> GetTimeRange() const {
+		std::optional<Potato::Misc::IndexSpan<DurationSec>> GetTimeRange() const {
 			if (view.size() > 0)
 			{
-				return Potato::Misc::IndexSpan<DurationT>{ view.begin()->time, view.rbegin()->time };
+				return Potato::Misc::IndexSpan<DurationSec>{ view.begin()->time, view.rbegin()->time };
 			}
 			return std::nullopt;
 		}
@@ -190,7 +259,7 @@ export namespace UEBabyPram::InsightParser
 		std::optional<std::size_t> frame_id;
 		std::size_t depth = 0;
 		std::vector<ThreadCPUEvent> stacks;
-		DurationT last_time = DurationT::zero();
+		DurationSec last_time = DurationSec::zero();
 		ParserInterface& reference;
 		~ParserThreadTimeLine();
 	};
@@ -198,7 +267,7 @@ export namespace UEBabyPram::InsightParser
 	struct ParserInterface : private BaseParser
 	{
 		virtual bool IsParserRequire(ParserRequireFlag flag) const override { return true; }
-		virtual void ContextSwitchEvent(ThreadSystemID thread_id, std::size_t core_name, Potato::Misc::IndexSpan<DurationT> duration) {}
+		virtual void ContextSwitchEvent(ThreadSystemID thread_id, std::size_t core_name, Potato::Misc::IndexSpan<DurationSec> duration) {}
 		virtual void OnThreadDiscoverd(ThreadID thread_id, ThreadSystemID thread_system_id, std::string_view thread_name) {}
 		virtual void OnCPUStackTree(ThreadCPUEventView event_scope) {}
 		virtual void OnCPUEventDiscoverd(EventID id, std::wstring_view event_name, std::wstring_view file_name, std::size_t file_line) {}
@@ -243,7 +312,7 @@ export namespace UEBabyPram::InsightParser
 		//virtual uint32 AddMetaData(uint32 event_id, MetaDataFormat format, uint8 const* data, std::size_t meta_data_len, uint32 thread_id) override;
 		//virtual void SetMetadata(uint32 MetaDataId, MetaDataFormat format, uint8 const* meta_data, std::size_t meta_data_len, uint32 TimerId, uint32 ThreadId) override;
 		virtual void ContextSwitchEvent(uint32 thread_id, uint32 active_core, double active_start_time, double active_end_time) override {
-			return ContextSwitchEvent(ThreadSystemID{ thread_id }, active_core, Potato::Misc::IndexSpan<DurationT>{DurationT{ active_start_time }, DurationT{ active_end_time }});
+			return ContextSwitchEvent(ThreadSystemID{ thread_id }, active_core, Potato::Misc::IndexSpan<DurationSec>{DurationSec{ active_start_time }, DurationSec{ active_end_time }});
 		}
 
 		virtual void OnThreadDiscoverd(uint32 thread_id, uint32 thread_system_id, char const* thread_name, std::size_t thread_name_len) override;

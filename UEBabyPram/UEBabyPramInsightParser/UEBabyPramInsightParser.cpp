@@ -5,9 +5,16 @@ module UEBabyPramInsightParser;
 
 namespace UEBabyPram::InsightParser
 {
+
+	DisplayDuration::DisplayDuration(DurationSec duration)
+	{
+		minutes = std::chrono::duration_cast<std::chrono::minutes>(duration);
+		seconds = duration - minutes;
+	}
+
 	void ParserThreadTimeLine::AppendBeginEvent(double start_time, std::uint32_t event_id)
 	{
-		auto start_time_duration = DurationT{ start_time };
+		auto start_time_duration = DurationSec{ start_time };
 		stacks.emplace_back(
 			EventID{ event_id },
 			start_time_duration,
@@ -19,7 +26,7 @@ namespace UEBabyPram::InsightParser
 
 	void ParserThreadTimeLine::AppendEndEvent(double end_time)
 	{
-		DurationT current_time = DurationT{ end_time };
+		DurationSec current_time = DurationSec{ end_time };
 		if (end_time == std::numeric_limits<double>::infinity())
 		{
 			current_time = last_time;
@@ -43,21 +50,133 @@ namespace UEBabyPram::InsightParser
 				std::span(stacks.data(), stacks.size())
 				});
 			stacks.clear();
-			last_time = DurationT::zero();
+			last_time = DurationSec::zero();
 		}
 	}
 
 	ParserThreadTimeLine::~ParserThreadTimeLine()
 	{
-		//assert(depth == 0);
+		assert(depth == 0);
 	}
 
-	void ContextSwitchEventList::AddContextSwitchEvent(ThreadSystemID thread_id, std::size_t active_core, Potato::Misc::IndexSpan<DurationT> active_time)
+	auto EventSpecManager::GetEventSpec(EventID id) const ->EventSpecView
+	{
+		if (id)
+		{
+			if (id.id < max_space_count)
+			{
+				if (id.id < events.size())
+				{
+					auto& ref = events[id.id];
+					EventSpecView view;
+					view.id = ref.id;
+					view.line = ref.line;
+					view.name_view = ref.name_index.Slice(std::wstring_view{ string_storage });
+					view.file_view = ref.file_index.Slice(std::wstring_view{ string_storage });
+					return view;
+				}
+			}
+			else {
+				auto find = out_range_spec.find(id);
+				if (find != out_range_spec.end())
+				{
+					EventSpecView view;
+					view.id = find->second.id;
+					view.line = find->second.line;
+					view.name_view = find->second.name_index.Slice(std::wstring_view{ string_storage });
+					view.file_view = find->second.file_index.Slice(std::wstring_view{ string_storage });
+					return view;
+				}
+			}
+		}
+		return {};
+	}
+
+	bool EventSpecManager::AddEvent(EventID id, std::wstring_view event_name, std::wstring_view file, std::size_t line)
+	{
+		if (id)
+		{
+			auto old_string_index = string_storage.size();
+			auto old_data = string_storage.data();
+			if (id.id < max_space_count)
+			{
+				if (events.size() < id.id + 1)
+				{
+					events.resize(id.id + 1);
+				}
+				auto& ref = events[id.id];
+				if (ref.id)
+				{
+					return false;
+				}
+				else {
+					string_storage.append(event_name);
+					auto new_string_index = string_storage.size();
+					if (need_file)
+					{
+						string_storage.append(file);
+						ref.line = line;
+					}
+					auto new_file_index = string_storage.size();
+					ref.id = id;
+					ref.name_index = { old_string_index, new_string_index };
+					ref.file_index = { new_string_index, new_file_index };
+					ref.debug_name_view = ref.name_index.Slice(std::wstring_view{ string_storage });
+					ref.debug_file = ref.file_index.Slice(std::wstring_view{ string_storage });
+				}
+			}
+			else {
+				Spec spec;
+				spec.id = id;
+				spec.line = line;
+				auto re = out_range_spec.insert(std::pair(id, spec));
+				if (re.second)
+				{
+					string_storage.append(event_name);
+					auto new_string_index = string_storage.size();
+					if (need_file)
+					{
+						string_storage.append(file);
+						re.first->second.line = line;
+					}
+					auto new_file_index = string_storage.size();
+					re.first->second.name_index = { old_string_index, new_string_index };
+					re.first->second.file_index = { new_string_index, new_file_index };
+					re.first->second.debug_name_view = re.first->second.name_index.Slice(std::wstring_view{ string_storage });
+					re.first->second.debug_file = re.first->second.file_index.Slice(std::wstring_view{ string_storage });
+				}
+			}
+			auto new_data = string_storage.data();
+			if (old_data != new_data)
+			{
+				for (auto& ite : events)
+				{
+					if (ite.id)
+					{
+						ite.debug_file = ite.file_index.Slice(std::wstring_view{ string_storage });
+						ite.debug_name_view = ite.name_index.Slice(std::wstring_view{ string_storage });
+					}
+				}
+
+				for (auto& ite : out_range_spec)
+				{
+					if (ite.first)
+					{
+						ite.second.debug_file = ite.second.file_index.Slice(std::wstring_view{ string_storage });
+						ite.second.debug_name_view = ite.second.name_index.Slice(std::wstring_view{ string_storage });
+					}
+				}
+			}
+		}
+		return false;
+	}
+
+	void ContextSwitchEventList::AddContextSwitchEvent(ThreadSystemID thread_id, std::size_t active_core, Potato::Misc::IndexSpan<DurationSec> active_time)
 	{
 		auto find = thread_list.find(thread_id);
 		if (find == thread_list.end())
 		{
-			ThreadList list{thread_id, fast_check_point_count};
+			ThreadList list{thread_id, fast_check_point_count, &resource};
 			list.thread_system_id = thread_id;
 			find = std::get<0>(thread_list.insert(std::pair(thread_id, std::move(list))));
 		}
@@ -68,7 +187,7 @@ namespace UEBabyPram::InsightParser
 		}
 	}
 
-	std::size_t ContextSwitchEventList::ThreadList::FastLocateFirstEventIndex(DurationT target_point) const
+	std::size_t ContextSwitchEventList::ThreadList::FastLocateFirstEventIndex(DurationSec target_point) const
 	{
 		std::size_t start_index = 0;
 		for (; start_index < fast_check_point.size(); ++start_index)
@@ -78,7 +197,7 @@ namespace UEBabyPram::InsightParser
 		}
 		return start_index * fast_check_point_count;
 	}
-	std::size_t ContextSwitchEventList::ThreadList::LocateFirstEventIndex(DurationT target_point, std::size_t index_offset) const
+	std::size_t ContextSwitchEventList::ThreadList::LocateFirstEventIndex(DurationSec target_point, std::size_t index_offset) const
 	{
 		for (; index_offset < events.size(); ++index_offset)
 		{
@@ -90,16 +209,16 @@ namespace UEBabyPram::InsightParser
 		return index_offset;
 	}
 
-	auto ContextSwitchEventList::ThreadList::GetContextSwitchStatic(Potato::Misc::IndexSpan<DurationT> time_range) const ->Static
+	auto ContextSwitchEventList::ThreadList::GetContextSwitchStatis(Potato::Misc::IndexSpan<DurationSec> time_range) const ->Statis
 	{
 		auto fast_start = FastLocateFirstEventIndex(time_range.Begin());
 		auto start = LocateFirstEventIndex(time_range.Begin(), fast_start);
 		auto end = LocateFirstEventIndex(time_range.End(), start);
 
 		std::size_t active_count = 0;
-		DurationT active_time = DurationT::zero();
+		DurationSec active_time = DurationSec::zero();
 
-		DurationT overlapping_time = DurationT::zero();
+		DurationSec overlapping_time = DurationSec::zero();
 
 		auto start_time = events[start].active_time_range.Begin();
 		auto end_time_range = events[end].active_time_range;
@@ -113,10 +232,10 @@ namespace UEBabyPram::InsightParser
 			overlapping_time += end_time_range.Size();
 		}
 		else {
-			overlapping_time += time_range.End() - end_time_range.Begin();
+			overlapping_time += end_time_range.End() - time_range.End();
 		}
 
-		auto total_duration = DurationT::zero();
+		auto total_duration = DurationSec::zero();
 
 		for (auto i : Potato::Misc::IndexSpan<>(start, end + 1))
 		{
@@ -125,19 +244,21 @@ namespace UEBabyPram::InsightParser
 
 		total_duration -= overlapping_time;
 
-		return Static{
+		assert(total_duration.count() >= 0.0);
+
+		return Statis{
 			total_duration,
 			active_count
 		};
 
 	}
 
-	auto ContextSwitchEventList::GetContextSwitchStatic(ThreadSystemID thread_id, Potato::Misc::IndexSpan<DurationT> time_range) const ->Static
+	auto ContextSwitchEventList::GetContextSwitchStatis(ThreadSystemID thread_id, Potato::Misc::IndexSpan<DurationSec> time_range) const ->Statis
 	{
 		auto find = thread_list.find(thread_id);
 		if (find != thread_list.end())
 		{
-			return find->second.GetContextSwitchStatic(time_range);
+			return find->second.GetContextSwitchStatis(time_range);
 		}
 		return {};
 	}
@@ -148,7 +269,7 @@ namespace UEBabyPram::InsightParser
 		for (std::size_t index = index_range.Begin(); index < end; ++index)
 		{
 			auto& ref = view[index];
-			if (std::find(event_ids.begin(), event_ids.end(), ref.event_id) != event_ids.end())
+			if (std::find(event_ids.begin(), event_ids.end(), ref.event_id) != event_ids.end() || (event_ids.empty() && ref.event_id))
 			{
 				return FindResult{ ref.event_id, index, ref.depth, ref.time };
 			}
@@ -199,22 +320,74 @@ namespace UEBabyPram::InsightParser
 		};
 	}
 
-	std::optional<DurationT> ThreadCPUEventView::GetExcludeTime(EventView view) const
+	auto ThreadCPUEventView::GetExcludeTime(EventView view) const -> std::optional<ExcludeTimeStatis>
 	{
 		if (view)
 		{
-			auto child_durations = DurationT::zero();
-			auto target_depth = view.depth + 1;
+			DurationSec start_point = view.time_range.Begin();
+
+			DurationSec exclude_time = DurationSec::zero();
+
 			std::size_t offset = view.index_range.Begin() + 1;
 			while (true)
 			{
-				auto next_depth = FindFirstDepth(target_depth, offset);
-				if (!next_depth)
-					return view.time_range.Size() - child_durations;
-				auto next_end_depth = FindFirstDepth(target_depth, next_depth.index_offset + 1);
-				assert(next_end_depth);
-				child_durations += next_end_depth.time_point - next_depth.time_point;
-				offset = next_end_depth.index_offset + 1;
+				auto child_event = FindNextEvent({}, { offset, view.index_range.End() });
+
+				if (!child_event)
+				{
+					assert(start_point <= view.time_range.End());
+					exclude_time +=  Potato::Misc::IndexSpan<DurationSec>{ start_point, view.time_range.End() }.Size();
+					return ExcludeTimeStatis{ exclude_time, exclude_time, 1 };
+				}
+
+				assert(start_point <= child_event.time_range.Begin());
+
+				exclude_time += Potato::Misc::IndexSpan<DurationSec>{ start_point, child_event.time_range.Begin() }.Size();
+
+				start_point = child_event.time_range.End();
+
+				offset = child_event.index_range.End();
+			}
+		}
+		return std::nullopt;
+	}
+
+	auto ThreadCPUEventView::GetExcludeTime(EventView view, ContextSwitchEventList const& list) const -> std::optional<ExcludeTimeStatis>
+	{
+		if (view)
+		{
+			DurationSec start_point = view.time_range.Begin();
+
+			DurationSec exclude_time = DurationSec::zero();
+			DurationSec exclude_time_remove_context_switch = DurationSec::zero();
+			std::size_t context_switch_count = 0;
+
+			std::size_t offset = view.index_range.Begin() + 1;
+			while (true)
+			{
+				auto child_event = FindNextEvent({}, { offset, view.index_range.End() });
+
+				if (!child_event)
+				{
+					assert(start_point <= view.time_range.End());
+					exclude_time += Potato::Misc::IndexSpan<DurationSec>{ start_point, view.time_range.End() }.Size();
+					auto statis = list.GetContextSwitchStatis(system_thread_id, { start_point, view.time_range.End() });
+					assert(statis.active_time.count() >= 0.0);
+					exclude_time_remove_context_switch += statis.active_time;
+					context_switch_count += statis.switch_count;
+					return ExcludeTimeStatis{ exclude_time, exclude_time_remove_context_switch, context_switch_count};
+				}
+
+				assert(start_point <= child_event.time_range.Begin());
+				exclude_time += Potato::Misc::IndexSpan<DurationSec>{ start_point, child_event.time_range.Begin() }.Size();
+				auto statis = list.GetContextSwitchStatis(system_thread_id, { start_point, child_event.time_range.Begin() });
+				assert(statis.active_time.count() >= 0.0);
+				exclude_time_remove_context_switch += statis.active_time;
+				context_switch_count += statis.switch_count;
+
+				start_point = child_event.time_range.End();
+
+				offset = child_event.index_range.End();
 			}
 		}
 		return std::nullopt;

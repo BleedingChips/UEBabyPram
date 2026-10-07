@@ -27,8 +27,10 @@ namespace UEBabyPram::InsightParser
 		FPlatformEventTraceAnalyzer platform_event_analyzer{ parser };
 		//TSharedPtr<TraceServices::IAnalysisSession> Session = TraceServices::CreateAnalysisSession(0, nullptr, {});
 
+
+		//TraceServices::FTimingProfilerProvider provider{*Session };
 		//FSummarizeCpuProfilerProvider CpuProfilerProvider;
-		//TSharedPtr<UE::Trace::IAnalyzer> CpuProfilerAnalyzer = TraceServices::CreateCpuProfilerAnalyzer(*Session, CpuProfilerProvider, CpuProfilerProvider);
+		//TSharedPtr<UE::Trace::IAnalyzer> CpuProfilerAnalyzer = TraceServices::CreateCpuProfilerAnalyzer(*Session, FTimingProfilerProvider, FTimingProfilerProvider);
 
 		TArray<UE::Trace::IAnalyzer*> List = { &cpu_analyzer, &platform_event_analyzer };
 		UE::Trace::FMessageDelegate Delegate;
