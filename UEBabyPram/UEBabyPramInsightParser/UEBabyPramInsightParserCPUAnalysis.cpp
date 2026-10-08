@@ -688,8 +688,9 @@ namespace UEBabyPram::InsightParser
 		}
 
 		uint32 SpecId = Context.EventData.GetTypeInfo().GetId();
-		auto new_spec = SpecId;
 		SpecId = ~SpecId; // to keep out of the way of normal spec IDs.
+		FAnsiStringView NameStringView = Context.EventData.GetTypeInfo().GetName();
+		Parser.OnCPUScopeEventDiscoverd(SpecId, NameStringView.GetData(), NameStringView.Len());
 
 
 
@@ -816,12 +817,6 @@ namespace UEBabyPram::InsightParser
 
 	void CPUScopeAnalyzer::OnMetadataSpec(const FOnEventContext& Context)
 	{
-		const auto& EventData = Context.EventData;
-		uint32 SpecId = EventData.GetValue<uint32>("Id");
-
-		FString Name, NameFormat;
-		EventData.GetString("Name", Name);
-		EventData.GetString("NameFormat", NameFormat);
 		/*
 		const auto& EventData = Context.EventData;
 

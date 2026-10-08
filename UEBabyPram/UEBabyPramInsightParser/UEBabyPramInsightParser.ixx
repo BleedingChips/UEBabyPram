@@ -112,36 +112,38 @@ export namespace UEBabyPram::InsightParser
 		const std::size_t fast_check_point_count = 300;
 	};
 
-	struct EventSpecManager
+	struct SubEventSpecManager
 	{
 		struct Config
 		{
-			std::size_t max_space_id_count = 8000;
+			std::size_t max_vector_storage = 1000;
 			bool need_file = true;
 			std::pmr::memory_resource* resource = std::pmr::get_default_resource();
 		};
 
-		EventSpecManager(Config config = {})
-			: string_storage(config.resource), events(config.resource), out_range_spec(config.resource), max_space_count(config.max_space_id_count), need_file(config.need_file)
-		{
-
-		}
-
-		EventSpecManager(EventSpecManager&&) = default;
-		EventSpecManager(EventSpecManager const&) = default;
-
 		struct EventSpecView
 		{
 			EventID id;
-			std::wstring_view name_view = L"UnknowSpecId";
+			std::wstring_view name_view = L"UnknowEvent";
 			std::wstring_view file_view;
 			std::size_t line = 0;
 			operator bool() const { return id; }
 		};
 
-		EventSpecView GetEventSpec(EventID id) const;
+		SubEventSpecManager(Config config = {})
+			: events(config.resource), 
+			out_range_spec(config.resource), max_spec_count(config.max_vector_storage),
+			need_file(config.need_file)
+		{
+		}
 
-		bool AddEvent(EventID id, std::wstring_view event_name, std::wstring_view file, std::size_t line);
+		SubEventSpecManager(SubEventSpecManager const&) = default;
+		SubEventSpecManager(SubEventSpecManager&&) = default;
+
+		bool AddEvent(std::pmr::wstring& string_storage, EventID id, std::wstring_view event_name, std::wstring_view file, std::size_t line);
+		bool AddEvent(std::pmr::wstring& string_storage, EventID id, std::u8string_view event_name, std::wstring_view file, std::size_t line);
+		void RefreshDebugView(std::pmr::wstring& string_storage);
+		EventSpecView GetEventSpec(EventID id, std::pmr::wstring const& string_storage) const;
 
 	protected:
 
@@ -156,12 +158,49 @@ export namespace UEBabyPram::InsightParser
 		};
 
 		const bool need_file;
-		const std::size_t max_space_count;
-		std::pmr::wstring string_storage;
-
+		const std::size_t max_spec_count;
 		std::pmr::vector<Spec> events;
 		std::pmr::unordered_map<EventID, Spec> out_range_spec;
+	};
 
+	struct EventSpecManager
+	{
+
+		using EventSpecView = typename SubEventSpecManager::EventSpecView;
+
+		struct Config
+		{
+			std::size_t max_spec_count = 8000;
+			std::size_t max_meta_data_spec_count = 1000;
+			bool need_file = true;
+			std::pmr::memory_resource* resource = std::pmr::get_default_resource();
+		};
+
+		EventSpecManager(Config config = {})
+			: string_storage(config.resource),
+			events(
+				SubEventSpecManager::Config{ config.max_spec_count, config.need_file, config.resource }
+			),
+			metadata_events(
+				SubEventSpecManager::Config{ config.max_meta_data_spec_count, false, config.resource }
+			)
+		{
+
+		}
+
+		EventSpecManager(EventSpecManager&&) = default;
+		EventSpecManager(EventSpecManager const&) = default;
+
+		EventSpecView GetEventSpec(EventID id) const;
+
+		bool AddEvent(EventID id, std::wstring_view event_name, std::wstring_view file, std::size_t line);
+		bool AddEvent(EventID id, std::u8string_view event_name, std::wstring_view file, std::size_t line);
+
+	protected:
+
+		std::pmr::wstring string_storage;
+		SubEventSpecManager events;
+		SubEventSpecManager metadata_events;
 	};
 
 	struct DcomentWrapper : public UEBabyPram::InsightParser::DataResourceInterface
@@ -271,6 +310,7 @@ export namespace UEBabyPram::InsightParser
 		virtual void OnThreadDiscoverd(ThreadID thread_id, ThreadSystemID thread_system_id, std::string_view thread_name) {}
 		virtual void OnCPUStackTree(ThreadCPUEventView event_scope) {}
 		virtual void OnCPUEventDiscoverd(EventID id, std::wstring_view event_name, std::wstring_view file_name, std::size_t file_line) {}
+		virtual void OnCPUScopeEventDiscoverd(EventID id, std::u8string_view event_name) {}
 		virtual	void AllAnalyzeDone() override;
 		virtual bool IsThreadRequired(ThreadID thread_id) const { return true; }
 		static std::wstring_view CoverStringView(wchar_t const* ScopeName, std::size_t ScopeNameLen);
@@ -300,6 +340,13 @@ export namespace UEBabyPram::InsightParser
 		{
 			return OnCPUEventDiscoverd(
 				EventID{ space_id }, std::wstring_view{ event_name, event_name_len }, std::wstring_view{ file, file_name_len }, line
+			);
+		}
+
+		virtual void OnCPUScopeEventDiscoverd(uint32_t space_id, char const* event_name, std::size_t event_name_len) override
+		{
+			return OnCPUScopeEventDiscoverd(
+				EventID{ space_id }, std::u8string_view{ reinterpret_cast<char8_t const*>(event_name), event_name_len }
 			);
 		}
 

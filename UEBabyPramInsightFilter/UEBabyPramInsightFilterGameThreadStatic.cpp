@@ -14,7 +14,7 @@ namespace UEBabyPram::InsightFilter
 	};
 
 	GameThreadStatic::GameThreadStatic()
-		: event_records(&resource), context_switch_list(ContextSwitchEventList::Config{ &resource }), events_manager(EventSpecManager::Config{10000, false, &resource})
+		: event_records(&resource), context_switch_list(ContextSwitchEventList::Config{ &resource }), events_manager(EventSpecManager::Config{10000, 1000, false, &resource})
 	{
 		
 	}
@@ -37,6 +37,17 @@ namespace UEBabyPram::InsightFilter
 		events_manager.AddEvent(id, event_name, file_name, file_line);
 	}
 
+	void GameThreadStatic::OnCPUScopeEventDiscoverd(EventID id, std::u8string_view event_name)
+	{
+		if (events_manager.AddEvent(id, event_name, {}, 0))
+		{
+			if (event_name == u8"FEngineLoop::Tick")
+			{
+				tick_event_id.push_back(id);
+			}
+		}
+	}
+
 	bool GameThreadStatic::IsThreadRequired(ThreadID thread_id) const
 	{
 		if (game_frame_thread_id)
@@ -53,6 +64,7 @@ namespace UEBabyPram::InsightFilter
 			auto result = event_scope.FindNextEvent({ tick_event_id.data(), tick_event_id.size() });
 			if (result)
 			{
+
 				auto k = event_scope.GetExcludeTime(result);
 				auto duration = event_scope.GetTimeRange()->Size();
 
@@ -95,6 +107,7 @@ namespace UEBabyPram::InsightFilter
 	{
 		Parser::AllAnalyzeDone();
 
+		//double sampling_ratio = SamplingRatio;
 
 	}
 

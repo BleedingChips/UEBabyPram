@@ -40,6 +40,7 @@ namespace UEBabyPram::InsightParser
 		virtual void ContextSwitchEvent(uint32 thread_id, uint32 active_core, double active_start_time, double active_end_time) {}
 		virtual void OnThreadDiscoverd(uint32 thread_id, uint32 thread_system_id, char const* thread_name, std::size_t thread_name_len) {}
 		virtual void OnCPUEventDiscoverd(uint32 space_id, wchar_t const* event_name, std::size_t event_name_len, wchar_t const* file, std::size_t file_name_len, std::size_t line) { }
+		virtual void OnCPUScopeEventDiscoverd(uint32 space_id, char const* event_name, std::size_t event_name_len) { }
 		virtual void OverrideCPUEventLocation(uint32 event_id, wchar_t const* file_name, std::size_t file_name_len) {}
 		virtual void OverrideCPUEventName(uint32 event_id, wchar_t const* event_name, std::size_t event_name_len) {}
 		virtual ThreadTimeLineInterface* GetThreadTimeLine(uint32 thread_id) = 0;

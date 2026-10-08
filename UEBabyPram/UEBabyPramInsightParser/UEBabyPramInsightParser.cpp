@@ -59,11 +59,11 @@ namespace UEBabyPram::InsightParser
 		assert(depth == 0);
 	}
 
-	auto EventSpecManager::GetEventSpec(EventID id) const ->EventSpecView
+	auto SubEventSpecManager::GetEventSpec(EventID id, std::pmr::wstring const& string_storage) const ->EventSpecView
 	{
 		if (id)
 		{
-			if (id.id < max_space_count)
+			if (id.id < max_spec_count)
 			{
 				if (id.id < events.size())
 				{
@@ -92,13 +92,11 @@ namespace UEBabyPram::InsightParser
 		return {};
 	}
 
-	bool EventSpecManager::AddEvent(EventID id, std::wstring_view event_name, std::wstring_view file, std::size_t line)
+	bool SubEventSpecManager::AddEvent(std::pmr::wstring& string_storage, EventID id, std::wstring_view event_name, std::wstring_view file, std::size_t line)
 	{
 		if (id)
 		{
-			auto old_string_index = string_storage.size();
-			auto old_data = string_storage.data();
-			if (id.id < max_space_count)
+			if (id.id < max_spec_count)
 			{
 				if (events.size() < id.id + 1)
 				{
@@ -110,6 +108,7 @@ namespace UEBabyPram::InsightParser
 					return false;
 				}
 				else {
+					auto old_string_index = string_storage.size();
 					string_storage.append(event_name);
 					auto new_string_index = string_storage.size();
 					if (need_file)
@@ -123,6 +122,7 @@ namespace UEBabyPram::InsightParser
 					ref.file_index = { new_string_index, new_file_index };
 					ref.debug_name_view = ref.name_index.Slice(std::wstring_view{ string_storage });
 					ref.debug_file = ref.file_index.Slice(std::wstring_view{ string_storage });
+					return true;
 				}
 			}
 			else {
@@ -132,6 +132,7 @@ namespace UEBabyPram::InsightParser
 				auto re = out_range_spec.insert(std::pair(id, spec));
 				if (re.second)
 				{
+					auto old_string_index = string_storage.size();
 					string_storage.append(event_name);
 					auto new_string_index = string_storage.size();
 					if (need_file)
@@ -144,31 +145,154 @@ namespace UEBabyPram::InsightParser
 					re.first->second.file_index = { new_string_index, new_file_index };
 					re.first->second.debug_name_view = re.first->second.name_index.Slice(std::wstring_view{ string_storage });
 					re.first->second.debug_file = re.first->second.file_index.Slice(std::wstring_view{ string_storage });
-				}
-			}
-			auto new_data = string_storage.data();
-			if (old_data != new_data)
-			{
-				for (auto& ite : events)
-				{
-					if (ite.id)
-					{
-						ite.debug_file = ite.file_index.Slice(std::wstring_view{ string_storage });
-						ite.debug_name_view = ite.name_index.Slice(std::wstring_view{ string_storage });
-					}
-				}
-
-				for (auto& ite : out_range_spec)
-				{
-					if (ite.first)
-					{
-						ite.second.debug_file = ite.second.file_index.Slice(std::wstring_view{ string_storage });
-						ite.second.debug_name_view = ite.second.name_index.Slice(std::wstring_view{ string_storage });
-					}
+					return false;
 				}
 			}
 		}
 		return false;
+	}
+
+	bool SubEventSpecManager::AddEvent(std::pmr::wstring& string_storage, EventID id, std::u8string_view event_name, std::wstring_view file, std::size_t line)
+	{
+		if (id)
+		{
+			if (id.id < max_spec_count)
+			{
+				if (events.size() < id.id + 1)
+				{
+					events.resize(id.id + 1);
+				}
+				auto& ref = events[id.id];
+				if (ref.id)
+				{
+					return false;
+				}
+				else {
+					auto old_string_index = string_storage.size();
+					Potato::Encode::UnicodeEncoder<char8_t, wchar_t>::EncodeTo(
+						event_name,
+						std::back_insert_iterator(string_storage)
+					);
+					auto new_string_index = string_storage.size();
+					if (need_file)
+					{
+						string_storage.append(file);
+						ref.line = line;
+					}
+					auto new_file_index = string_storage.size();
+					ref.id = id;
+					ref.name_index = { old_string_index, new_string_index };
+					ref.file_index = { new_string_index, new_file_index };
+					ref.debug_name_view = ref.name_index.Slice(std::wstring_view{ string_storage });
+					ref.debug_file = ref.file_index.Slice(std::wstring_view{ string_storage });
+					return true;
+				}
+			}
+			else {
+				Spec spec;
+				spec.id = id;
+				spec.line = line;
+				auto re = out_range_spec.insert(std::pair(id, spec));
+				if (re.second)
+				{
+					auto old_string_index = string_storage.size();
+					Potato::Encode::UnicodeEncoder<char8_t, wchar_t>::EncodeTo(
+						event_name,
+						std::back_insert_iterator(string_storage)
+					);
+					auto new_string_index = string_storage.size();
+					if (need_file)
+					{
+						string_storage.append(file);
+						re.first->second.line = line;
+					}
+					auto new_file_index = string_storage.size();
+					re.first->second.name_index = { old_string_index, new_string_index };
+					re.first->second.file_index = { new_string_index, new_file_index };
+					re.first->second.debug_name_view = re.first->second.name_index.Slice(std::wstring_view{ string_storage });
+					re.first->second.debug_file = re.first->second.file_index.Slice(std::wstring_view{ string_storage });
+					return false;
+				}
+			}
+		}
+		return false;
+	}
+
+	void SubEventSpecManager::RefreshDebugView(std::pmr::wstring& string_storage)
+	{
+		for (auto& ite : events)
+		{
+			if (ite.id)
+			{
+				ite.debug_file = ite.file_index.Slice(std::wstring_view{ string_storage });
+				ite.debug_name_view = ite.name_index.Slice(std::wstring_view{ string_storage });
+			}
+		}
+
+		for (auto& ite : out_range_spec)
+		{
+			if (ite.first)
+			{
+				ite.second.debug_file = ite.second.file_index.Slice(std::wstring_view{ string_storage });
+				ite.second.debug_name_view = ite.second.name_index.Slice(std::wstring_view{ string_storage });
+			}
+		}
+	}
+
+	auto EventSpecManager::GetEventSpec(EventID id) const ->EventSpecView
+	{
+		if (id)
+		{
+			if (id.id > std::numeric_limits<std::uint32_t>::max() / 2)
+			{
+				auto real_uint32 = ~static_cast<std::uint32_t>(id.id);
+				return metadata_events.GetEventSpec({ real_uint32 }, string_storage);
+			}
+			else {
+				return events.GetEventSpec(id, string_storage);
+			}
+		}
+		return {};
+	}
+
+	bool EventSpecManager::AddEvent(EventID id, std::wstring_view event_name, std::wstring_view file, std::size_t line)
+	{
+		bool result = false;
+		auto old_data = string_storage.data();
+		if (id.id > std::numeric_limits<std::uint32_t>::max() / 2)
+		{
+			auto real_uint32 = ~static_cast<std::uint32_t>(id.id);
+			result = metadata_events.AddEvent(string_storage, { real_uint32 }, event_name, {}, 0);
+		}
+		else {
+			result = events.AddEvent(string_storage, id, event_name, file, line);
+		}
+		if (result && string_storage.data() != old_data)
+		{
+			events.RefreshDebugView(string_storage);
+			metadata_events.RefreshDebugView(string_storage);
+		}
+		return result;
+	}
+
+	bool EventSpecManager::AddEvent(EventID id, std::u8string_view event_name, std::wstring_view file, std::size_t line)
+	{
+		bool result = false;
+		auto old_data = string_storage.data();
+		if (id.id > std::numeric_limits<std::uint32_t>::max() / 2)
+		{
+			auto real_uint32 = ~static_cast<std::uint32_t>(id.id);
+			result = metadata_events.AddEvent(string_storage, { real_uint32 }, event_name, {}, 0);
+		}
+		else {
+			result = events.AddEvent(string_storage, id, event_name, file, line);
+		}
+		if (result && string_storage.data() != old_data)
+		{
+			events.RefreshDebugView(string_storage);
+			metadata_events.RefreshDebugView(string_storage);
+		}
+		return result;
 	}
 
 	void ContextSwitchEventList::AddContextSwitchEvent(ThreadSystemID thread_id, std::size_t active_core, Potato::Misc::IndexSpan<DurationSec> active_time)

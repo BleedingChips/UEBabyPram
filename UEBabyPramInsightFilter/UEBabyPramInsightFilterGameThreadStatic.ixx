@@ -18,8 +18,10 @@ export namespace UEBabyPram::InsightFilter
 	struct GameThreadStatic : public Parser
 	{
 		void OnThreadDiscoverd(ThreadID thread_id, ThreadSystemID thread_system_id, std::string_view thread_name);
-		void OnCPUEventDiscoverd(EventID id, std::wstring_view event_name, std::wstring_view file_name, std::size_t file_line);
+		virtual void OnCPUEventDiscoverd(EventID id, std::wstring_view event_name, std::wstring_view file_name, std::size_t file_line) override;
+		virtual void OnCPUScopeEventDiscoverd(EventID id, std::u8string_view event_name) override;
 		virtual void OnCPUStackTree(ThreadCPUEventView event_scope) override;
+		
 		void ContextSwitchEvent(ThreadSystemID thread_id, std::size_t core_name, Potato::Misc::IndexSpan<DurationSec> duration) override;
 		virtual bool IsThreadRequired(ThreadID thread_id) const override;
 		virtual bool IsParserRequired(ParserRequireFlag flag) const { return true; }
@@ -51,6 +53,7 @@ export namespace UEBabyPram::InsightFilter
 		ThreadID game_frame_thread_id;
 		ThreadSystemID game_frame_thread_system_id;
 		std::vector<EventID> tick_event_id;
-		
+		Potato::Misc::IndexSpan<DurationSec> total_range;
+		double sampling_ratio = 0.9;
 	};
 }
