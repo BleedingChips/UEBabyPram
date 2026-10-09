@@ -38,6 +38,9 @@ export namespace UEBabyPram::InsightFilter
 		struct EventIDRecord
 		{
 			EventIDRecord(std::pmr::memory_resource* resource) : events(resource) {}
+			EventIDRecord(EventIDRecord const&) = default;
+			EventIDRecord(EventIDRecord&&) = default;
+			EventIDRecord& operator=(EventIDRecord&&) = default;
 			DurationSec duration = DurationSec::zero();
 			Potato::Misc::IndexSpan<DurationSec> time_range;
 			std::pmr::vector<ThreadCPUEvent> events;
@@ -46,6 +49,7 @@ export namespace UEBabyPram::InsightFilter
 		std::pmr::vector<EventIDRecord> event_records;
 		DurationSec min_duration = DurationSec::zero();
 		std::size_t max_record_frame = 10;
+		std::size_t max_exclude_time_count = 30;
 		std::size_t top_event_id_count = 10;
 		std::array<std::size_t, 5> fps_frame_record = {0, 0, 0, 0, 0};
 		InsightParser::DurationSec total_time = InsightParser::DurationSec::zero();
@@ -53,7 +57,18 @@ export namespace UEBabyPram::InsightFilter
 		ThreadID game_frame_thread_id;
 		ThreadSystemID game_frame_thread_system_id;
 		std::vector<EventID> tick_event_id;
-		Potato::Misc::IndexSpan<DurationSec> total_range;
 		double sampling_ratio = 0.9;
+
+		struct CrossFrameRecord
+		{
+			std::wstring_view event_name;
+			std::size_t count = 0;
+			DurationSec durations = DurationSec::zero();
+			Potato::Misc::IndexSpan<DurationSec> max_time_range;
+			std::size_t from_frame_index = 0;
+		};
+
+		std::pmr::vector<CrossFrameRecord> longest_frame_records;
+		std::pmr::vector<CrossFrameRecord> longest_frame_records_in_top;
 	};
 }

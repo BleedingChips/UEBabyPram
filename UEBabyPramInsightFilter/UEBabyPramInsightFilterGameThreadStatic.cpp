@@ -64,41 +64,12 @@ namespace UEBabyPram::InsightFilter
 			auto result = event_scope.FindNextEvent({ tick_event_id.data(), tick_event_id.size() });
 			if (result)
 			{
-
-				auto k = event_scope.GetExcludeTime(result);
-				auto duration = event_scope.GetTimeRange()->Size();
-
-				{
-					std::size_t record_count = 0;
-					for (; record_count < fps_thresholds.size(); ++record_count)
-					{
-						if (duration <= fps_thresholds[record_count])
-							break;
-					}
-					fps_frame_record[record_count] += 1;
-				}
-
-				if (duration > min_duration || event_records.size() < max_record_frame)
-				{
-					EventIDRecord records{&resource};
-					records.duration = duration;
-					records.events.insert(records.events.end(), event_scope.view.begin(), event_scope.view.end());
-					records.time_range = *event_scope.GetTimeRange();
-					event_records.push_back(std::move(records));
-
-					std::sort(event_records.begin(), event_records.end(), [](const EventIDRecord& a, const EventIDRecord& b) {
-						return a.duration > b.duration;
-						});
-
-					if (event_records.size() > max_record_frame)
-					{
-						event_records.pop_back();
-					}
-
-					min_duration = event_records.rbegin()->duration;
-				}
-				total_count += 1;
-				total_time += duration;
+				EventIDRecord records{ &resource };
+				auto current_time_range = *event_scope.GetTimeRange();
+				records.duration = current_time_range.Size();
+				records.events.insert(records.events.end(), event_scope.view.begin(), event_scope.view.end());
+				records.time_range = current_time_range;
+				event_records.push_back(std::move(records));
 			}
 		}
 	}
@@ -107,7 +78,177 @@ namespace UEBabyPram::InsightFilter
 	{
 		Parser::AllAnalyzeDone();
 
-		//double sampling_ratio = SamplingRatio;
+		if (event_records.size() > 0)
+		{
+			double current_sampling_ratio = std::clamp(sampling_ratio, 0.0, 1.0);
+			Potato::Misc::IndexSpan<DurationSec> sample_range = {
+				event_records.front().time_range.Begin(),
+				event_records.back().time_range.End()
+			};
+
+			event_records.erase(
+				std::remove_if(event_records.begin(), event_records.end(), [&](const EventIDRecord& record) {
+					return 	record.time_range.End() < sample_range.Begin() || record.time_range.Begin() > sample_range.End();
+					}),
+				event_records.end()
+			);
+
+			for (auto& ite : event_records)
+			{
+				total_time += ite.duration;
+				total_count += 1;
+				auto duration = ite.duration;
+
+				for (std::size_t i = 0; i < fps_frame_record.size(); ++i)
+				{
+					if (i + 1 == fps_frame_record.size() || duration < fps_thresholds[i])
+					{
+						fps_frame_record[i] += 1;
+						break;
+					}
+				}
+			}
+
+			std::sort(event_records.begin(), event_records.end(), [](const EventIDRecord& a, const EventIDRecord& b) {
+				return a.duration > b.duration;
+				});
+
+			if (event_records.size() > max_record_frame)
+			{
+				event_records.erase(
+					event_records.begin() + max_record_frame,
+					event_records.end()
+				);
+			}
+
+			if (event_records.size() > 0)
+			{
+				auto StatisRecord = [this](ThreadCPUEventView view, std::pmr::vector<CrossFrameRecord>& output, std::size_t frame_index) {
+					std::size_t index_offset = 0;
+					while (index_offset < view.view.size())
+					{
+						auto current_event = view.FindNextEvent({}, index_offset);
+
+						if (current_event)
+						{
+							auto event_spec = events_manager.GetEventSpec(current_event.event_id);
+							auto find = std::find_if(output.begin(), output.end(), [&](CrossFrameRecord const& list) {
+								return list.event_name == event_spec.name_view;
+								});
+							if (find != output.end())
+							{
+								find->durations += view.GetExcludeTime(current_event, context_switch_list)->active_time_without_context_switch;
+								find->count += 1;
+
+								if (find->max_time_range.Size() < current_event.time_range.Size())
+								{
+									find->max_time_range = current_event.time_range;
+								}
+							}
+							else {
+								CrossFrameRecord new_record;
+								new_record.count = 1;
+								new_record.durations = view.GetExcludeTime(current_event, context_switch_list)->active_time_without_context_switch;
+								new_record.event_name = event_spec.name_view;
+								new_record.from_frame_index = frame_index;
+								new_record.max_time_range = current_event.time_range;
+								output.push_back(new_record);
+							}
+							index_offset = current_event.index_range.Begin() + 1;
+						}
+						else {
+							break;
+						}
+					}
+
+					};
+
+				longest_frame_records.clear();
+				ThreadCPUEventView view{
+					game_frame_thread_id,
+					game_frame_thread_system_id,
+					std::span(event_records.begin()->events),
+					std::nullopt
+				};
+
+				StatisRecord(view, longest_frame_records, 0);
+
+				std::sort(
+					longest_frame_records.begin(),
+					longest_frame_records.end(),
+					[](CrossFrameRecord const& record1, CrossFrameRecord const& record2) {
+						return record1.durations > record2.durations;
+					}
+				);
+
+				if (longest_frame_records.size() > max_exclude_time_count)
+				{
+					longest_frame_records.erase(
+						longest_frame_records.begin() + max_exclude_time_count,
+						longest_frame_records.end()
+					);
+				}
+
+				longest_frame_records_in_top.clear();
+
+				std::pmr::vector<CrossFrameRecord> temp_cross_frame_record;
+
+				for (std::size_t index = 0; index < event_records.size(); ++index)
+				{
+					temp_cross_frame_record.clear();
+					ThreadCPUEventView view{
+						game_frame_thread_id,
+						game_frame_thread_system_id,
+						std::span(event_records[index].events),
+						std::nullopt
+					};
+					StatisRecord(view, temp_cross_frame_record, index);
+					if (longest_frame_records_in_top.size() == 0)
+					{
+						longest_frame_records_in_top = temp_cross_frame_record;
+					}
+					else {
+						for (auto& ite : temp_cross_frame_record)
+						{
+							auto finded = std::find_if(
+								longest_frame_records_in_top.begin(),
+								longest_frame_records_in_top.end(),
+								[&](CrossFrameRecord const& record) {
+									return record.event_name == ite.event_name;
+								}
+							);
+							if (finded != longest_frame_records_in_top.end())
+							{
+								if (finded->durations > ite.durations)
+								{
+									ite = *finded;
+								}
+							}
+							else {
+								longest_frame_records_in_top.emplace_back(ite);
+							}
+						}
+					}
+				}
+
+				std::sort(
+					longest_frame_records_in_top.begin(),
+					longest_frame_records_in_top.end(),
+					[](CrossFrameRecord const& record1, CrossFrameRecord const& record2) {
+						return record1.durations > record2.durations;
+					}
+				);
+
+				if (longest_frame_records_in_top.size() > max_exclude_time_count)
+				{
+					longest_frame_records_in_top.erase(
+						longest_frame_records_in_top.begin() + max_exclude_time_count,
+						longest_frame_records_in_top.end()
+					);
+				}
+			}
+
+		}
 
 	}
 
@@ -120,7 +261,7 @@ namespace UEBabyPram::InsightFilter
 
 		std::format_to(
 			std::back_insert_iterator{ out_string },
-			L"   Total GameThread Time: <{}s>, Total GameFrame :<{}>, Avg GameThread Time: <{}s>\n",
+			L"    Total GameThread Time: <{}s>, Total GameFrame :<{}>, Avg GameThread Time: <{}s>\n",
 			total_time.count(),
 			total_count,
 			total_time.count() / total_count
@@ -138,7 +279,7 @@ namespace UEBabyPram::InsightFilter
 
 		std::format_to(
 			std::back_insert_iterator{ out_string },
-			L"    Top <{}> GameThread :\n",
+			L"\nTop <{}> Longgest GameThread :\n",
 			max_record_frame
 		);
 
@@ -158,7 +299,7 @@ namespace UEBabyPram::InsightFilter
 
 			std::format_to(
 				std::back_insert_iterator{ out_string },
-				L"      {:<4}- TotalDuration:<{:.3f}ms>, RemoveContextSwitch:<{:.3f}ms>, TimeRange: [{:}m{:.6f}s, {}m{:.6f}s]\n",
+				L"    {:<4}- TotalDuration:<{:.2f}ms>, RemoveContextSwitch:<{:.2f}ms>, TimeRange: [{:}m{:.6f}s, {}m{:.6f}s]\n",
 				count,
 				std::chrono::duration_cast<
 					std::chrono::duration<double, std::milli>
@@ -172,6 +313,62 @@ namespace UEBabyPram::InsightFilter
 				end_duration.seconds.count()
 			);
 		}
+
+		std::format_to(
+			std::back_insert_iterator{ out_string },
+			L"\nTopExcludeTime In Longgest Frame:\n"
+		);
+
+		for (auto& ite : longest_frame_records)
+		{
+			DisplayDuration m1{ ite.max_time_range.Begin() };
+			DisplayDuration m2{ ite.max_time_range.End() };
+			std::format_to(
+				std::back_insert_iterator{ out_string },
+				L"    EventName:<{:}>\tTotal:<{:.2f}ms> Count:<{:}> TimeRange:[{:}m{:.6f}s, {:}m{:.6f}s]\n",
+				ite.event_name,
+				std::chrono::duration_cast<
+					std::chrono::duration<double, std::milli>
+				>(ite.durations).count(),
+				ite.count,
+				m1.minutes.count(),
+				m1.seconds.count(),
+				m2.minutes.count(),
+				m2.seconds.count()
+			);
+		}
+
+		std::format_to(
+			std::back_insert_iterator{ out_string },
+			L"\nTopExcludeTime In Top {} Longgest Frame:\n",
+			max_record_frame
+		);
+
+		for (auto& ite : longest_frame_records_in_top)
+		{
+			DisplayDuration m1{ ite.max_time_range.Begin() };
+			DisplayDuration m2{ ite.max_time_range.End() };
+			std::format_to(
+				std::back_insert_iterator{ out_string },
+				L"    EventName:<{:}>\tTotal:<{:.2f}ms> Count:<{:}> TimeRange:[{:}m{:.6f}s, {:}m{:.6f}s] From No.{:} Top Frame\n",
+				ite.event_name,
+				std::chrono::duration_cast<
+					std::chrono::duration<double, std::milli>
+				>(ite.durations).count(),
+				ite.count,
+				m1.minutes.count(),
+				m1.seconds.count(),
+				m2.minutes.count(),
+				m2.seconds.count(),
+				ite.from_frame_index
+			);
+		}
+
+		/*
+
+
+
+		
 
 		count = 0;
 
@@ -334,7 +531,7 @@ namespace UEBabyPram::InsightFilter
 			*/
 
 
-			top_frame_index += 1;
+			//top_frame_index += 1;
 			/*
 			++count;
 
@@ -365,8 +562,9 @@ namespace UEBabyPram::InsightFilter
 				);
 			}
 			*/
-		}
-
+		//}
+		
+/*
 		std::sort(cross_frame_record.begin(), cross_frame_record.end(), [](CrossFrameRecord const& i1, CrossFrameRecord const& i2) {
 			return i1.durations > i2.durations;
 			});
@@ -401,7 +599,7 @@ namespace UEBabyPram::InsightFilter
 				ite.from_frame_index
 			);
 		}
-
+		*/
 		return true;
 	}
 
