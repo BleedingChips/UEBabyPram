@@ -1,4 +1,4 @@
-﻿module;
+module;
 #include <cassert>
 module UEBabyPramInsightParser;
 
@@ -566,12 +566,12 @@ namespace UEBabyPram::InsightParser
 		else {
 			thread_timelines.emplace_back(TimeLineTuple{ thread_id, std::string{thread_name_str}, std::move(new_timeline) });
 		}
-		OnThreadDiscoverd(thread_id, thread_name_str);
+		OnThreadDiscovered(thread_id, thread_name_str);
 	}
 	*/
 
 	/*
-	uint32 ParserInterface::OnCPUEventDiscoverd(wchar_t const* event_name, std::size_t event_name_len, wchar_t const* file, std::size_t file_name_len, std::size_t line)
+	uint32 ParserInterface::OnCPUEventDiscovered(wchar_t const* event_name, std::size_t event_name_len, wchar_t const* file, std::size_t file_name_len, std::size_t line)
 	{
 		auto cur_event_name = CoverStringView(event_name, event_name_len);
 		auto cur_file_name = CoverStringView(file, file_name_len);
@@ -586,7 +586,7 @@ namespace UEBabyPram::InsightParser
 		{
 			frame_event_id.push_back(event_id);
 		}
-		OnCPUEventDiscoverd(EventID{ event_id }, cur_event_name, cur_file_name, line);
+		OnCPUEventDiscovered(EventID{ event_id }, cur_event_name, cur_file_name, line);
 		return static_cast<uint32>(event_id);
 	}
 	*/
@@ -673,7 +673,7 @@ namespace UEBabyPram::InsightParser
 	}
 	*/
 
-	void ParserInterface::OnThreadDiscoverd(uint32 thread_id, uint32 thread_system_id, char const* thread_name, std::size_t thread_name_len)
+	void ParserInterface::OnThreadDiscovered(uint32 thread_id, uint32 thread_system_id, char const* thread_name, std::size_t thread_name_len)
 	{
 		std::string_view thread_name_view{ thread_name, thread_name_len };
 		thread_timelines.emplace_back(
@@ -682,7 +682,7 @@ namespace UEBabyPram::InsightParser
 			std::string{ thread_name, thread_name_len },
 			std::unique_ptr<ParserThreadTimeLine>{}
 		);
-		OnThreadDiscoverd(ThreadID{ thread_id }, ThreadSystemID{ thread_system_id }, thread_name_view);
+		OnThreadDiscovered(ThreadID{ thread_id }, ThreadSystemID{ thread_system_id }, thread_name_view);
 	}
 
 	void ParserInterface::AllAnalyzeDone()

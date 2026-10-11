@@ -1,6 +1,6 @@
 module;
 
-export module UEBabyPramInsightFilterGameStatic;
+export module UEBabyPramInsightFilterGameThreadParser;
 
 import UEBabyPramInsightFilterParser;
 import UEBabyPramInsightParser;
@@ -15,19 +15,19 @@ namespace UEBabyPram::InsightFilter
 export namespace UEBabyPram::InsightFilter
 {
 
-	struct GameThreadStatic : public Parser
+	struct GameThreadParser : public Parser
 	{
-		void OnThreadDiscoverd(ThreadID thread_id, ThreadSystemID thread_system_id, std::string_view thread_name);
-		virtual void OnCPUEventDiscoverd(EventID id, std::wstring_view event_name, std::wstring_view file_name, std::size_t file_line) override;
-		virtual void OnCPUScopeEventDiscoverd(EventID id, std::u8string_view event_name) override;
+		void OnThreadDiscovered(ThreadID thread_id, ThreadSystemID thread_system_id, std::string_view thread_name) override;
+		virtual void OnCPUEventDiscovered(EventID id, std::wstring_view event_name, std::wstring_view file_name, std::size_t file_line) override;
+		virtual void OnCPUScopeEventDiscovered(EventID id, std::u8string_view event_name) override;
 		virtual void OnCPUStackTree(ThreadCPUEventView event_scope) override;
 		
 		void ContextSwitchEvent(ThreadSystemID thread_id, std::size_t core_name, Potato::Misc::IndexSpan<DurationSec> duration) override;
 		virtual bool IsThreadRequired(ThreadID thread_id) const override;
-		virtual bool IsParserRequired(ParserRequireFlag flag) const { return true; }
-		virtual void AllAnalyzeDone();
-		bool PrintToLog(std::pmr::wstring& out_string) override;
-		GameThreadStatic();
+		virtual bool IsParserRequired(ParserRequireFlag flag) const override { return true; }
+		virtual void AllAnalyzeDone() override;
+		bool PrintToLog(Potato::Log::LogPrinter& printer) override;
+		GameThreadParser();
 	
 	protected:
 
@@ -35,18 +35,18 @@ export namespace UEBabyPram::InsightFilter
 		ContextSwitchEventList context_switch_list;
 		EventSpecManager events_manager;
 
-		struct EventIDRecord
+		struct FrameRecord
 		{
-			EventIDRecord(std::pmr::memory_resource* resource) : events(resource) {}
-			EventIDRecord(EventIDRecord const&) = default;
-			EventIDRecord(EventIDRecord&&) = default;
-			EventIDRecord& operator=(EventIDRecord&&) = default;
+			FrameRecord(std::pmr::memory_resource* resource) : events(resource) {}
+			FrameRecord(FrameRecord const&) = default;
+			FrameRecord(FrameRecord&&) = default;
+			FrameRecord& operator=(FrameRecord&&) = default;
 			DurationSec duration = DurationSec::zero();
 			Potato::Misc::IndexSpan<DurationSec> time_range;
 			std::pmr::vector<ThreadCPUEvent> events;
 		};
 
-		std::pmr::vector<EventIDRecord> event_records;
+		std::pmr::vector<FrameRecord> event_records;
 		DurationSec min_duration = DurationSec::zero();
 		std::size_t max_record_frame = 10;
 		std::size_t max_exclude_time_count = 30;
@@ -54,21 +54,22 @@ export namespace UEBabyPram::InsightFilter
 		std::array<std::size_t, 5> fps_frame_record = {0, 0, 0, 0, 0};
 		InsightParser::DurationSec total_time = InsightParser::DurationSec::zero();
 		std::size_t total_count = 0;
-		ThreadID game_frame_thread_id;
-		ThreadSystemID game_frame_thread_system_id;
+		ThreadID game_thread_id;
+		ThreadSystemID game_thread_system_id;
 		std::vector<EventID> tick_event_id;
 		double sampling_ratio = 0.9;
 
-		struct CrossFrameRecord
+		struct CrossFrameEventRecord
 		{
 			std::wstring_view event_name;
 			std::size_t count = 0;
 			DurationSec durations = DurationSec::zero();
+			DurationSec durations_without_context_switch = DurationSec::zero();
 			Potato::Misc::IndexSpan<DurationSec> max_time_range;
 			std::size_t from_frame_index = 0;
 		};
 
-		std::pmr::vector<CrossFrameRecord> longest_frame_records;
-		std::pmr::vector<CrossFrameRecord> longest_frame_records_in_top;
+		std::pmr::vector<CrossFrameEventRecord> longest_frame_records;
+		std::pmr::vector<CrossFrameEventRecord> longest_frame_records_in_top;
 	};
 }

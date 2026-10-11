@@ -1,4 +1,4 @@
-﻿module;
+module;
 
 #include "UEBabyPramInsightParserInterface.h"
 
@@ -305,12 +305,12 @@ export namespace UEBabyPram::InsightParser
 
 	struct ParserInterface : private BaseParser
 	{
-		virtual bool IsParserRequire(ParserRequireFlag flag) const override { return true; }
+		virtual bool IsParserRequired(ParserRequireFlag flag) const override { return true; }
 		virtual void ContextSwitchEvent(ThreadSystemID thread_id, std::size_t core_name, Potato::Misc::IndexSpan<DurationSec> duration) {}
-		virtual void OnThreadDiscoverd(ThreadID thread_id, ThreadSystemID thread_system_id, std::string_view thread_name) {}
+		virtual void OnThreadDiscovered(ThreadID thread_id, ThreadSystemID thread_system_id, std::string_view thread_name) {}
 		virtual void OnCPUStackTree(ThreadCPUEventView event_scope) {}
-		virtual void OnCPUEventDiscoverd(EventID id, std::wstring_view event_name, std::wstring_view file_name, std::size_t file_line) {}
-		virtual void OnCPUScopeEventDiscoverd(EventID id, std::u8string_view event_name) {}
+		virtual void OnCPUEventDiscovered(EventID id, std::wstring_view event_name, std::wstring_view file_name, std::size_t file_line) {}
+		virtual void OnCPUScopeEventDiscovered(EventID id, std::u8string_view event_name) {}
 		virtual	void AllAnalyzeDone() override;
 		virtual bool IsThreadRequired(ThreadID thread_id) const { return true; }
 		static std::wstring_view CoverStringView(wchar_t const* ScopeName, std::size_t ScopeNameLen);
@@ -336,16 +336,16 @@ export namespace UEBabyPram::InsightParser
 
 	private:
 		
-		virtual void OnCPUEventDiscoverd(uint32_t space_id, wchar_t const* event_name, std::size_t event_name_len, wchar_t const* file, std::size_t file_name_len, std::size_t line) override
+		virtual void OnCPUEventDiscovered(uint32_t space_id, wchar_t const* event_name, std::size_t event_name_len, wchar_t const* file, std::size_t file_name_len, std::size_t line) override
 		{
-			return OnCPUEventDiscoverd(
+			return OnCPUEventDiscovered(
 				EventID{ space_id }, std::wstring_view{ event_name, event_name_len }, std::wstring_view{ file, file_name_len }, line
 			);
 		}
 
-		virtual void OnCPUScopeEventDiscoverd(uint32_t space_id, char const* event_name, std::size_t event_name_len) override
+		virtual void OnCPUScopeEventDiscovered(uint32_t space_id, char const* event_name, std::size_t event_name_len) override
 		{
-			return OnCPUScopeEventDiscoverd(
+			return OnCPUScopeEventDiscovered(
 				EventID{ space_id }, std::u8string_view{ reinterpret_cast<char8_t const*>(event_name), event_name_len }
 			);
 		}
@@ -362,7 +362,7 @@ export namespace UEBabyPram::InsightParser
 			return ContextSwitchEvent(ThreadSystemID{ thread_id }, active_core, Potato::Misc::IndexSpan<DurationSec>{DurationSec{ active_start_time }, DurationSec{ active_end_time }});
 		}
 
-		virtual void OnThreadDiscoverd(uint32 thread_id, uint32 thread_system_id, char const* thread_name, std::size_t thread_name_len) override;
+		virtual void OnThreadDiscovered(uint32 thread_id, uint32 thread_system_id, char const* thread_name, std::size_t thread_name_len) override;
 		
 		struct TimeLineTuple
 		{

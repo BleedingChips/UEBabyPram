@@ -12,11 +12,20 @@ export namespace UEBabyPram::InsightFilter
 	
 	struct Parser : public InsightParser::ParserInterface
 	{
-		virtual bool PrintToLog(std::pmr::wstring& out_string) { return false; }
+		virtual bool PrintToLog(Potato::Log::LogPrinter& printer) { return false; }
 	};
 
 	constexpr auto LogCategory = Potato::TMP::TypeString("FilterLog");
 	constexpr auto OutputCategory = Potato::TMP::TypeString("UEBabyPram::InsightFilter");
+
+	template<Potato::TMP::TypeString formatter, typename ...Parameters>
+	constexpr void OutputLog(Potato::Log::LogPrinter& printer, Parameters&& ...parameters)
+	{
+		Potato::Log::LogTo<OutputCategory, Potato::Log::LogLevel::Display, formatter>(
+			printer,
+			std::forward<Parameters>(parameters)...
+		);
+	}
 }
 
 export namespace Potato::Log

@@ -38,14 +38,14 @@ namespace UEBabyPram::InsightParser
 	{
 		auto& Builder = Context.InterfaceBuilder;
 
-		if (Parser.IsParserRequire(ParserRequireFlag::EVENT_SPEC))
+		if (Parser.IsParserRequired(ParserRequireFlag::EVENT_SPEC))
 		{
 			Builder.RouteEvent(RouteId_EventSpec, "CpuProfiler", "EventSpec");
 		}
 		
 		Builder.RouteEvent(RouteId_EndThread, "CpuProfiler", "EndThread");
 
-		if (Parser.IsParserRequire(ParserRequireFlag::CPU_EVENT))
+		if (Parser.IsParserRequired(ParserRequireFlag::CPU_EVENT))
 		{
 			Builder.RouteEvent(RouteId_EventBatchV3, "CpuProfiler", "EventBatchV3"); // added in UE 5.6
 			Builder.RouteEvent(RouteId_EventBatchV2, "CpuProfiler", "EventBatchV2"); // backward compatibility, added in UE 5.1, removed in 5.6
@@ -53,13 +53,13 @@ namespace UEBabyPram::InsightParser
 			Builder.RouteEvent(RouteId_EndCapture, "CpuProfiler", "EndCapture"); // backward compatibility; removed in UE 5.1
 		}
 
-		if (Parser.IsParserRequire(ParserRequireFlag::META_DATA) || true)
+		if (Parser.IsParserRequired(ParserRequireFlag::META_DATA) || true)
 		{
 			Builder.RouteEvent(RouteId_MetadataSpec, "CpuProfiler", "MetadataSpec");
 			Builder.RouteEvent(RouteId_Metadata, "CpuProfiler", "Metadata");
 		}
 
-		if (Parser.IsParserRequire(ParserRequireFlag::CPU_EVENT))
+		if (Parser.IsParserRequired(ParserRequireFlag::CPU_EVENT))
 		{
 			Builder.RouteLoggerEvents(RouteId_CpuScope, "Cpu", true); // scoped trace events
 		}
@@ -690,7 +690,7 @@ namespace UEBabyPram::InsightParser
 		uint32 SpecId = Context.EventData.GetTypeInfo().GetId();
 		SpecId = ~SpecId; // to keep out of the way of normal spec IDs.
 		FAnsiStringView NameStringView = Context.EventData.GetTypeInfo().GetName();
-		Parser.OnCPUScopeEventDiscoverd(SpecId, NameStringView.GetData(), NameStringView.Len());
+		Parser.OnCPUScopeEventDiscovered(SpecId, NameStringView.GetData(), NameStringView.Len());
 
 
 
@@ -977,7 +977,7 @@ namespace UEBabyPram::InsightParser
 		// Add a new CPU timer.
 		FStringView TimerNameView(TimerName);
 		FStringView FileNameView(File);
-		Parser.OnCPUEventDiscoverd(SpecId, TimerNameView.GetData(), TimerNameView.Len(), FileNameView.GetData(), FileNameView.Len(), Line);
+		Parser.OnCPUEventDiscovered(SpecId, TimerNameView.GetData(), TimerNameView.Len(), FileNameView.GetData(), FileNameView.Len(), Line);
 	}
 
 	////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1112,7 +1112,7 @@ namespace UEBabyPram::InsightParser
 			if (ThreadState->Timeline == nullptr)
 			{
 				FAnsiStringView StringView{ ThreadName };
-				Parser.OnThreadDiscoverd(ThreadId, ThreadSystemId, StringView.GetData(), StringView.Len());
+				Parser.OnThreadDiscovered(ThreadId, ThreadSystemId, StringView.GetData(), StringView.Len());
 				ThreadState->Timeline = Parser.GetThreadTimeLine(ThreadId);
 			}
 			ThreadStatesMap.Add(ThreadId, ThreadState);
@@ -1127,7 +1127,7 @@ namespace UEBabyPram::InsightParser
 	void CPUScopeAnalyzer::OnThreadInfo(const FThreadInfo& ThreadInfo)
 	{
 		FAnsiStringView ThreadName{ ThreadInfo.GetName()};
-		Parser.OnThreadDiscoverd(ThreadInfo.GetId(), ThreadInfo.GetSystemId(), ThreadName.GetData(), ThreadName.Len());
+		Parser.OnThreadDiscovered(ThreadInfo.GetId(), ThreadInfo.GetSystemId(), ThreadName.GetData(), ThreadName.Len());
 	}
 }
 
