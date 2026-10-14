@@ -17,6 +17,14 @@ export namespace UEBabyPram::InsightFilter
 
 	struct GameThreadParser : public Parser
 	{
+		struct Config
+		{
+			std::size_t max_record_frame = 10;
+			std::size_t max_exclude_time_count = 30;
+			double sampling_ratio = 0.8;
+			std::pmr::memory_resource* resource = std::pmr::get_default_resource();
+		};
+
 		void OnThreadDiscovered(ThreadID thread_id, ThreadSystemID thread_system_id, std::string_view thread_name) override;
 		virtual void OnCPUEventDiscovered(EventID id, std::wstring_view event_name, std::wstring_view file_name, std::size_t file_line) override;
 		virtual void OnCPUScopeEventDiscovered(EventID id, std::u8string_view event_name) override;
@@ -27,7 +35,7 @@ export namespace UEBabyPram::InsightFilter
 		virtual bool IsParserRequired(ParserRequireFlag flag) const override { return true; }
 		virtual void AllAnalyzeDone() override;
 		bool PrintToLog(Potato::Log::LogPrinter& printer) override;
-		GameThreadParser();
+		GameThreadParser(Config config = {});
 	
 	protected:
 
@@ -50,14 +58,15 @@ export namespace UEBabyPram::InsightFilter
 		DurationSec min_duration = DurationSec::zero();
 		std::size_t max_record_frame = 10;
 		std::size_t max_exclude_time_count = 30;
-		std::size_t top_event_id_count = 10;
 		std::array<std::size_t, 5> fps_frame_record = {0, 0, 0, 0, 0};
 		InsightParser::DurationSec total_time = InsightParser::DurationSec::zero();
+		Potato::Misc::IndexSpan<DurationSec> total_range;
+		Potato::Misc::IndexSpan<DurationSec> sampled_range;
 		std::size_t total_count = 0;
 		ThreadID game_thread_id;
 		ThreadSystemID game_thread_system_id;
 		std::vector<EventID> tick_event_id;
-		double sampling_ratio = 0.9;
+		double sampling_ratio = 0.8;
 
 		struct CrossFrameEventRecord
 		{

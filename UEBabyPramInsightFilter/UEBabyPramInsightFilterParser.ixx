@@ -12,6 +12,7 @@ export namespace UEBabyPram::InsightFilter
 	
 	struct Parser : public InsightParser::ParserInterface
 	{
+		virtual ~Parser() = default;
 		virtual bool PrintToLog(Potato::Log::LogPrinter& printer) { return false; }
 	};
 

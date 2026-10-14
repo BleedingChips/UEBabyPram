@@ -337,7 +337,21 @@ namespace UEBabyPram::InsightParser
 	{
 		auto fast_start = FastLocateFirstEventIndex(time_range.Begin());
 		auto start = LocateFirstEventIndex(time_range.Begin(), fast_start);
+		
+		if (start >= events.size())
+		{
+			return Statis{
+				time_range.Size(),
+				0
+			};
+		}
+		
 		auto end = LocateFirstEventIndex(time_range.End(), start);
+
+		if (end >= events.size())
+		{
+			end = events.size() - 1;
+		}
 
 		std::size_t active_count = 0;
 		DurationSec active_time = DurationSec::zero();

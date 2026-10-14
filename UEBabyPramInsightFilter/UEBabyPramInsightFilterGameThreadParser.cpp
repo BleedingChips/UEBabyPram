@@ -13,8 +13,14 @@ namespace UEBabyPram::InsightFilter
 		DurationSec(1.0 / 15.0)
 	};
 
-	GameThreadParser::GameThreadParser()
-		: event_records(&resource), context_switch_list(ContextSwitchEventList::Config{ &resource }), events_manager(EventSpecManager::Config{10000, 1000, false, &resource})
+	GameThreadParser::GameThreadParser(Config in_config)
+		: resource(in_config.resource)
+		, context_switch_list(ContextSwitchEventList::Config{ &resource })
+		, events_manager(EventSpecManager::Config{10000, 1000, false, &resource})
+		, event_records(&resource)
+		, max_record_frame(in_config.max_record_frame)
+		, max_exclude_time_count(in_config.max_exclude_time_count)
+		, sampling_ratio(in_config.sampling_ratio)
 	{
 		
 	}
@@ -81,14 +87,20 @@ namespace UEBabyPram::InsightFilter
 		if (event_records.size() > 0)
 		{
 			double current_sampling_ratio = std::clamp(sampling_ratio, 0.0, 1.0);
-			Potato::Misc::IndexSpan<DurationSec> sample_range = {
+			
+			total_range = Potato::Misc::IndexSpan<DurationSec>{
 				event_records.front().time_range.Begin(),
 				event_records.back().time_range.End()
+			};
+			
+			sampled_range = Potato::Misc::IndexSpan<DurationSec>{
+				total_range.Begin() + total_range.Size() * (1.0 - current_sampling_ratio) / 2.0,
+				total_range.End() - total_range.Size() * (1.0 - current_sampling_ratio) / 2.
 			};
 
 			event_records.erase(
 				std::remove_if(event_records.begin(), event_records.end(), [&](const FrameRecord& record) {
-					return 	record.time_range.End() < sample_range.Begin() || record.time_range.Begin() > sample_range.End();
+					return 	record.time_range.End() < sampled_range.Begin() || record.time_range.Begin() > sampled_range.End();
 					}),
 				event_records.end()
 			);
@@ -279,6 +291,24 @@ namespace UEBabyPram::InsightFilter
 			fps_frame_record[2] / static_cast<double>(total_count) * 100.0,
 			fps_frame_record[3] / static_cast<double>(total_count) * 100.0,
 			fps_frame_record[4] / static_cast<double>(total_count) * 100.0
+		);
+
+		DisplayDuration total_range_display_begin{ total_range.Begin() };
+		DisplayDuration total_range_display_end{ total_range.End() };
+
+		DisplayDuration sampled_range_display_begin{ sampled_range.Begin() };
+		DisplayDuration sampled_range_display_end{ sampled_range.End() };
+
+		OutputLog<L"Time Range: [{:}m{:.6f}s, {}m{:.6f}s] Sampled Range: [{:}m{:.6f}s, {}m{:.6f}s]">(
+			printer,
+			total_range_display_begin.minutes.count(),
+			total_range_display_begin.seconds.count(),
+			total_range_display_end.minutes.count(),
+			total_range_display_end.seconds.count(),
+			sampled_range_display_begin.minutes.count(),
+			sampled_range_display_begin.seconds.count(),
+			sampled_range_display_end.minutes.count(),
+			sampled_range_display_end.seconds.count()
 		);
 
 		OutputLog<L"{}Top <{}> Longgest GameThread :">(

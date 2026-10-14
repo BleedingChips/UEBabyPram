@@ -1,38 +1,23 @@
-
 import Potato;
 import std;
 import UEBabyPramInsightParser;
 import UEBabyPramInsightFilterParser;
-import UEBabyPramInsightFilterGameThreadParser;
-
-using UEBabyPram::InsightParser::ThreadID;
-using UEBabyPram::InsightParser::ThreadSystemID;
-using UEBabyPram::InsightParser::EventID;
+import UEBabyPramInsightFilterCLI;
 
 using namespace UEBabyPram::InsightFilter;
 
 int main(int argc, char* argv[])
 {
+	CommandLineSetting setting;
 
-	std::filesystem::path insight_path;
-
-	for (std::size_t i = 0; i < argc; ++i)
+	auto handle_result = HandleCommand(argc, argv, setting);
+	if (handle_result > 0)
 	{
-		std::string_view arg = argv[i];
-		if (arg == "-f" || arg == "--file")
-		{
-			if (i + 1 < argc)
-			{
-				std::u8string path;
-				Potato::Encode::STDInputEncoder<char8_t>::EncodeTo(argv[i + 1], std::back_insert_iterator{ path });
-				insight_path = path;
-				break;
-			}
-			else {
-				Potato::Log::Log<LogCategory, Potato::Log::LogLevel::Display, "Error: No insight file path provided after {}">(arg);
-				return -1;
-			}
-		}
+		return 0;
+	}
+	if (handle_result < 0)
+	{
+		return handle_result;
 	}
 
 	if (std::endian::native == std::endian::big)
@@ -40,18 +25,19 @@ int main(int argc, char* argv[])
 		return -1;
 	}
 
+	if (!setting.parser || setting.insight_path.empty())
+	{
+		Potato::Log::Log<CommandLineLogCategory, Potato::Log::LogLevel::Error, L"Require a target file with -f or --file, use -h for more infomation">();
+		return -1;
+	}
+
 	auto start_time = std::chrono::system_clock::now();
 
-	if (!insight_path.empty() && std::filesystem::exists(insight_path))
-	{
-		Potato::Log::Log<LogCategory, Potato::Log::LogLevel::Display, L"Start With UTrace File {}">(insight_path.generic_wstring());
+	Potato::Log::Log<LogCategory, Potato::Log::LogLevel::Display, L"Start With UTrace File {}">(setting.insight_path.generic_wstring());
 
-		Potato::Document::DocumentReader Reader(insight_path);
-		GameThreadParser game_thread_parser;
-		UEBabyPram::InsightParser::ExecuteParser(Reader, game_thread_parser);
-		
-		game_thread_parser.PrintToLog(*Potato::Log::GetLogPrinter());
-	}
+	Potato::Document::DocumentReader Reader(setting.insight_path);
+	UEBabyPram::InsightParser::ExecuteParser(Reader, *setting.parser);
+	setting.parser->PrintToLog(*Potato::Log::GetLogPrinter());
 
 	auto end_time = std::chrono::system_clock::now();
 
