@@ -145,6 +145,37 @@ export namespace UEBabyPram::InsightParser
 		void RefreshDebugView(std::pmr::wstring& string_storage);
 		EventSpecView GetEventSpec(EventID id, std::pmr::wstring const& string_storage) const;
 
+		// Visit every stored event spec through the visitor, the order is unspecified.
+		// The string views of the visited EventSpecView are only valid while the visitor is running,
+		// because they point into the string_storage which the manager keeps appending to.
+		template<typename VisitorT>
+		void ForEachEvent(std::pmr::wstring const& string_storage, VisitorT&& visitor) const
+		{
+			std::wstring_view storage_view{ string_storage };
+			auto visit_spec = [&](Spec const& spec) {
+				visitor(EventSpecView{
+					spec.id,
+					spec.name_index.Slice(storage_view),
+					spec.file_index.Slice(storage_view),
+					spec.line
+					});
+				};
+			for (auto& ite : events)
+			{
+				if (ite.id)
+				{
+					visit_spec(ite);
+				}
+			}
+			for (auto& ite : out_range_spec)
+			{
+				if (ite.first)
+				{
+					visit_spec(ite.second);
+				}
+			}
+		}
+
 	protected:
 
 		struct Spec
@@ -195,6 +226,15 @@ export namespace UEBabyPram::InsightParser
 
 		bool AddEvent(EventID id, std::wstring_view event_name, std::wstring_view file, std::size_t line);
 		bool AddEvent(EventID id, std::u8string_view event_name, std::wstring_view file, std::size_t line);
+
+		// Visit every event spec which is managed by this manager, the order is unspecified.
+		// The string views of the visited EventSpecView are only valid while the visitor is running.
+		template<typename VisitorT>
+		void ForEachEvent(VisitorT&& visitor) const
+		{
+			events.ForEachEvent(string_storage, visitor);
+			metadata_events.ForEachEvent(string_storage, visitor);
+		}
 
 	protected:
 
