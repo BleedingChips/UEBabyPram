@@ -299,7 +299,7 @@ namespace UEBabyPram::InsightFilter
 		DisplayDuration sampled_range_display_begin{ sampled_range.Begin() };
 		DisplayDuration sampled_range_display_end{ sampled_range.End() };
 
-		OutputLog<L"Time Range: [{:}m{:.6f}s, {}m{:.6f}s] Sampled Range: [{:}m{:.6f}s, {}m{:.6f}s]">(
+		OutputLog<L"    Time Range: [{:}m{:.6f}s, {}m{:.6f}s] Sampled Range: [{:}m{:.6f}s, {}m{:.6f}s]">(
 			printer,
 			total_range_display_begin.minutes.count(),
 			total_range_display_begin.seconds.count(),
