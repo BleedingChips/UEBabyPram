@@ -34,6 +34,15 @@ export namespace UEBabyPram::InsightParser
 
 	using DurationSec = std::chrono::duration<double, std::ratio<1, 1>>;
 
+	// A time point (or duration) which is displayed as "<minutes>m<seconds>s",
+	// e.g. 90.5 seconds is displayed as "1m30.500000s".
+	struct DisplayTimePoint
+	{
+		std::chrono::minutes minutes = std::chrono::minutes::zero();
+		DurationSec seconds = DurationSec::zero();
+		DisplayTimePoint(DurationSec duration);
+	};
+
 }
 
 export namespace std
@@ -49,19 +58,44 @@ export namespace std
 	{
 		std::size_t operator()(UEBabyPram::InsightParser::ThreadSystemID key) const { return key; }
 	};
+
+	// Format a DisplayTimePoint as "[minutes]m[seconds]s", where the minutes are printed
+	// as an integer and the seconds are printed with 6 digits after the decimal point,
+	// i.e. the output looks like "1m30.500000s". No format spec is accepted.
+	template<typename CharT>
+	struct formatter<UEBabyPram::InsightParser::DisplayTimePoint, CharT>
+	{
+		constexpr auto parse(std::basic_format_parse_context<CharT>& parse_context)
+		{
+			if (*parse_context.begin() == static_cast<CharT>('}'))
+				return parse_context.begin();
+			throw std::format_error("std::formatter<UEBabyPram::InsightParser::DisplayTimePoint> does not accept any format spec");
+		}
+
+		template<typename FormatContext>
+		auto format(UEBabyPram::InsightParser::DisplayTimePoint time_point, FormatContext& format_context) const
+		{
+			if constexpr (std::is_same_v<CharT, char>)
+			{
+				return std::format_to(
+					format_context.out(), "{:}m{:.6f}s",
+					time_point.minutes.count(), time_point.seconds.count()
+				);
+			}
+			else
+			{
+				return std::format_to(
+					format_context.out(), L"{:}m{:.6f}s",
+					time_point.minutes.count(), time_point.seconds.count()
+				);
+			}
+		}
+	};
 }
 
 export namespace UEBabyPram::InsightParser
 {
 	using UEBabyPram::InsightParser::DataResourceInterface;
-	
-
-	struct DisplayDuration
-	{
-		std::chrono::minutes minutes = std::chrono::minutes::zero();
-		DurationSec seconds = DurationSec::zero();
-		DisplayDuration(DurationSec duration);
-	};
 
 	struct ContextSwitchEventList
 	{

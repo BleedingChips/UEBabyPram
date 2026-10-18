@@ -8,6 +8,7 @@ module UEBabyPramInsightFilterCLI;
 import UEBabyPramInsightFilterParser;
 import UEBabyPramInsightFilterGameThreadParser;
 import UEBabyPramInsightFilterEventSearchParser;
+import UEBabyPramInsightFilterEventStatisticParser;
 import UEBabyPramInsightParser;
 import Potato;
 import std;
@@ -22,11 +23,13 @@ namespace UEBabyPram::InsightFilter
 		{
 			Log::Log<CommandLineLogCategory, Log::LogLevel::Display, LR"(
 UEBabyPramInsightFilter, report the GameThread timing of an unreal insight .utrace file,
-or search the events of the trace by a regular expression of the event name.
+search the events of the trace by a regular expression of the event name, or report the
+timing statistic of every event whose name is matched by a regular expression.
 
 Usage:
   UEBabyPramInsightFilter -f <path of the .utrace file> [options]
   UEBabyPramInsightFilter -f <path of the .utrace file> -r <regex> [options]
+  UEBabyPramInsightFilter -f <path of the .utrace file> -es <regex> [options]
 
 Options:
   -f, --file <path>
@@ -39,9 +42,22 @@ Options:
       When it is set, every event whose name is matched is reported with the file path and
       the line where it is defined, otherwise the GameThread timing analysis is reported.
       The same event name may be defined in several places, so every location is reported.
+      -r and -es can not be used at the same time.
+
+  -es, --event_stat <regex>
+      Regular expression of the event name, in the re2 (RE2) syntax, the same syntax as -r.
+      When it is set, the timing of every event whose name is matched is collected and
+      reported per event:
+        - the occurrence count, the mean duration and the mean exclude time,
+        - the median and the standard deviation of the duration of the single occurrence,
+        - the top longest occurrences with the call chain which leads to them.
+      The exclude time is the duration of the occurrence without the time of its child events.
 
   -mlc, --max_location_count <count>
       How many matched event locations should be reported with -r, 0 for no limit, default is 256.
+
+  -tx, --top_count <count>
+      How many of the longest occurrences should be reported with -es, default is 5.
 
   -mrf, --max_record_frame <count>
       How many of the longest game frames should be recorded and reported, default is 10.
@@ -62,7 +78,9 @@ Options:
 	{
 		GameThreadParser::Config config;
 		EventSearchParser::Config search_config;
+		EventStatisticParser::Config statistic_config;
 		bool search_event = false;
+		bool statistic_event = false;
 		std::u8string path_buffer;
 
 		for (std::size_t i = 1; i < argc; ++i)
@@ -146,6 +164,55 @@ Options:
 					return -1;
 				}
 			}
+			else if (argv_string == "-es" || argv_string == "--event_stat")
+			{
+				if (i + 1 < argc)
+				{
+					std::string_view pattern = argv[i + 1];
+					re2::RE2::Options options;
+					// The error is reported below, re2 should not print it a second time.
+					options.set_log_errors(false);
+					auto matcher = std::make_shared<re2::RE2>(pattern, options);
+					if (matcher->ok())
+					{
+						statistic_config.matcher = std::move(matcher);
+						statistic_event = true;
+						++i;
+					}
+					else {
+						Log::Log<CommandLineLogCategory, Log::LogLevel::Error, L"-es --event_stat <regex> : <{}> is not an acceptable regex : <{}>, use -h for detailed help">(
+							pattern,
+							std::string_view{ matcher->error() }
+						);
+						return -1;
+					}
+				}
+				else {
+					Log::Log<CommandLineLogCategory, Log::LogLevel::Error, L"Unsupport command -es --event_stat, use -h for detailed help">();
+					return -1;
+				}
+			}
+			else if (argv_string == "-tx" || argv_string == "--top_count")
+			{
+				if (i + 1 < argc)
+				{
+					std::size_t value = 0;
+					std::string_view sub_argv = argv[i + 1];
+					if (Format::DirectDeformat(sub_argv, value))
+					{
+						statistic_config.top_count = value;
+						++i;
+					}
+					else {
+						Log::Log<CommandLineLogCategory, Log::LogLevel::Error, L"-tx --top_count <count> : <{}> is not a valid count, use -h for detailed help">(sub_argv);
+						return -1;
+					}
+				}
+				else {
+					Log::Log<CommandLineLogCategory, Log::LogLevel::Error, L"Unsupport command -tx --top_count, use -h for detailed help">();
+					return -1;
+				}
+			}
 			else if (argv_string == "-mrf" || argv_string == "--max_record_frame")
 			{
 				if (i + 1 < argc)
@@ -216,7 +283,17 @@ Options:
 			}
 		}
 
-		if (search_event)
+		if (statistic_event && search_event)
+		{
+			Log::Log<CommandLineLogCategory, Log::LogLevel::Error, L"-r --regex and -es --event_stat can not be used at the same time, use -h for detailed help">();
+			return -1;
+		}
+
+		if (statistic_event)
+		{
+			setting.parser = std::make_unique<EventStatisticParser>(std::move(statistic_config));
+		}
+		else if (search_event)
 		{
 			setting.parser = std::make_unique<EventSearchParser>(std::move(search_config));
 		}

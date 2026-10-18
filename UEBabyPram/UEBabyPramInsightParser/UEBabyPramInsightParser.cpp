@@ -6,7 +6,7 @@ module UEBabyPramInsightParser;
 namespace UEBabyPram::InsightParser
 {
 
-	DisplayDuration::DisplayDuration(DurationSec duration)
+	DisplayTimePoint::DisplayTimePoint(DurationSec duration)
 	{
 		minutes = std::chrono::duration_cast<std::chrono::minutes>(duration);
 		seconds = duration - minutes;
@@ -145,7 +145,7 @@ namespace UEBabyPram::InsightParser
 					re.first->second.file_index = { new_string_index, new_file_index };
 					re.first->second.debug_name_view = re.first->second.name_index.Slice(std::wstring_view{ string_storage });
 					re.first->second.debug_file = re.first->second.file_index.Slice(std::wstring_view{ string_storage });
-					return false;
+					return true;
 				}
 			}
 		}
@@ -211,7 +211,7 @@ namespace UEBabyPram::InsightParser
 					re.first->second.file_index = { new_string_index, new_file_index };
 					re.first->second.debug_name_view = re.first->second.name_index.Slice(std::wstring_view{ string_storage });
 					re.first->second.debug_file = re.first->second.file_index.Slice(std::wstring_view{ string_storage });
-					return false;
+					return true;
 				}
 			}
 		}

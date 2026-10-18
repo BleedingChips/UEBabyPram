@@ -293,22 +293,18 @@ namespace UEBabyPram::InsightFilter
 			fps_frame_record[4] / static_cast<double>(total_count) * 100.0
 		);
 
-		DisplayDuration total_range_display_begin{ total_range.Begin() };
-		DisplayDuration total_range_display_end{ total_range.End() };
+		DisplayTimePoint total_range_display_begin{ total_range.Begin() };
+		DisplayTimePoint total_range_display_end{ total_range.End() };
 
-		DisplayDuration sampled_range_display_begin{ sampled_range.Begin() };
-		DisplayDuration sampled_range_display_end{ sampled_range.End() };
+		DisplayTimePoint sampled_range_display_begin{ sampled_range.Begin() };
+		DisplayTimePoint sampled_range_display_end{ sampled_range.End() };
 
-		OutputLog<L"    Time Range: [{:}m{:.6f}s, {}m{:.6f}s] Sampled Range: [{:}m{:.6f}s, {}m{:.6f}s]">(
+		OutputLog<L"    Time Range: [{}, {}] Sampled Range: [{}, {}]">(
 			printer,
-			total_range_display_begin.minutes.count(),
-			total_range_display_begin.seconds.count(),
-			total_range_display_end.minutes.count(),
-			total_range_display_end.seconds.count(),
-			sampled_range_display_begin.minutes.count(),
-			sampled_range_display_begin.seconds.count(),
-			sampled_range_display_end.minutes.count(),
-			sampled_range_display_end.seconds.count()
+			total_range_display_begin,
+			total_range_display_end,
+			sampled_range_display_begin,
+			sampled_range_display_end
 		);
 
 		OutputLog<L"{}Top <{}> Longgest GameThread :">(
@@ -332,10 +328,10 @@ namespace UEBabyPram::InsightFilter
 
 			auto context_switch_static = context_switch_list.GetContextSwitchStatis(game_thread_system_id, range);
 
-			DisplayDuration start_duration{ range.Begin() };
-			DisplayDuration end_duration{ range.End() };
+			DisplayTimePoint start_duration{ range.Begin() };
+			DisplayTimePoint end_duration{ range.End() };
 
-			OutputLog<L"    {:<4}- E:<{:.2f}ms>, ENCS:<{:.2f}ms>, TR: [{:}m{:.6f}s, {}m{:.6f}s];">(
+			OutputLog<L"    {:<4}- E:<{:.2f}ms>, ENCS:<{:.2f}ms>, TR: [{}, {}];">(
 				printer,
 				count,
 				std::chrono::duration_cast<
@@ -344,10 +340,8 @@ namespace UEBabyPram::InsightFilter
 				std::chrono::duration_cast<
 					std::chrono::duration<double, std::milli>
 				>(ite.duration - context_switch_static.active_time).count(),
-				start_duration.minutes.count(),
-				start_duration.seconds.count(),
-				end_duration.minutes.count(),
-				end_duration.seconds.count()
+				start_duration,
+				end_duration
 			);
 		}
 
@@ -362,10 +356,10 @@ namespace UEBabyPram::InsightFilter
 
 		for (auto& ite : longest_frame_records)
 		{
-			DisplayDuration m1{ ite.max_time_range.Begin() };
-			DisplayDuration m2{ ite.max_time_range.End() };
+			DisplayTimePoint m1{ ite.max_time_range.Begin() };
+			DisplayTimePoint m2{ ite.max_time_range.End() };
 
-			OutputLog< L"    Name:<{:}> -> E:<{:.2f}ms>, ENCS:<{:.2f}m>, OC:<{:}>, TR:[{:}m{:.6f}s, {:}m{:.6f}s];">(
+			OutputLog< L"    Name:<{:}> -> E:<{:.2f}ms>, ENCS:<{:.2f}m>, OC:<{:}>, TR:[{}, {}];">(
 				printer,
 				ite.event_name,
 				std::chrono::duration_cast<
@@ -375,10 +369,8 @@ namespace UEBabyPram::InsightFilter
 					std::chrono::duration<double, std::milli>
 				>(ite.durations_without_context_switch).count(),
 				ite.count,
-				m1.minutes.count(),
-				m1.seconds.count(),
-				m2.minutes.count(),
-				m2.seconds.count()
+				m1,
+				m2
 			);
 		}
 
@@ -394,10 +386,10 @@ namespace UEBabyPram::InsightFilter
 
 		for (auto& ite : longest_frame_records_in_top)
 		{
-			DisplayDuration m1{ ite.max_time_range.Begin() };
-			DisplayDuration m2{ ite.max_time_range.End() };
+			DisplayTimePoint m1{ ite.max_time_range.Begin() };
+			DisplayTimePoint m2{ ite.max_time_range.End() };
 
-			OutputLog< L"    Name:<{:}> -> E:<{:.2f}ms>, ENCS:<{:.2f}m>, OC:<{:}>, TR:[{:}m{:.6f}s, {:}m{:.6f}s]. From <No.{:}> Top Frame;">(
+			OutputLog< L"    Name:<{:}> -> E:<{:.2f}ms>, ENCS:<{:.2f}m>, OC:<{:}>, TR:[{}, {}]. From <No.{:}> Top Frame;">(
 				printer,
 				ite.event_name,
 				std::chrono::duration_cast<
@@ -407,10 +399,8 @@ namespace UEBabyPram::InsightFilter
 					std::chrono::duration<double, std::milli>
 				>(ite.durations_without_context_switch).count(),
 				ite.count,
-				m1.minutes.count(),
-				m1.seconds.count(),
-				m2.minutes.count(),
-				m2.seconds.count(),
+				m1,
+				m2,
 				ite.from_frame_index
 			);
 		}

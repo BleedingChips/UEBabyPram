@@ -53,7 +53,7 @@ namespace UEBabyPram::InsightParser
 			Builder.RouteEvent(RouteId_EndCapture, "CpuProfiler", "EndCapture"); // backward compatibility; removed in UE 5.1
 		}
 
-		if (Parser.IsParserRequired(ParserRequireFlag::META_DATA) || true)
+		if (Parser.IsParserRequired(ParserRequireFlag::META_DATA))
 		{
 			Builder.RouteEvent(RouteId_MetadataSpec, "CpuProfiler", "MetadataSpec");
 			Builder.RouteEvent(RouteId_Metadata, "CpuProfiler", "Metadata");

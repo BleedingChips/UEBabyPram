@@ -13,53 +13,37 @@ namespace UEBabyPram::InsightFilter
 {
 	using namespace InsightParser;
 
-	namespace
-	{
-		// Describe the error of a matcher which can not be used, the message is empty when it is usable.
-		std::wstring DescribeMatcherError(std::shared_ptr<re2::RE2> const& matcher)
-		{
-			if (!matcher)
-			{
-				return L"the matcher of the config is empty";
-			}
-			if (!matcher->ok())
-			{
-				std::wstring error_message = L"the matcher of the config is not valid : <";
-				Potato::Encode::UnicodeEncoder<char, wchar_t>::EncodeTo(
-					std::string_view{ matcher->error() },
-					std::back_inserter(error_message)
-				);
-				error_message += L">";
-				return error_message;
-			}
-			return {};
-		}
-	}
-
 	EventSearchParser::EventSearchParser(Config in_config)
 		: resource(in_config.resource)
 		, events_manager(EventSpecManager::Config{ 10000, 1000, true, &resource })
 		, event_locations(&resource)
+		, scanned_event_ids(&resource)
 		, matcher(std::move(in_config.matcher))
 		, matcher_error(DescribeMatcherError(matcher))
 		, max_location_count(in_config.max_location_count)
 	{
 	}
 
-	void EventSearchParser::OnCPUEventDiscovered(EventID id, std::wstring_view event_name, std::wstring_view file_name, std::size_t file_line)
+	bool EventSearchParser::IsNewScannedEvent(EventID id)
 	{
-		if (events_manager.AddEvent(id, event_name, file_name, file_line))
+		if (scanned_event_ids.insert(id).second)
 		{
 			++scanned_event_count;
+			return true;
 		}
+		return false;
 	}
 
-	void EventSearchParser::OnCPUScopeEventDiscovered(EventID id, std::u8string_view event_name)
+	void EventSearchParser::OnCPUEventDiscovered(EventID id, std::wstring_view event_name, std::wstring_view file_name, std::size_t file_line)
 	{
-		if (events_manager.AddEvent(id, event_name, {}, 0))
+		// An event without a name is never reported, every other event has to match the matcher.
+		if (!matcher_error.empty() || !IsNewScannedEvent(id) || event_name.empty() || !IsEventNameMatched(*matcher, event_name, encoded_event_name))
 		{
-			++scanned_event_count;
+			return;
 		}
+
+		// Only the matched event is stored, AllAnalyzeDone() takes the report from the events manager directly.
+		events_manager.AddEvent(id, event_name, file_name, file_line);
 	}
 
 	bool EventSearchParser::IsParserRequired(ParserRequireFlag flag) const
@@ -67,24 +51,6 @@ namespace UEBabyPram::InsightFilter
 		// Only the event spec, which carries the name and the definition location of every event,
 		// is required. The event batch, which carries the timing data, does not have to be parsed.
 		return flag == ParserRequireFlag::EVENT_SPEC;
-	}
-
-	bool EventSearchParser::IsEventNameMatched(std::wstring_view event_name)
-	{
-		encoded_event_name.clear();
-		Potato::Encode::UnicodeEncoder<wchar_t, char8_t>::EncodeTo(
-			event_name,
-			std::back_inserter(encoded_event_name)
-		);
-
-		// The regex has to match the whole event name, a partial match is not accepted.
-		return re2::RE2::FullMatch(
-			std::string_view{
-				reinterpret_cast<char const*>(encoded_event_name.data()),
-				encoded_event_name.size()
-			},
-			*matcher
-		);
 	}
 
 	void EventSearchParser::AllAnalyzeDone()
@@ -102,11 +68,9 @@ namespace UEBabyPram::InsightFilter
 
 		std::pmr::vector<EventLocation> matched_locations{ &resource };
 
+		// Every event in the events manager already matched the matcher when it was discovered,
+		// so the matched locations are taken from it without any further filtering.
 		events_manager.ForEachEvent([&](EventSpecManager::EventSpecView const& event_spec) {
-			if (event_spec.name_view.empty() || !IsEventNameMatched(event_spec.name_view))
-			{
-				return;
-			}
 			++matched_event_count;
 			matched_locations.push_back(EventLocation{
 				std::pmr::wstring{ event_spec.name_view, &resource },

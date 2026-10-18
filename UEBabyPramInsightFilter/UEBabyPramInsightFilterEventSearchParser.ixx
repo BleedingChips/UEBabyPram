@@ -21,6 +21,13 @@ export namespace UEBabyPram::InsightFilter
 	//
 	// An event name is not unique, the same name may be defined in several places, so the
 	// matched events are grouped by the event name and every location is reported separately.
+	//
+	// Every discovered event spec is checked against the matcher immediately, only the matched
+	// ones are stored in the events manager, so the report can be built from the events manager
+	// directly and the memory is not spent on the events which will never be reported.
+	//
+	// Only the event specs which carry a definition location (the file path + the line) are
+	// handled, the CPU scope events, which have no file and no line, are ignored.
 	struct EventSearchParser : public Parser
 	{
 		struct Config
@@ -49,16 +56,20 @@ export namespace UEBabyPram::InsightFilter
 		EventSearchParser(Config config = {});
 
 		virtual void OnCPUEventDiscovered(EventID id, std::wstring_view event_name, std::wstring_view file_name, std::size_t file_line) override;
-		virtual void OnCPUScopeEventDiscovered(EventID id, std::u8string_view event_name) override;
+		// The CPU scope event carries no definition location (no file and no line), so it is not
+		// handled here. OnCPUScopeEventDiscovered is left to the default implementation, which
+		// ignores the scope event.
 		virtual bool IsParserRequired(ParserRequireFlag flag) const override;
 		virtual void AllAnalyzeDone() override;
 		bool PrintToLog(Potato::Log::LogPrinter& printer) override;
 
 		// Every matched location, ordered by the event name, the file path and the line.
 		std::span<EventLocation const> GetEventLocations() const { return event_locations; }
-		// Count of the matched event specs, before the events which share the same name and location are merged.
+		// Count of the matched event specs, which is built in AllAnalyzeDone() from the events
+		// manager and is not merged by the name and the location.
 		std::size_t GetMatchedEventCount() const { return matched_event_count; }
-		// Count of the scanned event specs.
+		// Count of the scanned event specs, which is accumulated while the event specs are discovered.
+		// The CPU scope events are not handled and are not counted.
 		std::size_t GetScannedEventCount() const { return scanned_event_count; }
 		// Count of the location which is dropped by Config::max_location_count.
 		std::size_t GetDroppedLocationCount() const { return dropped_location_count; }
@@ -67,11 +78,16 @@ export namespace UEBabyPram::InsightFilter
 
 	protected:
 
-		bool IsEventNameMatched(std::wstring_view event_name);
+		// The parser may report the same event spec more than once, count it only once.
+		// Returns true when the spec has not been scanned before.
+		bool IsNewScannedEvent(EventID id);
 
 		std::pmr::unsynchronized_pool_resource resource;
 		EventSpecManager events_manager;
 		std::pmr::vector<EventLocation> event_locations;
+		// The ids of the scanned event specs, it only dedups the counter, the specs themselves
+		// are stored in the events manager when they match the matcher.
+		std::pmr::unordered_set<EventID> scanned_event_ids;
 		std::shared_ptr<re2::RE2> matcher;
 		std::wstring matcher_error;
 		// The matcher needs the event name in UTF-8, the scratch buffer avoids an allocation per event.
