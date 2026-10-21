@@ -15,34 +15,35 @@ namespace UEBabyPram::InsightFilter
 		: resource(in_config.resource)
 		, events_manager(EventSpecManager::Config{ 10000, 1000, false, &resource })
 		, matcher(std::move(in_config.matcher))
-		, matcher_error(DescribeMatcherError(matcher))
-		, matched_event_index(&resource)
 		, event_statistics(&resource)
-		, top_records(&resource)
-		, thread_names(&resource)
 		, top_count(in_config.top_count)
 	{
+		// The matcher is compiled and checked by the creator of the config, an invalid matcher has
+		// to be reported there, the parser never reports the error of the matcher.
+		assert(matcher && matcher->ok());
 	}
 
-	void EventStatisticParser::OnThreadDiscovered(ThreadID thread_id, ThreadSystemID thread_system_id, std::string_view thread_name)
+	// The name of the event is resolved from the events manager, and the statistic which already
+	// carries that name is found with the name index, so every event name is grouped as soon as it
+	// is discovered, and a new statistic is only created for a name which is seen for the first time.
+	std::size_t EventStatisticParser::AddEventStatistic(EventID id)
 	{
-		if (!thread_names.contains(thread_id.id))
+		std::wstring_view event_name = events_manager.GetEventSpec(id).name_view;
+
+		for (std::size_t index = 0; index < event_statistics.size(); ++index)
 		{
-			auto& name = thread_names[thread_id.id];
-			Potato::Encode::UnicodeEncoder<char, wchar_t>::EncodeTo(
-				thread_name,
-				std::back_inserter(name)
-			);
+			auto& statistic = event_statistics[index];
+			assert(!statistic.event_ids.empty());
+			auto cur_name = events_manager.GetEventSpec(statistic.event_ids.front()).name_view;
+			if (event_name == cur_name)
+			{
+				statistic.event_ids.emplace_back(id);
+				return index;
+			}
 		}
-	}
 
-	// Every event spec gets its own statistic here, the statistics which share the same event name
-	// are merged in AllAnalyzeDone(), so this is a constant time operation per event spec.
-	std::size_t EventStatisticParser::AddEventStatistic(EventID id, std::wstring_view event_name)
-	{
 		std::size_t index = event_statistics.size();
-		event_statistics.emplace_back(&resource).event_name.assign(event_name);
-		matched_event_index.emplace(id, index);
+		event_statistics.emplace_back(&resource).event_ids.push_back(id);
 		return index;
 	}
 
@@ -56,9 +57,9 @@ namespace UEBabyPram::InsightFilter
 		{
 			// Keep the id of the matched event, so that the sample of every occurrence in the stack
 			// tree is found by a single lookup.
-			if (matcher_error.empty() && !event_name.empty() && IsEventNameMatched(*matcher, event_name, encoded_event_name))
+			if (!event_name.empty() && IsEventNameMatched(*matcher, event_name, encoded_event_name))
 			{
-				AddEventStatistic(id, event_name);
+				AddEventStatistic(id);
 			}
 		}
 	}
@@ -67,21 +68,13 @@ namespace UEBabyPram::InsightFilter
 	{
 		// The event of the CPU scope logger carries no file and no line, its name is the only
 		// information of the spec, but it is carried by the stack tree as well, so it is handled
-		// the same way as the event of the event spec.
+		// the same way as the event of the event spec. The name is already UTF-8, which is what the
+		// matcher needs, so it is matched in place without any conversion.
 		if (events_manager.AddEvent(id, event_name, {}, 0))
 		{
-			if (matcher_error.empty() && !event_name.empty())
+			if (!event_name.empty() && IsEventNameMatched(*matcher, event_name))
 			{
-				std::wstring name_storage;
-				Potato::Encode::UnicodeEncoder<char8_t, wchar_t>::EncodeTo(
-					event_name,
-					std::back_inserter(name_storage)
-				);
-
-				if (IsEventNameMatched(*matcher, name_storage, encoded_event_name))
-				{
-					AddEventStatistic(id, name_storage);
-				}
+				AddEventStatistic(id);
 			}
 		}
 	}
@@ -97,232 +90,116 @@ namespace UEBabyPram::InsightFilter
 			|| flag == ParserRequireFlag::CPU_EVENT;
 	}
 
-	auto EventStatisticParser::CopyEventName(EventID id) -> std::pmr::wstring
-	{
-		auto spec = events_manager.GetEventSpec(id);
-		if (spec.name_view.empty())
-		{
-			return std::pmr::wstring{ std::wstring_view{ L"<Unknow>" }, &resource };
-		}
-		return std::pmr::wstring{ spec.name_view, &resource };
-	}
-
-	auto EventStatisticParser::GetThreadName(ThreadID thread_id) -> std::wstring_view
-	{
-		if (auto find = thread_names.find(thread_id.id); find != thread_names.end())
-		{
-			return find->second;
-		}
-		return {};
-	}
-
 	void EventStatisticParser::OnCPUStackTree(ThreadCPUEventView event_scope)
 	{
-		if (matcher_error.empty() && !matched_event_index.empty())
+		for (EventStatistic& ite : event_statistics)
 		{
-			// Every event of the stack tree is visited once, in the order of the beginning of the event.
 			std::size_t index_offset = 0;
 			while (index_offset < event_scope.view.size())
 			{
-				auto current_event = event_scope.FindNextEvent({}, index_offset);
-
-				if (!current_event)
+				auto current_event = FindStatisticEvent(event_scope, ite, index_offset);
+				if (current_event)
 				{
+					RecordEventOccurrence(event_scope, current_event, ite);
+					index_offset = current_event.index_range.End();
+					continue;
+				}
+				else {
 					break;
 				}
-
-				if (auto find = matched_event_index.find(current_event.event_id); find != matched_event_index.end())
-				{
-					RecordSample(event_scope, current_event, find->second);
-				}
-
-				index_offset = current_event.index_range.Begin() + 1;
 			}
 		}
 	}
 
-	void EventStatisticParser::RecordSample(ThreadCPUEventView event_scope, ThreadCPUEventView::EventView event_view, std::size_t statistic_index)
+	// The search of the occurrence is the place where the rule of which event counts as an
+	// occurrence of the statistic will grow, so it is kept apart from the walk of the stack tree.
+	auto EventStatisticParser::FindStatisticEvent(ThreadCPUEventView event_scope, EventStatistic const& statistic, std::size_t offset) const -> ThreadCPUEventView::EventView
 	{
-		auto exclude_time = event_scope.GetExcludeTime(event_view);
-		assert(exclude_time.has_value());
-		if (!exclude_time)
+		return event_scope.FindNextEvent(
+			{ statistic.event_ids.data(), statistic.event_ids.size() },
+			offset
+		);
+	}
+
+	void EventStatisticParser::RecordEventOccurrence(ThreadCPUEventView event_scope, ThreadCPUEventView::EventView event_view, EventStatistic& statistic)
+	{
+		// The duration of the occurrence is the whole time which it takes, and the exclude time is
+		// its duration without the time spent in the child events.
+		DurationSec duration = event_view.time_range.Size();
+		DurationSec exclude_time = DurationSec::zero();
+		if (auto exclude_statistic = event_scope.GetExcludeTime(event_view); exclude_statistic)
 		{
-			return;
+			exclude_time = exclude_statistic->active_time;
 		}
 
-		DurationSec duration = event_view.time_range.Size();
-
-		auto& statistic = event_statistics[statistic_index];
-		statistic.samples.push_back(EventSample{ duration, exclude_time->active_time });
+		// Accumulate the occurrence into the statistic of its event name, the duration of the single
+		// occurrence is kept for the median and the standard deviation.
+		++statistic.count;
+		statistic.total_duration += duration;
+		statistic.total_exclude_time += exclude_time;
+		statistic.durations.push_back(duration);
 
 		if (top_count == 0)
 		{
 			return;
 		}
 
-		// Keep the list of the longest occurrences, the call chain is only copied for a new entry.
-		if (top_records.size() >= top_count)
+		// Keep the top N longest occurrences of this event name: the occurrence is recorded and the
+		// shortest one is kicked out when the list is already full, so an occurrence which does not
+		// rank in the top N is kicked out right away.
+		statistic.top_occurrences.push_back(TopEventOccurrence{ event_view.time_range, exclude_time });
+		if (statistic.top_occurrences.size() > top_count)
 		{
-			auto shortest = std::min_element(top_records.begin(), top_records.end(), [](TopEventRecord const& left, TopEventRecord const& right) {
-				return left.duration < right.duration;
+			auto shortest = std::min_element(
+				statistic.top_occurrences.begin(),
+				statistic.top_occurrences.end(),
+				[](TopEventOccurrence const& left, TopEventOccurrence const& right) {
+					return left.time_range.Size() < right.time_range.Size();
 				});
-			if (shortest != top_records.end() && duration <= shortest->duration)
+			if (shortest != statistic.top_occurrences.end())
 			{
-				return;
+				statistic.top_occurrences.erase(shortest);
 			}
 		}
-
-		TopEventRecord& record = top_records.emplace_back(&resource);
-		record.event_name.assign(statistic.event_name);
-		record.thread_id = event_scope.thread_id;
-		record.thread_name.assign(GetThreadName(event_scope.thread_id));
-		record.duration = duration;
-		record.exclude_time = exclude_time->active_time;
-
-		// Collect the enclosing events, from the innermost to the outermost, the parent of an event
-		// is the closest event which is one level above it and begins before it.
-		std::size_t target_depth = event_view.depth;
-		for (std::size_t cursor = event_view.index_range.Begin(); cursor > 0 && target_depth > 0;)
-		{
-			--cursor;
-			auto const& ref = event_scope.view[cursor];
-			if (ref.event_id && ref.depth + 1 == target_depth)
-			{
-				record.call_chain.push_back(CopyEventName(ref.event_id));
-				target_depth = ref.depth;
-			}
-		}
-
-		std::reverse(record.call_chain.begin(), record.call_chain.end());
-		record.call_chain.push_back(std::pmr::wstring{ std::wstring_view{ record.event_name }, &resource });
-
-		if (top_records.size() > top_count)
-		{
-			auto shortest = std::min_element(top_records.begin(), top_records.end(), [](TopEventRecord const& left, TopEventRecord const& right) {
-				return left.duration < right.duration;
-				});
-			if (shortest != top_records.end())
-			{
-				top_records.erase(shortest);
-			}
-		}
-	}
-
-	void EventStatisticParser::MergeEventStatistics()
-	{
-		// The same event name may be defined in several places, which gives several event specs,
-		// merge their samples so that every event name is reported once.
-		std::sort(event_statistics.begin(), event_statistics.end(), [](EventStatistic const& left, EventStatistic const& right) {
-			return left.event_name < right.event_name;
-			});
-
-		std::size_t output_index = 0;
-		for (std::size_t index = 1; index < event_statistics.size(); ++index)
-		{
-			if (event_statistics[index].event_name == event_statistics[output_index].event_name)
-			{
-				auto& target = event_statistics[output_index];
-				auto& source = event_statistics[index];
-				if (target.samples.size() < source.samples.size())
-				{
-					// Append the smaller list to the bigger one, to move the memory of the samples
-					// as seldom as possible.
-					std::swap(target.samples, source.samples);
-				}
-				target.samples.insert(
-					target.samples.end(),
-					std::make_move_iterator(source.samples.begin()),
-					std::make_move_iterator(source.samples.end())
-				);
-			}
-			else {
-				++output_index;
-				if (output_index != index)
-				{
-					event_statistics[output_index] = std::move(event_statistics[index]);
-				}
-			}
-		}
-
-		event_statistics.erase(event_statistics.begin() + output_index + 1, event_statistics.end());
-	}
-
-	void EventStatisticParser::BuildEventStatistic(EventStatistic& statistic)
-	{
-		// Sort the single occurrences by their own duration in ascending order.
-		std::sort(statistic.samples.begin(), statistic.samples.end(), [](EventSample const& left, EventSample const& right) {
-			return left.duration < right.duration;
-			});
-
-		statistic.count = statistic.samples.size();
-		if (statistic.count == 0)
-		{
-			return;
-		}
-
-		DurationSec total_duration = DurationSec::zero();
-		DurationSec total_exclude_time = DurationSec::zero();
-		for (auto const& sample : statistic.samples)
-		{
-			total_duration += sample.duration;
-			total_exclude_time += sample.exclude_time;
-		}
-
-		statistic.mean_duration = total_duration / static_cast<double>(statistic.count);
-		statistic.mean_exclude_time = total_exclude_time / static_cast<double>(statistic.count);
-
-		// The median of the sorted durations, the middle sample for an odd count, and the mean of
-		// the two middle samples for an even count.
-		std::size_t middle_index = statistic.count / 2;
-		if ((statistic.count % 2) != 0)
-		{
-			statistic.median_duration = statistic.samples[middle_index].duration;
-		}
-		else {
-			statistic.median_duration = (statistic.samples[middle_index - 1].duration + statistic.samples[middle_index].duration) / 2.0;
-		}
-
-		// The standard deviation of the durations, the square root of the sum of the square of the
-		// distance to the mean divided by the count, the two pass form keeps the precision.
-		double square_distance = 0.0;
-		for (auto const& sample : statistic.samples)
-		{
-			double distance = (sample.duration - statistic.mean_duration).count();
-			square_distance += distance * distance;
-		}
-		statistic.duration_standard_deviation = DurationSec{ std::sqrt(square_distance / static_cast<double>(statistic.count)) };
 	}
 
 	void EventStatisticParser::AllAnalyzeDone()
 	{
 		Parser::AllAnalyzeDone();
 
-		// The index of the matched event is only meaningful before the statistics are reordered.
-		matched_event_index.clear();
-
-		if (!matcher_error.empty())
-		{
-			event_statistics.clear();
-			top_records.clear();
-			return;
-		}
-
-		MergeEventStatistics();
-
 		for (auto& statistic : event_statistics)
 		{
-			BuildEventStatistic(statistic);
+			if (statistic.count == 0)
+			{
+				continue;
+			}
+
+			// The median and the standard deviation are computed from the duration of the single
+			// occurrence, so the durations are sorted first.
+			std::sort(statistic.durations.begin(), statistic.durations.end());
+
+			// The median is the middle duration for an odd count, and the mean of the two middle
+			// durations for an even count.
+			std::size_t middle_index = statistic.count / 2;
+			if ((statistic.count % 2) != 0)
+			{
+				statistic.median_duration = statistic.durations[middle_index];
+			}
+			else {
+				statistic.median_duration = (statistic.durations[middle_index - 1] + statistic.durations[middle_index]) / 2.0;
+			}
+
+			// The standard deviation is the square root of the variance of the durations, the two
+			// pass form keeps the precision, the mean is taken from the total which is accumulated.
+			DurationSec mean_duration = statistic.total_duration / static_cast<double>(statistic.count);
+			double square_distance = 0.0;
+			for (auto const& duration : statistic.durations)
+			{
+				double distance = (duration - mean_duration).count();
+				square_distance += distance * distance;
+			}
+			statistic.duration_standard_deviation = DurationSec{ std::sqrt(square_distance / static_cast<double>(statistic.count)) };
 		}
-
-		// Report the shortest event first, so the events which cost the most time are at the end.
-		std::sort(event_statistics.begin(), event_statistics.end(), [](EventStatistic const& left, EventStatistic const& right) {
-			return left.mean_duration < right.mean_duration;
-			});
-
-		// Report the longest occurrence first.
-		std::sort(top_records.begin(), top_records.end(), [](TopEventRecord const& left, TopEventRecord const& right) {
-			return left.duration > right.duration;
-			});
 	}
 
 	bool EventStatisticParser::PrintToLog(Potato::Log::LogPrinter& printer)
@@ -331,78 +208,79 @@ namespace UEBabyPram::InsightFilter
 
 		OutputLog<L"EventStatisticParser Output:">(printer);
 
-		if (!matcher_error.empty())
-		{
-			OutputLog<L"    Unsupport Event Matcher : <{}>">(printer, matcher_error);
-			return false;
-		}
-
-		std::size_t total_count = 0;
-		for (auto const& statistic : event_statistics)
-		{
-			total_count += statistic.count;
-		}
-
-		OutputLog<L"    Event Regex <{}>, Matched Event <{}>, Occurrence <{}>">(
+		// Every statistic is reported on its own line, so the statistics are not summed up here.
+		OutputLog<L"    Event Regex <{}>">(
 			printer,
-			std::string_view{ matcher->pattern() },
-			event_statistics.size(),
-			total_count
+			std::string_view{ matcher->pattern() }
 		);
 
-		OutputLog<L"    (D: Duration of the single occurrence; E: Exclude Time, the duration without the time of the child events; Median D: the median of the single duration; Std D: the standard deviation of the single duration)">(
+		OutputLog<L"    (D: Duration of the single occurrence; E: Exclude Time, the duration without the time of the child events; Mean D / Median D / Std D: the mean, the median and the standard deviation of the single duration; TR: Time Range of the occurrence)">(
 			printer
 		);
 
 		for (auto const& statistic : event_statistics)
 		{
-			OutputLog<L"    Name:<{:}>, Count:<{}>, Mean D:<{:.3f}ms>, Mean E:<{:.3f}ms>, Median D:<{:.3f}ms>, Std D:<{:.3f}ms>">(
-				printer,
-				std::wstring_view{ statistic.event_name },
-				statistic.count,
-				statistic.mean_duration.count() * 1000.0,
-				statistic.mean_exclude_time.count() * 1000.0,
-				statistic.median_duration.count() * 1000.0,
-				statistic.duration_standard_deviation.count() * 1000.0
-			);
-		}
-
-		OutputLog<L"{}Top <{}> Longest Occurrence:">(
-			printer,
-			printer.EndLineString(),
-			top_count
-		);
-
-		std::size_t index = 0;
-		for (auto const& record : top_records)
-		{
-			OutputLog<L"    <{:<4}> Name:<{:}>, Thread:<{:} No.{:}>, D:<{:.3f}ms>, E:<{:.3f}ms>">(
-				printer,
-				index,
-				std::wstring_view{ record.event_name },
-				std::wstring_view{ record.thread_name },
-				record.thread_id.id,
-				record.duration.count() * 1000.0,
-				record.exclude_time.count() * 1000.0
-			);
-
-			std::wstring call_chain;
-			for (auto const& frame : record.call_chain)
+			// The statistic which has no occurrence carries no timing information, so it is not
+			// reported at all.
+			if (statistic.count == 0)
 			{
-				if (!call_chain.empty())
-				{
-					call_chain += L" -> ";
-				}
-				call_chain += frame;
+				continue;
 			}
 
-			OutputLog<L"        Chain:<{:}>, Chain Depth:<{}>">(
+			// The name of the event is not stored by the statistic, it is taken from the events
+			// manager with the first id of the statistic.
+			std::wstring_view event_name = L"<Unknow>";
+			if (!statistic.event_ids.empty())
+			{
+				auto event_spec = events_manager.GetEventSpec(statistic.event_ids.front());
+				if (!event_spec.name_view.empty())
+				{
+					event_name = event_spec.name_view;
+				}
+			}
+
+			// The statistic is only reported when it has at least one occurrence, so the count is
+			// never zero here.
+			double mean_duration = (statistic.total_duration / static_cast<double>(statistic.count)).count() * 1000.0;
+			double mean_exclude_time = (statistic.total_exclude_time / static_cast<double>(statistic.count)).count() * 1000.0;
+
+			OutputLog<L"    Name:<{:}>, EventID:<{}>, Count:<{}>, Total D:<{:.3f}ms>, Mean D:<{:.3f}ms>, Median D:<{:.3f}ms>, Std D:<{:.3f}ms>, Total E:<{:.3f}ms>, Mean E:<{:.3f}ms>">(
 				printer,
-				std::wstring_view{ call_chain },
-				record.call_chain.size()
+				event_name,
+				statistic.event_ids.size(),
+				statistic.count,
+				statistic.total_duration.count() * 1000.0,
+				mean_duration,
+				statistic.median_duration.count() * 1000.0,
+				statistic.duration_standard_deviation.count() * 1000.0,
+				statistic.total_exclude_time.count() * 1000.0,
+				mean_exclude_time
 			);
 
-			++index;
+			if (statistic.top_occurrences.empty())
+			{
+				continue;
+			}
+
+			OutputLog<L"        Top <{}> Longest Occurrence:">(printer, statistic.top_occurrences.size());
+
+			std::size_t index = 0;
+			for (auto const& occurrence : statistic.top_occurrences)
+			{
+				DisplayTimePoint begin_time{ occurrence.time_range.Begin() };
+				DisplayTimePoint end_time{ occurrence.time_range.End() };
+
+				OutputLog<L"            <{:<4}> D:<{:.3f}ms>, E:<{:.3f}ms>, TR: [{}, {}]">(
+					printer,
+					index,
+					occurrence.time_range.Size().count() * 1000.0,
+					occurrence.exclude_time.count() * 1000.0,
+					begin_time,
+					end_time
+				);
+
+				++index;
+			}
 		}
 
 		return true;

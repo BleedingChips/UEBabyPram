@@ -41,7 +41,11 @@ Options:
       ex: -r "FEngineLoop::.*" or -r ".*Tick.*".
       When it is set, every event whose name is matched is reported with the file path and
       the line where it is defined, otherwise the GameThread timing analysis is reported.
+      The same regex may match several event names, the matched events are grouped by the
+      event name, every name is counted separately.
       The same event name may be defined in several places, so every location is reported.
+      The event of the CPU scope logger carries no location, it is reported with
+      an unknown file and line 0.
       -r and -es can not be used at the same time.
 
   -es, --event_stat <regex>

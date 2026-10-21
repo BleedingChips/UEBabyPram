@@ -338,6 +338,8 @@ export namespace UEBabyPram::InsightParser
 		
 		EventView FindNextEvent(std::span<EventID const> event_id_span, Potato::Misc::IndexSpan<> index_range) const;
 
+		EventView FindParentEvent(std::span<EventID const> event_id_span, EventView child_event) const;
+
 		struct ExcludeTimeStatis
 		{
 			DurationSec active_time = DurationSec::zero();
@@ -383,7 +385,15 @@ export namespace UEBabyPram::InsightParser
 		virtual void ContextSwitchEvent(ThreadSystemID thread_id, std::size_t core_name, Potato::Misc::IndexSpan<DurationSec> duration) {}
 		virtual void OnThreadDiscovered(ThreadID thread_id, ThreadSystemID thread_system_id, std::string_view thread_name) {}
 		virtual void OnCPUStackTree(ThreadCPUEventView event_scope) {}
+		// Called when a CPU event spec ("CpuProfiler/EventSpec") is discovered.
+		// Requires ParserRequireFlag::EVENT_SPEC, it is not called without that flag.
+		// Note: the same event_name may correspond to multiple EventIDs (the same name can be
+		// declared more than once), but the same EventID is reported only once.
 		virtual void OnCPUEventDiscovered(EventID id, std::wstring_view event_name, std::wstring_view file_name, std::size_t file_line) {}
+		// Called when a CPU scoped event (a "Cpu" logger scope) is discovered.
+		// Requires ParserRequireFlag::META_DATA.
+		// Note: contrary to OnCPUEventDiscovered, the same EventID shows up multiple times
+		// (once per scope instance), so implementations must tolerate repeated ids.
 		virtual void OnCPUScopeEventDiscovered(EventID id, std::u8string_view event_name) {}
 		virtual	void AllAnalyzeDone() override;
 		virtual bool IsThreadRequired(ThreadID thread_id) const { return true; }

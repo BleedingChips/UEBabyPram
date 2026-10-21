@@ -458,6 +458,34 @@ namespace UEBabyPram::InsightParser
 		};
 	}
 
+	ThreadCPUEventView::EventView ThreadCPUEventView::FindParentEvent(std::span<EventID const> event_id_span, EventView child_event) const
+	{
+		if (child_event && child_event.depth != 0)
+		{
+			assert(child_event.index_range.Begin() > 0);
+			auto iterator = child_event.index_range.Begin();
+			do {
+				--iterator;
+				auto cur = view[iterator];
+				if (
+					cur.event_id && cur.depth < child_event.depth
+					&& (event_id_span.empty() || std::find(event_id_span.begin(), event_id_span.end(), cur.event_id) != event_id_span.end())
+					)
+				{
+					auto find = FindFirstDepth(cur.depth, iterator + 1);
+					assert(find);
+					return EventView{
+						cur.event_id,
+						{iterator, find.index_offset},
+						{cur.time, find.time_point},
+						cur.depth
+					};
+				}
+			} while (iterator > 0);
+		}
+		return {};
+	}
+
 	auto ThreadCPUEventView::GetExcludeTime(EventView view) const -> std::optional<ExcludeTimeStatis>
 	{
 		if (view)

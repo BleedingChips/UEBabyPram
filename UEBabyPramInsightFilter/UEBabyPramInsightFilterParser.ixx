@@ -30,26 +30,6 @@ export namespace UEBabyPram::InsightFilter
 		);
 	}
 
-	// Describe the error of the matcher which can not be used, the message is empty when the matcher is usable.
-	inline std::wstring DescribeMatcherError(std::shared_ptr<re2::RE2> const& matcher)
-	{
-		if (!matcher)
-		{
-			return L"the matcher of the config is empty";
-		}
-		if (!matcher->ok())
-		{
-			std::wstring error_message = L"the matcher of the config is not valid : <";
-			Potato::Encode::UnicodeEncoder<char, wchar_t>::EncodeTo(
-				std::string_view{ matcher->error() },
-				std::back_inserter(error_message)
-			);
-			error_message += L">";
-			return error_message;
-		}
-		return {};
-	}
-
 	// Check whether the event name is fully matched by the matcher, a partial match is not accepted.
 	// The matcher needs the event name in UTF-8, the utf8_buffer is a scratch storage of the caller
 	// which avoids an allocation per call.
@@ -68,6 +48,23 @@ export namespace UEBabyPram::InsightFilter
 			},
 			matcher
 		);
+	}
+
+	// Check whether the event name is fully matched by the matcher, a partial match is not accepted.
+	// The event name is already UTF-8, so it is matched in place without a copy and no scratch
+	// storage is needed.
+	inline bool IsEventNameMatched(re2::RE2 const& matcher, std::u8string_view event_name)
+	{
+		std::string_view name_view;
+		if (!event_name.empty())
+		{
+			name_view = std::string_view{
+				reinterpret_cast<char const*>(event_name.data()),
+				event_name.size()
+			};
+		}
+
+		return re2::RE2::FullMatch(name_view, matcher);
 	}
 }
 

@@ -59,7 +59,12 @@ namespace UEBabyPram::InsightParser
 			Builder.RouteEvent(RouteId_Metadata, "CpuProfiler", "Metadata");
 		}
 
-		if (Parser.IsParserRequired(ParserRequireFlag::CPU_EVENT))
+		// The scoped trace events are the source of OnCPUScopeEventDiscovered, which is a part of
+		// the metadata interface, so the route is also required when only the metadata is asked for.
+		if (
+			Parser.IsParserRequired(ParserRequireFlag::CPU_EVENT)
+			|| Parser.IsParserRequired(ParserRequireFlag::META_DATA)
+			)
 		{
 			Builder.RouteLoggerEvents(RouteId_CpuScope, "Cpu", true); // scoped trace events
 		}
