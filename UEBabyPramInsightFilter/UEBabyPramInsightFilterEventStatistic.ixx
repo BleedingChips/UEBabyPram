@@ -2,7 +2,7 @@ module;
 
 #include <re2/re2.h>
 
-export module UEBabyPramInsightFilterEventStatisticParser;
+export module UEBabyPramInsightFilterEventStatistic;
 
 import UEBabyPramInsightFilterParser;
 import UEBabyPramInsightParser;

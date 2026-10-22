@@ -6,9 +6,10 @@ module;
 module UEBabyPramInsightFilterCLI;
 
 import UEBabyPramInsightFilterParser;
-import UEBabyPramInsightFilterGameThreadParser;
-import UEBabyPramInsightFilterEventSearchParser;
-import UEBabyPramInsightFilterEventStatisticParser;
+import UEBabyPramInsightFilterGameThread;
+import UEBabyPramInsightFilterEventSearch;
+import UEBabyPramInsightFilterEventStatistic;
+import UEBabyPramInsightFilterThreadSearch;
 import UEBabyPramInsightParser;
 import Potato;
 import std;
@@ -23,13 +24,15 @@ namespace UEBabyPram::InsightFilter
 		{
 			Log::Log<CommandLineLogCategory, Log::LogLevel::Display, LR"(
 UEBabyPramInsightFilter, report the GameThread timing of an unreal insight .utrace file,
-search the events of the trace by a regular expression of the event name, or report the
-timing statistic of every event whose name is matched by a regular expression.
+search the events of the trace by a regular expression of the event name, report the
+timing statistic of every event whose name is matched by a regular expression, or search
+the threads of the trace by a regular expression of the thread name.
 
 Usage:
   UEBabyPramInsightFilter -f <path of the .utrace file> [options]
   UEBabyPramInsightFilter -f <path of the .utrace file> -r <regex> [options]
   UEBabyPramInsightFilter -f <path of the .utrace file> -es <regex> [options]
+  UEBabyPramInsightFilter -f <path of the .utrace file> -ts <regex> [options]
 
 Options:
   -f, --file <path>
@@ -46,7 +49,7 @@ Options:
       The same event name may be defined in several places, so every location is reported.
       The event of the CPU scope logger carries no location, it is reported with
       an unknown file and line 0.
-      -r and -es can not be used at the same time.
+      -r, -es and -ts can not be used at the same time.
 
   -es, --event_stat <regex>
       Regular expression of the event name, in the re2 (RE2) syntax, the same syntax as -r.
@@ -56,6 +59,14 @@ Options:
         - the median and the standard deviation of the duration of the single occurrence,
         - the top longest occurrences with the call chain which leads to them.
       The exclude time is the duration of the occurrence without the time of its child events.
+
+  -ts, --thread_search <regex>
+      Regular expression of the thread name, in the re2 (RE2) syntax, the same syntax as -r.
+      The expression has to match the whole thread name, ex: -ts ".*Thread" or -ts "GameThread".
+      When it is set, every thread whose name is matched is reported with the thread id and
+      the system thread id.
+      An empty regex (ex: -ts "") matches every thread of the trace.
+      -r, -es and -ts can not be used at the same time.
 
   -mlc, --max_location_count <count>
       How many matched event locations should be reported with -r, 0 for no limit, default is 256.
@@ -83,8 +94,10 @@ Options:
 		GameThreadParser::Config config;
 		EventSearchParser::Config search_config;
 		EventStatisticParser::Config statistic_config;
+		ThreadSearchParser::Config thread_config;
 		bool search_event = false;
 		bool statistic_event = false;
+		bool search_thread = false;
 		std::u8string path_buffer;
 
 		for (std::size_t i = 1; i < argc; ++i)
@@ -196,6 +209,35 @@ Options:
 					return -1;
 				}
 			}
+			else if (argv_string == "-ts" || argv_string == "--thread_search")
+			{
+				if (i + 1 < argc)
+				{
+					std::string_view pattern = argv[i + 1];
+					re2::RE2::Options options;
+					// The error is reported below, re2 should not print it a second time.
+					options.set_log_errors(false);
+					auto matcher = std::make_shared<re2::RE2>(pattern, options);
+					if (matcher->ok())
+					{
+						// An empty pattern is accepted, the parser matches every thread with it.
+						thread_config.matcher = std::move(matcher);
+						search_thread = true;
+						++i;
+					}
+					else {
+						Log::Log<CommandLineLogCategory, Log::LogLevel::Error, L"-ts --thread_search <regex> : <{}> is not an acceptable regex : <{}>, use -h for detailed help">(
+							pattern,
+							std::string_view{ matcher->error() }
+						);
+						return -1;
+					}
+				}
+				else {
+					Log::Log<CommandLineLogCategory, Log::LogLevel::Error, L"Unsupport command -ts --thread_search, use -h for detailed help">();
+					return -1;
+				}
+			}
 			else if (argv_string == "-tx" || argv_string == "--top_count")
 			{
 				if (i + 1 < argc)
@@ -293,7 +335,17 @@ Options:
 			return -1;
 		}
 
-		if (statistic_event)
+		if (search_thread && (search_event || statistic_event))
+		{
+			Log::Log<CommandLineLogCategory, Log::LogLevel::Error, L"-ts --thread_search can not be used with -r --regex or -es --event_stat, use -h for detailed help">();
+			return -1;
+		}
+
+		if (search_thread)
+		{
+			setting.parser = std::make_unique<ThreadSearchParser>(std::move(thread_config));
+		}
+		else if (statistic_event)
 		{
 			setting.parser = std::make_unique<EventStatisticParser>(std::move(statistic_config));
 		}

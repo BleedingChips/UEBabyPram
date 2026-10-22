@@ -54,6 +54,12 @@ export namespace std
 	};
 
 	template<>
+	struct hash<UEBabyPram::InsightParser::ThreadID>
+	{
+		std::size_t operator()(UEBabyPram::InsightParser::ThreadID key) const { return key.id; }
+	};
+
+	template<>
 	struct hash<UEBabyPram::InsightParser::ThreadSystemID>
 	{
 		std::size_t operator()(UEBabyPram::InsightParser::ThreadSystemID key) const { return key; }

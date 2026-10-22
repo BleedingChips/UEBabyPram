@@ -5,7 +5,7 @@ module;
 export module UEBabyPramInsightFilterCLI;
 
 import UEBabyPramInsightFilterParser;
-import UEBabyPramInsightFilterGameThreadParser;
+import UEBabyPramInsightFilterGameThread;
 import UEBabyPramInsightParser;
 import Potato;
 import std;

@@ -1,6 +1,6 @@
 module;
 #include <cassert>
-module UEBabyPramInsightFilterEventStatisticParser;
+module UEBabyPramInsightFilterEventStatistic;
 
 import UEBabyPramInsightFilterParser;
 import UEBabyPramInsightParser;
@@ -199,6 +199,12 @@ namespace UEBabyPram::InsightFilter
 				square_distance += distance * distance;
 			}
 			statistic.duration_standard_deviation = DurationSec{ std::sqrt(square_distance / static_cast<double>(statistic.count)) };
+
+			// Report the longest occurrence of the top list first, the shortest one is the last, the
+			// occurrence which did not rank in the top N is not in the list at all.
+			std::sort(statistic.top_occurrences.begin(), statistic.top_occurrences.end(), [](TopEventOccurrence const& left, TopEventOccurrence const& right) {
+				return left.time_range.Size() > right.time_range.Size();
+				});
 		}
 	}
 
@@ -244,10 +250,9 @@ namespace UEBabyPram::InsightFilter
 			double mean_duration = (statistic.total_duration / static_cast<double>(statistic.count)).count() * 1000.0;
 			double mean_exclude_time = (statistic.total_exclude_time / static_cast<double>(statistic.count)).count() * 1000.0;
 
-			OutputLog<L"    Name:<{:}>, EventID:<{}>, Count:<{}>, Total D:<{:.3f}ms>, Mean D:<{:.3f}ms>, Median D:<{:.3f}ms>, Std D:<{:.3f}ms>, Total E:<{:.3f}ms>, Mean E:<{:.3f}ms>">(
+			OutputLog<L"    Name:<{:}>, Count:<{}>, Total D:<{:.3f}ms>, Mean D:<{:.3f}ms>, Median D:<{:.3f}ms>, Std D:<{:.3f}ms>, Total E:<{:.3f}ms>, Mean E:<{:.3f}ms>">(
 				printer,
 				event_name,
-				statistic.event_ids.size(),
 				statistic.count,
 				statistic.total_duration.count() * 1000.0,
 				mean_duration,

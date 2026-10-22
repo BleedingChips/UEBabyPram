@@ -3,7 +3,7 @@ module;
 #include <cassert>
 #include <re2/re2.h>
 
-module UEBabyPramInsightFilterEventSearchParser;
+module UEBabyPramInsightFilterEventSearch;
 
 import UEBabyPramInsightFilterParser;
 import UEBabyPramInsightParser;

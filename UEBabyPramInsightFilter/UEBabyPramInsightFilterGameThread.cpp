@@ -1,6 +1,6 @@
 module;
 #include <cassert>
-module UEBabyPramInsightFilterGameThreadParser;
+module UEBabyPramInsightFilterGameThread;
 
 namespace UEBabyPram::InsightFilter
 {

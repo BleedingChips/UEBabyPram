@@ -1,6 +1,6 @@
 module;
 
-export module UEBabyPramInsightFilterGameThreadParser;
+export module UEBabyPramInsightFilterGameThread;
 
 import UEBabyPramInsightFilterParser;
 import UEBabyPramInsightParser;
