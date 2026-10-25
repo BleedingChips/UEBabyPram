@@ -115,7 +115,9 @@ export namespace UEBabyPram::InsightParser
 		
 		struct Statis
 		{
-			DurationSec active_time = DurationSec::zero();
+			// The time of the range with the context switch time removed, i.e. the time which the
+			// thread really spent on the CPU in the range.
+			DurationSec removed_context_switch_time = DurationSec::zero();
 			std::size_t switch_count = 0;
 		};
 

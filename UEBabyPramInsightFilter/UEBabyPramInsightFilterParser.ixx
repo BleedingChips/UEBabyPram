@@ -24,7 +24,7 @@ export namespace UEBabyPram::InsightFilter
 	template<Potato::TMP::TypeString formatter, typename ...Parameters>
 	constexpr void OutputLog(Potato::Log::LogPrinter& printer, Parameters&& ...parameters)
 	{
-		Potato::Log::LogTo<OutputCategory, Potato::Log::LogLevel::Display, formatter>(
+		Potato::Log::LogTo<formatter>(
 			printer,
 			std::forward<Parameters>(parameters)...
 		);
@@ -66,35 +66,4 @@ export namespace UEBabyPram::InsightFilter
 
 		return re2::RE2::FullMatch(name_view, matcher);
 	}
-}
-
-export namespace Potato::Log
-{
-	template<LogLevel level>
-	struct LogCategoryFormatter<UEBabyPram::InsightFilter::LogCategory, level>
-	{
-		template<typename OutputIterator, typename ...Parameters>
-		OutputIterator operator()(OutputIterator iterator, std::basic_format_string<wchar_t, std::type_identity_t<Parameters>...> const& pattern, Parameters&& ...parameters)
-		{
-			return std::format_to(
-				std::move(iterator),
-				pattern,
-				std::forward<Parameters>(parameters)...
-			);
-		}
-	};
-
-	template<LogLevel level>
-	struct LogCategoryFormatter<UEBabyPram::InsightFilter::OutputCategory, level>
-	{
-		template<typename OutputIterator, typename ...Parameters>
-		OutputIterator operator()(OutputIterator iterator, std::basic_format_string<wchar_t, std::type_identity_t<Parameters>...> const& pattern, Parameters&& ...parameters)
-		{
-			return std::format_to(
-				std::move(iterator),
-				pattern,
-				std::forward<Parameters>(parameters)...
-			);
-		}
-	};
 }

@@ -32,20 +32,3 @@ export namespace UEBabyPram::InsightFilter
 	// return a negative value when the command line is invalid and the program should exit with that code.
 	int HandleCommand(int argc, char* argv[], CommandLineSetting& setting);
 }
-
-export namespace Potato::Log
-{
-	template<LogLevel level>
-	struct LogCategoryFormatter<UEBabyPram::InsightFilter::CommandLineLogCategory, level>
-	{
-		template<typename OutputIterator, typename ...Parameters>
-		OutputIterator operator()(OutputIterator iterator, std::basic_format_string<wchar_t, std::type_identity_t<Parameters>...> const& pattern, Parameters&& ...parameters)
-		{
-			return std::format_to(
-				std::move(iterator),
-				pattern,
-				std::forward<Parameters>(parameters)...
-			);
-		}
-	};
-}

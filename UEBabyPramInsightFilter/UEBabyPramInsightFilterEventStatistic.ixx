@@ -24,7 +24,9 @@ export namespace UEBabyPram::InsightFilter
 	//     the time spent in the child events),
 	//   - the median and the standard deviation of the duration of the single occurrence, which are
 	//     built from the stored occurrences in AllAnalyzeDone(),
-	//   - the time ranges of the top N (Config::top_count) longest occurrences.
+	//   - the time ranges of the top N (Config::top_count) longest occurrences, with the exclude time
+	//     of every one of them and its exclude time without the context switch time, which is built
+	//     in AllAnalyzeDone() when the context switch events are complete.
 	// One event name may be carried by several event ids, the ids which carry a name are merged into
 	// the statistic of that name, so every name is counted separately.
 	struct EventStatisticParser : public Parser
@@ -45,13 +47,24 @@ export namespace UEBabyPram::InsightFilter
 			std::pmr::memory_resource* resource = std::pmr::get_default_resource();
 		};
 
-		// One of the longest occurrences of an event name, the time range of the occurrence and its
-		// exclude time are kept, so that the occurrence can be reported.
+		// One of the longest occurrences of an event name, the time range of the occurrence, its
+		// exclude time, the exclude time without the time which the thread was switched out of the
+		// CPU and the thread which the occurrence happened on are kept, so that the occurrence can
+		// be reported.
 		struct TopEventOccurrence
 		{
 			Potato::Misc::IndexSpan<DurationSec> time_range;
 			// The duration of the occurrence without the time spent in the child events.
 			DurationSec exclude_time = DurationSec::zero();
+			// The exclude time without the time which the thread was switched out of the CPU in the
+			// whole time range of the occurrence. It is initialized to the exclude time, and the time
+			// out of the CPU is removed in AllAnalyzeDone(), when the context switch events are
+			// complete.
+			DurationSec exclude_time_without_context_switch = DurationSec::zero();
+			// The thread which the occurrence happened on. The id is kept instead of the name, the
+			// name is resolved from the thread info in PrintToLog, so the occurrence does not have
+			// to own a copy of the name.
+			ThreadID thread_id;
 		};
 
 		// The statistics of one event name.
@@ -86,9 +99,10 @@ export namespace UEBabyPram::InsightFilter
 			// The standard deviation of the duration of the single occurrence, which is the square
 			// root of the variance of the durations, it is built in AllAnalyzeDone().
 			DurationSec duration_standard_deviation = DurationSec::zero();
-			// The top N (Config::top_count) longest occurrences, each one keeps its time range and its
-			// exclude time, the shortest one is kicked out when the list is full and a longer
-			// occurrence is found, the order is unspecified.
+			// The top N (Config::top_count) longest occurrences, each one keeps its time range, its
+			// exclude time and its exclude time without the context switch time, the shortest one is
+			// kicked out when the list is full and a longer occurrence is found, the order is
+			// unspecified.
 			std::pmr::vector<TopEventOccurrence> top_occurrences;
 		};
 
@@ -97,6 +111,7 @@ export namespace UEBabyPram::InsightFilter
 		virtual void OnCPUEventDiscovered(EventID id, std::wstring_view event_name, std::wstring_view file_name, std::size_t file_line) override;
 		virtual void OnCPUScopeEventDiscovered(EventID id, std::u8string_view event_name) override;
 		virtual void OnCPUStackTree(ThreadCPUEventView event_scope) override;
+		virtual void ContextSwitchEvent(ThreadSystemID thread_id, std::size_t core_name, Potato::Misc::IndexSpan<DurationSec> duration) override;
 		virtual bool IsParserRequired(ParserRequireFlag flag) const override;
 		virtual void AllAnalyzeDone() override;
 		bool PrintToLog(Potato::Log::LogPrinter& printer) override;
@@ -120,11 +135,15 @@ export namespace UEBabyPram::InsightFilter
 		// Record one occurrence of the event of the statistic: the occurrence count, the total
 		// duration and the total exclude time are accumulated, the sample of the occurrence is
 		// stored for the median and the standard deviation, and the time range of the occurrence is
-		// kept when it ranks in the top N of the statistic. It is kept apart from the walk of the
-		// stack tree, more statistics of the occurrence will grow here later.
+		// kept with its thread and its exclude time when it ranks in the top N of the statistic. It
+		// is kept apart from the walk of the stack tree, more statistics of the occurrence will grow
+		// here later.
 		void RecordEventOccurrence(ThreadCPUEventView event_scope, ThreadCPUEventView::EventView event_view, EventStatistic& statistic);
 
 		std::pmr::unsynchronized_pool_resource resource;
+		// The context switch events of every thread, they are only complete when the whole trace is
+		// analyzed, so the time without them is built from this list in AllAnalyzeDone().
+		ContextSwitchEventList context_switch_list;
 		EventSpecManager events_manager;
 		std::shared_ptr<re2::RE2> matcher;
 		// The matcher needs the event name in UTF-8, the scratch buffer avoids an allocation per call.

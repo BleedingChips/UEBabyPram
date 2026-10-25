@@ -27,21 +27,21 @@ int main(int argc, char* argv[])
 
 	if (!setting.parser || setting.insight_path.empty())
 	{
-		Potato::Log::Log<CommandLineLogCategory, Potato::Log::LogLevel::Error, L"Require a target file with -f or --file, use -h for more infomation">();
+		Potato::Log::Log<L"Require a target file with -f or --file, use -h for more infomation">();
 		return -1;
 	}
 
 	auto start_time = std::chrono::system_clock::now();
 
-	Potato::Log::Log<LogCategory, Potato::Log::LogLevel::Display, L"Start With UTrace File {}">(setting.insight_path.generic_wstring());
+	Potato::Log::Log<L"Start With UTrace File {}">(setting.insight_path.generic_wstring());
 
 	Potato::Document::DocumentReader Reader(setting.insight_path);
 	UEBabyPram::InsightParser::ExecuteParser(Reader, *setting.parser);
-	setting.parser->PrintToLog(*Potato::Log::GetLogPrinter());
+	setting.parser->PrintToLog(*Potato::Log::GetSTDOutPrinter());
 
 	auto end_time = std::chrono::system_clock::now();
 
-	Potato::Log::Log<LogCategory, Potato::Log::LogLevel::Display, "\nDone With Time: <{}> microseconds">(
+	Potato::Log::Log<"\nDone With Time: <{}> microseconds">(
 		std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time).count()
 	);
 

@@ -339,7 +339,7 @@ namespace UEBabyPram::InsightFilter
 				>(ite.duration).count(),
 				std::chrono::duration_cast<
 					std::chrono::duration<double, std::milli>
-				>(ite.duration - context_switch_static.active_time).count(),
+				>(ite.duration - context_switch_static.removed_context_switch_time).count(),
 				start_duration,
 				end_duration
 			);

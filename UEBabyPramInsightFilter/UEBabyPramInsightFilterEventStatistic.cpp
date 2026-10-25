@@ -13,6 +13,7 @@ namespace UEBabyPram::InsightFilter
 
 	EventStatisticParser::EventStatisticParser(Config in_config)
 		: resource(in_config.resource)
+		, context_switch_list(ContextSwitchEventList::Config{ &resource })
 		, events_manager(EventSpecManager::Config{ 10000, 1000, false, &resource })
 		, matcher(std::move(in_config.matcher))
 		, event_statistics(&resource)
@@ -82,12 +83,20 @@ namespace UEBabyPram::InsightFilter
 	bool EventStatisticParser::IsParserRequired(ParserRequireFlag flag) const
 	{
 		// The event spec carries the name of every event, the metadata carries the spec of the
-		// event of the CPU scope logger, and the CPU event carries the stack tree which carries
-		// the timing of every event. The context switch event is not required, the exclude time
-		// does not remove the time of the context switch.
+		// event of the CPU scope logger, the CPU event carries the stack tree which carries the
+		// timing of every event, and the context switch event carries the time which the thread
+		// spent out of the CPU, which is removed from the exclude time of the occurrences.
 		return flag == ParserRequireFlag::EVENT_SPEC
 			|| flag == ParserRequireFlag::META_DATA
-			|| flag == ParserRequireFlag::CPU_EVENT;
+			|| flag == ParserRequireFlag::CPU_EVENT
+			|| flag == ParserRequireFlag::CONTEXT_SWITCH;
+	}
+
+	void EventStatisticParser::ContextSwitchEvent(ThreadSystemID thread_id, std::size_t core_name, Potato::Misc::IndexSpan<DurationSec> duration)
+	{
+		// The context switch events are complete only when the whole trace is analyzed, so they are
+		// collected here and the time without them is built from the list in AllAnalyzeDone().
+		context_switch_list.AddContextSwitchEvent(thread_id, core_name, duration);
 	}
 
 	void EventStatisticParser::OnCPUStackTree(ThreadCPUEventView event_scope)
@@ -146,8 +155,15 @@ namespace UEBabyPram::InsightFilter
 
 		// Keep the top N longest occurrences of this event name: the occurrence is recorded and the
 		// shortest one is kicked out when the list is already full, so an occurrence which does not
-		// rank in the top N is kicked out right away.
-		statistic.top_occurrences.push_back(TopEventOccurrence{ event_view.time_range, exclude_time });
+		// rank in the top N is kicked out right away. The thread of the stack tree is kept with the
+		// occurrence, its name is resolved when the occurrence is reported, and the exclude time
+		// without the context switch time is initialized to the exclude time, the context switch time
+		// is only removed in AllAnalyzeDone(), when the context switch events are complete.
+		auto& occurrence = statistic.top_occurrences.emplace_back();
+		occurrence.time_range = event_view.time_range;
+		occurrence.exclude_time = exclude_time;
+		occurrence.exclude_time_without_context_switch = exclude_time;
+		occurrence.thread_id = event_scope.thread_id;
 		if (statistic.top_occurrences.size() > top_count)
 		{
 			auto shortest = std::min_element(
@@ -200,6 +216,27 @@ namespace UEBabyPram::InsightFilter
 			}
 			statistic.duration_standard_deviation = DurationSec{ std::sqrt(square_distance / static_cast<double>(statistic.count)) };
 
+			// The context switch events are complete now, so the time which the thread spent out of
+			// the CPU in the whole time range of the occurrence is removed from the exclude time,
+			// which the occurrence is initialized with. The thread which the occurrence happened on
+			// is resolved by its id, and a thread which carries no context switch event is treated
+			// as active in the whole range by GetContextSwitchStatis(), so its exclude time stays.
+			for (auto& occurrence : statistic.top_occurrences)
+			{
+				auto thread_info = GetThreadInfo(occurrence.thread_id);
+				if (!thread_info)
+				{
+					continue;
+				}
+
+				auto context_switch_statis = context_switch_list.GetContextSwitchStatis(thread_info->thread_system_id, occurrence.time_range);
+				DurationSec switched_out_time = occurrence.time_range.Size() - context_switch_statis.removed_context_switch_time;
+				occurrence.exclude_time_without_context_switch = std::max(
+					DurationSec::zero(),
+					occurrence.exclude_time_without_context_switch - switched_out_time
+				);
+			}
+
 			// Report the longest occurrence of the top list first, the shortest one is the last, the
 			// occurrence which did not rank in the top N is not in the list at all.
 			std::sort(statistic.top_occurrences.begin(), statistic.top_occurrences.end(), [](TopEventOccurrence const& left, TopEventOccurrence const& right) {
@@ -220,7 +257,7 @@ namespace UEBabyPram::InsightFilter
 			std::string_view{ matcher->pattern() }
 		);
 
-		OutputLog<L"    (D: Duration of the single occurrence; E: Exclude Time, the duration without the time of the child events; Mean D / Median D / Std D: the mean, the median and the standard deviation of the single duration; TR: Time Range of the occurrence)">(
+		OutputLog<L"    (D: Duration of the single occurrence; E: Exclude Time, the duration without the time of the child events; ENCS: Exclude Time WithOut Context Switch Time; Mean D / Median D / Std D: the mean, the median and the standard deviation of the single duration; TName: the name of the thread which the occurrence happened on; TR: Time Range of the occurrence)">(
 			printer
 		);
 
@@ -275,11 +312,22 @@ namespace UEBabyPram::InsightFilter
 				DisplayTimePoint begin_time{ occurrence.time_range.Begin() };
 				DisplayTimePoint end_time{ occurrence.time_range.End() };
 
-				OutputLog<L"            <{:<4}> D:<{:.3f}ms>, E:<{:.3f}ms>, TR: [{}, {}]">(
+				// The name of the thread is not kept by the occurrence, it is resolved from the thread
+				// id which is kept at the time of the occurrence. The thread info may be missing when
+				// the thread was never discovered.
+				std::string_view thread_name{ "<Unknow>" };
+				if (auto thread_info = GetThreadInfo(occurrence.thread_id); thread_info && !thread_info->thread_name.empty())
+				{
+					thread_name = thread_info->thread_name;
+				}
+
+				OutputLog<L"            <{:<4}> TName:<{:}>, D:<{:.3f}ms>, E:<{:.3f}ms>, ENCS:<{:.3f}ms>, TR: [{}, {}]">(
 					printer,
 					index,
+					thread_name,
 					occurrence.time_range.Size().count() * 1000.0,
 					occurrence.exclude_time.count() * 1000.0,
+					occurrence.exclude_time_without_context_switch.count() * 1000.0,
 					begin_time,
 					end_time
 				);

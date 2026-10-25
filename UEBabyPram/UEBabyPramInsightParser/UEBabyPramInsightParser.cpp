@@ -398,7 +398,7 @@ namespace UEBabyPram::InsightParser
 		{
 			return find->second.GetContextSwitchStatis(time_range);
 		}
-		return {};
+		return {time_range.Size(), 0};
 	}
 
 	auto ThreadCPUEventView::FindFirstEventID(std::span<EventID const> event_ids, Potato::Misc::IndexSpan<> index_range) const -> FindResult
@@ -538,8 +538,8 @@ namespace UEBabyPram::InsightParser
 					assert(start_point <= view.time_range.End());
 					exclude_time += Potato::Misc::IndexSpan<DurationSec>{ start_point, view.time_range.End() }.Size();
 					auto statis = list.GetContextSwitchStatis(system_thread_id, { start_point, view.time_range.End() });
-					assert(statis.active_time.count() >= 0.0);
-					exclude_time_remove_context_switch += statis.active_time;
+					assert(statis.removed_context_switch_time.count() >= 0.0);
+					exclude_time_remove_context_switch += statis.removed_context_switch_time;
 					context_switch_count += statis.switch_count;
 					return ExcludeTimeStatis{ exclude_time, exclude_time_remove_context_switch, context_switch_count};
 				}
@@ -547,8 +547,8 @@ namespace UEBabyPram::InsightParser
 				assert(start_point <= child_event.time_range.Begin());
 				exclude_time += Potato::Misc::IndexSpan<DurationSec>{ start_point, child_event.time_range.Begin() }.Size();
 				auto statis = list.GetContextSwitchStatis(system_thread_id, { start_point, child_event.time_range.Begin() });
-				assert(statis.active_time.count() >= 0.0);
-				exclude_time_remove_context_switch += statis.active_time;
+				assert(statis.removed_context_switch_time.count() >= 0.0);
+				exclude_time_remove_context_switch += statis.removed_context_switch_time;
 				context_switch_count += statis.switch_count;
 
 				start_point = child_event.time_range.End();
