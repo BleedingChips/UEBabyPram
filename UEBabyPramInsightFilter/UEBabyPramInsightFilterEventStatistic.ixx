@@ -1,10 +1,12 @@
 module;
 
-#include <re2/re2.h>
+#include <cassert>
 
 export module UEBabyPramInsightFilterEventStatistic;
 
 import UEBabyPramInsightFilterParser;
+import UEBabyPramInsightFilterEventFilter;
+import UEBabyPramInsightFilterEventQuery;
 import UEBabyPramInsightParser;
 import Potato;
 import std;
@@ -16,10 +18,23 @@ namespace UEBabyPram::InsightFilter
 
 export namespace UEBabyPram::InsightFilter
 {
-	// Collect the timing of every event whose name is fully matched by Config::matcher.
+	// Collect the timing of the events which the event queries match.
 	//
-	// Every single occurrence of an event is found in the stack tree of the CPU event, and is
-	// accumulated into the statistic of its event name:
+	// Every query is a call chain (see EventQuery and GetFilterEbnf()), and the chain elements which are
+	// marked as statistic ([^Regex^]) are the events whose timing is collected: an occurrence of such an
+	// element is counted when the whole chain is completed with it, which means that the preceding
+	// elements of the chain are its ancestors and the following ones are its descendants, in the order
+	// of the call (see EventQueryMapping).
+	//
+	// The statistics are keyed by the query which counts the event and by the name of the event: every
+	// query keeps its own statistics, so the same name is counted independently by two queries, and one
+	// name keeps one statistic inside one query.
+	//
+	// The matches of one query inside one stack tree are collapsed before they are counted: two matches
+	// whose time ranges overlap are the same call seen from two chain elements, so only the longest of
+	// them is counted and the shorter ones are ignored. The matches of two queries are never compared.
+	//
+	// Every counted occurrence is accumulated into the statistic of its event name:
 	//   - the occurrence count, the total duration and the total exclude time (the duration without
 	//     the time spent in the child events),
 	//   - the median and the standard deviation of the duration of the single occurrence, which are
@@ -33,14 +48,14 @@ export namespace UEBabyPram::InsightFilter
 	{
 		struct Config
 		{
-			// The re2 matcher of the event name, it is compiled from the regex by the creator
-			// of the config, ex: std::make_shared<re2::RE2>(std::string_view{ "FEngineLoop::.*" }).
-			// The regex has to match the whole event name (re2::RE2::FullMatch), use ".*" when
-			// only a part of the name is known, ex: ".*Tick.*".
-			// The matcher has to be valid (re2::RE2::ok), the error of an invalid matcher is not
-			// reported by the parser, the creator has to check it and report it before the parser
-			// is created, which is what the command line does.
-			std::shared_ptr<re2::RE2> matcher;
+			// The queries of the analysis, every one of them is built from its text by ParseEventQuery,
+			// ex: std::get<EventQuery>(ParseEventQuery(u8"(^Tick^)->[^Update^]")). The command line
+			// collects them from the -es arguments, and it reports the error of a query which is not
+			// acceptable, so the parser only receives the queries which are ready to be analyzed.
+			// Every query keeps its own statistics, and the same event name is counted independently by
+			// two queries, so the same name may be reported twice when it is matched by two queries.
+			// The queries are taken over by the parser.
+			std::vector<EventQuery> queries;
 			// How many of the longest occurrences of every event name are kept as a time range,
 			// 0 for none.
 			std::size_t top_count = 5;
@@ -67,7 +82,7 @@ export namespace UEBabyPram::InsightFilter
 			ThreadID thread_id;
 		};
 
-		// The statistics of one event name.
+		// The statistics of one event name of one query, which is the key of the statistic.
 		// The same event name may be carried by several event ids (it may be declared in several
 		// places, and the event of the CPU scope logger is a separate id as well), so the ids which
 		// carry the name are kept with the statistic. The name itself is not stored, it is taken
@@ -79,6 +94,11 @@ export namespace UEBabyPram::InsightFilter
 			EventStatistic(std::pmr::memory_resource* resource = std::pmr::get_default_resource())
 				: event_ids(resource), durations(resource), top_occurrences(resource) {}
 
+			// The index of the query which counts the events of this statistic, see
+			// EventQueryMapping::GetQueries(). Together with the name of the event it is the key of the
+			// statistic: one name keeps one statistic inside one query, and two queries never share a
+			// statistic.
+			std::size_t query_index = 0;
 			// The ids of the events which carry this name, the occurrences of all of them are merged
 			// into this statistic. The ids are the ones which the parser receives and the ones
 			// which are carried by the stack tree of the CPU event, the id of the event of the CPU
@@ -108,47 +128,51 @@ export namespace UEBabyPram::InsightFilter
 
 		EventStatisticParser(Config config = {});
 
+		virtual void OnThreadDiscovered(ThreadID thread_id, ThreadSystemID thread_system_id, std::string_view thread_name) override;
 		virtual void OnCPUEventDiscovered(EventID id, std::wstring_view event_name, std::wstring_view file_name, std::size_t file_line) override;
 		virtual void OnCPUScopeEventDiscovered(EventID id, std::u8string_view event_name) override;
 		virtual void OnCPUStackTree(ThreadCPUEventView event_scope) override;
 		virtual void ContextSwitchEvent(ThreadSystemID thread_id, std::size_t core_name, Potato::Misc::IndexSpan<DurationSec> duration) override;
 		virtual bool IsParserRequired(ParserRequireFlag flag) const override;
+		// Only the threads which at least one query counts are analyzed: a query which carries a thread
+		// condition only counts the threads which its matcher matched, so a thread which is matched by no
+		// query carries no event which has to be counted.
+		virtual bool IsThreadRequired(ThreadID thread_id) const override;
 		virtual void AllAnalyzeDone() override;
 		bool PrintToLog(Potato::Log::LogPrinter& printer) override;
 
-		// Every event statistic, one per matched event name, the order is unspecified.
+		// The statistics of every event name of every query, keyed by EventStatistic::query_index and by
+		// the name of the event, the order is unspecified.
 		std::span<EventStatistic const> GetEventStatistics() const { return event_statistics; }
+
+		// The query system which is built from Config::queries, it resolves the regular expression of
+		// every chain element into the ids of the events and it tells which occurrences are counted.
+		EventQueryMapping const& GetQueryMapping() const { return query_mapping; }
 
 	protected:
 
-		// Add a matched event to the statistic of its name, returns the index of the statistic in
-		// event_statistics. The event has to be stored in the events manager before this is called,
-		// the name is resolved from the id, and the id is appended to the ids of the statistic which
-		// already carries that name. A new statistic is only created when there is no statistic of
-		// that name yet, so the statistics are grouped by the name as soon as the events are found.
-		std::size_t AddEventStatistic(EventID id);
-		// Find the next occurrence of the event which the statistic belongs to, the search starts
-		// from the offset of the stack tree view. The search is kept apart from the walk of the
-		// stack tree, the rule of which event is accepted as an occurrence will grow later.
-		// Returns an empty view when there is no more occurrence in the rest of the view.
-		ThreadCPUEventView::EventView FindStatisticEvent(ThreadCPUEventView event_scope, EventStatistic const& statistic, std::size_t offset) const;
+		// Find the statistic of the event name which the id carries inside the query, and create it when
+		// the name is not counted by the query yet. The event has to be stored in the events manager
+		// before this is called, the name is resolved from the id, and the id is only appended to the
+		// statistic once.
+		EventStatistic& GetNameStatistic(std::size_t query_index, EventID id);
 		// Record one occurrence of the event of the statistic: the occurrence count, the total
 		// duration and the total exclude time are accumulated, the sample of the occurrence is
 		// stored for the median and the standard deviation, and the time range of the occurrence is
-		// kept with its thread and its exclude time when it ranks in the top N of the statistic. It
-		// is kept apart from the walk of the stack tree, more statistics of the occurrence will grow
-		// here later.
-		void RecordEventOccurrence(ThreadCPUEventView event_scope, ThreadCPUEventView::EventView event_view, EventStatistic& statistic);
+		// kept with its thread and its exclude time when it ranks in the top N of the statistic.
+		void RecordEventOccurrence(ThreadCPUEventView event_scope, ThreadCPUEventView::EventView event_view, DurationSec exclude_time, EventStatistic& statistic);
+		// Print the timing of one event name, the name is resolved from the events manager.
+		void PrintEventStatistic(Potato::Log::LogPrinter& printer, EventStatistic const& statistic) const;
 
 		std::pmr::unsynchronized_pool_resource resource;
 		// The context switch events of every thread, they are only complete when the whole trace is
 		// analyzed, so the time without them is built from this list in AllAnalyzeDone().
 		ContextSwitchEventList context_switch_list;
 		EventSpecManager events_manager;
-		std::shared_ptr<re2::RE2> matcher;
-		// The matcher needs the event name in UTF-8, the scratch buffer avoids an allocation per call.
-		std::u8string encoded_event_name;
-		
+		// The query system which is built from Config::queries, the ids of the events are resolved
+		// into it when they are discovered, so the stack tree is never matched by a name.
+		EventQueryMapping query_mapping;
+		// The statistics of every event name of every query, keyed by the query and by the name.
 		std::pmr::vector<EventStatistic> event_statistics;
 
 		std::size_t top_count = 5;

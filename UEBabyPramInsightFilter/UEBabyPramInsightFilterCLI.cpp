@@ -7,6 +7,7 @@ module UEBabyPramInsightFilterCLI;
 
 import UEBabyPramInsightFilterParser;
 import UEBabyPramInsightFilterGameThread;
+import UEBabyPramInsightFilterEventFilter;
 import UEBabyPramInsightFilterEventSearch;
 import UEBabyPramInsightFilterEventStatistic;
 import UEBabyPramInsightFilterThreadSearch;
@@ -22,7 +23,7 @@ namespace UEBabyPram::InsightFilter
 	{
 		void PrintGeneralHelp()
 		{
-			Log::Log<CommandLineLogCategory, Log::LogLevel::Display, LR"(
+			Log::Log<CommandLineLogCategory, Log::LogLevel::Display, LR"HELP(
 UEBabyPramInsightFilter, report the GameThread timing of an unreal insight .utrace file,
 search the events of the trace by a regular expression of the event name, report the
 timing statistic of every event whose name is matched by a regular expression, or search
@@ -31,7 +32,7 @@ the threads of the trace by a regular expression of the thread name.
 Usage:
   UEBabyPramInsightFilter -f <path of the .utrace file> [options]
   UEBabyPramInsightFilter -f <path of the .utrace file> -r <regex> [options]
-  UEBabyPramInsightFilter -f <path of the .utrace file> -es <regex> [options]
+  UEBabyPramInsightFilter -f <path of the .utrace file> -es <query> [options]
   UEBabyPramInsightFilter -f <path of the .utrace file> -ts <regex> [options]
 
 Options:
@@ -51,14 +52,27 @@ Options:
       an unknown file and line 0.
       -r, -es and -ts can not be used at the same time.
 
-  -es, --event_stat <regex>
-      Regular expression of the event name, in the re2 (RE2) syntax, the same syntax as -r.
-      When it is set, the timing of every event whose name is matched is collected and
-      reported per event:
-        - the occurrence count, the mean duration and the mean exclude time,
-        - the median and the standard deviation of the duration of the single occurrence,
-        - the top longest occurrences with the call chain which leads to them.
-      The exclude time is the duration of the occurrence without the time of its child events.
+  -es, --event_stat <query>
+      Query of the events whose timing should be collected, the grammar is:
+        chain [ '&' 'Time' '=' [TimePoint, TimePoint]+ ] [ '&' 'Thread' '=' (^Regex^) ]
+        chain     := elem ( '->' elem )*
+        elem      := (^Regex^)    the event is only matched as a part of the call chain
+                  |  [^Regex^]    the event is matched and its timing is collected
+        TimePoint := Integer 'm' Decimal 's' | Decimal 's' | Integer 's' | Integer 'm' Integer 's'
+      Ex: -es "(^FEngineLoop::Tick^)->[^.*TickActor.*^]"
+          -es "[^UWorld::Tick^]&Time=[0s,10s]&Thread=(.*GameThread.*)"
+      Every regex is the re2 syntax and it has to match the whole event name. The chain is matched
+      on the call stack: every element has to be a descendant of the previous one and the elements
+      are matched in the order of the call, but the events which are not a part of the chain may be
+      between them. Only the elements which are surrounded by '[' and ']' are collected, one
+      statistic per event name, and the same name is only collected by the topmost of them, so one
+      occurrence is never counted twice by one query.
+      The Time and the Thread conditions only filter the collected events, the events which complete
+      the call chain are not filtered by them. The time is matched against the beginning of the
+      collected event, and the thread name has to match the whole thread name.
+      -es can be given more than once, every query keeps its own statistics, so the same event name
+      may be reported several times, once per query which collects it.
+      -r, -es and -ts can not be used at the same time.
 
   -ts, --thread_search <regex>
       Regular expression of the thread name, in the re2 (RE2) syntax, the same syntax as -r.
@@ -85,7 +99,7 @@ Options:
 
   -h, --help
       Print this help.
-)">();
+)HELP">();
 		}
 	}
 
@@ -185,24 +199,26 @@ Options:
 			{
 				if (i + 1 < argc)
 				{
-					std::string_view pattern = argv[i + 1];
-					re2::RE2::Options options;
-					// The error is reported below, re2 should not print it a second time.
-					options.set_log_errors(false);
-					auto matcher = std::make_shared<re2::RE2>(pattern, options);
-					if (matcher->ok())
+					// The query is built from the argument, and the error of an unacceptable query is
+					// reported here, so the parser only receives the queries which are ready to be
+					// analyzed.
+					std::u8string query_text;
+					Encode::STDInputEncoder<char8_t>::EncodeTo(argv[i + 1], std::back_insert_iterator{ query_text });
+					auto query_result = ParseEventQuery(query_text);
+					if (auto error = std::get_if<std::u8string>(&query_result); error != nullptr)
 					{
-						statistic_config.matcher = std::move(matcher);
-						statistic_event = true;
-						++i;
-					}
-					else {
-						Log::Log<CommandLineLogCategory, Log::LogLevel::Error, L"-es --event_stat <regex> : <{}> is not an acceptable regex : <{}>, use -h for detailed help">(
-							pattern,
-							std::string_view{ matcher->error() }
+						std::wstring message;
+						Encode::UnicodeEncoder<char8_t, wchar_t>::EncodeTo(*error, std::back_inserter(message));
+						Log::Log<CommandLineLogCategory, Log::LogLevel::Error, L"-es --event_stat <query> : <{}>, use -h for detailed help">(
+							message
 						);
 						return -1;
 					}
+
+					// The queries are accumulated, every one of them keeps its own statistics.
+					statistic_config.queries.push_back(std::move(std::get<EventQuery>(query_result)));
+					statistic_event = true;
+					++i;
 				}
 				else {
 					Log::Log<CommandLineLogCategory, Log::LogLevel::Error, L"Unsupport command -es --event_stat, use -h for detailed help">();

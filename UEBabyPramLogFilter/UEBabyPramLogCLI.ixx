@@ -39,33 +39,54 @@ export namespace UEBabyPram::LogFilter
 		bool not_repeat = false;
 	};
 
-	constexpr auto comment_log = TMP::TypeString{u"CLI"};
-
 	int HandleComment(int argc, char* argv[], FilterSetting& setting, LogFilterProcessor& processor, LogFilterFormatter& fomatter);
-}
 
-namespace Potato::Log
-{
+	// The log messages of the command line and of the filter itself are printed without the time and
+	// without the name of the category, and the level is only printed for an error, so the help text
+	// and the filtered output stay readable.
 	template<Potato::Log::LogLevel level>
-	struct LogCategoryFormatter<UEBabyPram::LogFilter::comment_log, level>
+	struct CommandLineLogFormatter
 	{
-		template<typename OutputIterator, typename ...Parameters>
-		OutputIterator operator()(OutputIterator iterator, std::basic_format_string<wchar_t, std::type_identity_t<Parameters>...> const& pattern, Parameters&& ...parameters)
+		template<typename OutIterator, typename ...Parameters>
+		static OutIterator LogFormat(OutIterator iterator, Potato::Log::FormatedSystemTime, std::basic_format_string<wchar_t, std::type_identity_t<Parameters>...> const& pattern, Parameters&& ...parameters)
 		{
 			if constexpr (level == Potato::Log::LogLevel::Error)
 			{
-				Potato::Log::FormatedSystemTime time;
 				iterator = std::format_to(
 					std::move(iterator),
 					L"{}:",
 					level
 				);
 			}
+
 			return std::format_to(
 				std::move(iterator),
 				pattern,
 				std::forward<Parameters>(parameters)...
 			);
 		}
+
+		static constexpr Potato::Log::LogLevel value = level;
 	};
+
+	// Whether the messages below the error level are dropped.
+	bool IsConsoleLogSuppressed();
+	// Drop the messages below the error level, or stop dropping them. The filter drops them when the
+	// filtered log is printed to the standard output, so the messages never pollute that output.
+	void SetConsoleLogSuppressed(bool suppressed);
+
+	// Print one message of the command line or of the filter, see CommandLineLogFormatter.
+	template<Potato::Log::LogLevel level, Potato::TMP::TypeString pattern, typename ...Parameters>
+	void LogToConsole(Parameters&& ...parameters)
+	{
+		if (level <= Potato::Log::LogLevel::Log && IsConsoleLogSuppressed())
+		{
+			return;
+		}
+
+		Potato::Log::LogTo<CommandLineLogFormatter<level>, pattern>(
+			*Potato::Log::GetSTDOutPrinter(),
+			std::forward<Parameters>(parameters)...
+		);
+	}
 }

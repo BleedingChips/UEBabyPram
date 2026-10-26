@@ -66,9 +66,22 @@ namespace UEBabyPram::LogFilter
 
 	using namespace Potato;
 
+	// Whether the messages below the error level are dropped, see SetConsoleLogSuppressed.
+	static bool console_log_suppressed = false;
+
+	bool IsConsoleLogSuppressed()
+	{
+		return console_log_suppressed;
+	}
+
+	void SetConsoleLogSuppressed(bool suppressed)
+	{
+		console_log_suppressed = suppressed;
+	}
+
 	static void PrintGeneralHelp()
 	{
-		Log::Log<comment_log, Log::LogLevel::Display, u8"{}">(
+		LogToConsole<Log::LogLevel::Display, u8"{}">(
 			general_help_string
 		);
 	}
@@ -77,7 +90,7 @@ namespace UEBabyPram::LogFilter
 	{
 		if (topic == "h" || topic == "help")
 		{
-			Log::Log<comment_log, Log::LogLevel::Display, u8"{}">(u8R"(
+			LogToConsole<Log::LogLevel::Display, u8"{}">(u8R"(
   -h, --help [topic]
 
     Shows general help overview, or detailed help for a specific topic.
@@ -100,7 +113,7 @@ namespace UEBabyPram::LogFilter
 		}
 		else if (topic == "f" || topic == "file")
 		{
-			Log::Log<comment_log, Log::LogLevel::Display, u8"{}">(u8R"(
+			LogToConsole<Log::LogLevel::Display, u8"{}">(u8R"(
   -f, --file <path>
 
     Adds a .log file as input. The file must exist and have a .log extension.
@@ -116,7 +129,7 @@ namespace UEBabyPram::LogFilter
 		}
 		else if (topic == "c" || topic == "condition")
 		{
-			Log::Log<comment_log, Log::LogLevel::Display, u8"{}">(u8R"(
+			LogToConsole<Log::LogLevel::Display, u8"{}">(u8R"(
   -c, --condition <statement>
 
     Adds a filter condition using EBNF grammar.
@@ -163,7 +176,7 @@ namespace UEBabyPram::LogFilter
 		}
 		else if (topic == "p" || topic == "path")
 		{
-			Log::Log<comment_log, Log::LogLevel::Display, u8"{}">(u8R"(
+			LogToConsole<Log::LogLevel::Display, u8"{}">(u8R"(
   -p, --path <directory>
 
     Scans a directory for all .log files (non-recursive) and adds them as input.
@@ -179,7 +192,7 @@ namespace UEBabyPram::LogFilter
 		}
 		else if (topic == "oml" || topic == "output_mode_line")
 		{
-			Log::Log<comment_log, Log::LogLevel::Display, u8"{}">(u8R"(
+			LogToConsole<Log::LogLevel::Display, u8"{}">(u8R"(
   -oml, --output_mode_line
 
     Sets output mode to normal output with line numbers prepended.
@@ -198,7 +211,7 @@ namespace UEBabyPram::LogFilter
 		}
 		else if (topic == "omtl" || topic == "output_mode_only_time_and_line")
 		{
-			Log::Log<comment_log, Log::LogLevel::Display, u8"{}">(u8R"(
+			LogToConsole<Log::LogLevel::Display, u8"{}">(u8R"(
   -omtl, --output_mode_only_time_and_line
 
     Sets output mode to display only the timestamp and line number.
@@ -215,7 +228,7 @@ namespace UEBabyPram::LogFilter
 		}
 		else if (topic == "osf" || topic == "output_separate_frame")
 		{
-			Log::Log<comment_log, Log::LogLevel::Display, u8"{}">(u8R"(
+			LogToConsole<Log::LogLevel::Display, u8"{}">(u8R"(
   -osf, --output_separate_frame
 
     Enables output with frame count separators between frames.
@@ -237,7 +250,7 @@ namespace UEBabyPram::LogFilter
 		}
 		else if (topic == "nr" || topic == "not_repeat")
 		{
-			Log::Log<comment_log, Log::LogLevel::Display, u8"{}">(u8R"(
+			LogToConsole<Log::LogLevel::Display, u8"{}">(u8R"(
   -nr, --not_repeat
 
     Suppresses duplicate output lines. When enabled, each unique output
@@ -249,7 +262,7 @@ namespace UEBabyPram::LogFilter
 		}
 		else if (topic == "e" || topic == "extension")
 		{
-			Log::Log<comment_log, Log::LogLevel::Display, u8"{}">(u8R"(
+			LogToConsole<Log::LogLevel::Display, u8"{}">(u8R"(
   -e, --extension <ext>
 
     Sets a custom output file extension for filtered output files.
@@ -263,7 +276,7 @@ namespace UEBabyPram::LogFilter
 		}
 		else if (topic == "or" || topic == "output_range")
 		{
-			Log::Log<comment_log, Log::LogLevel::Display, u8"{}">(u8R"(
+			LogToConsole<Log::LogLevel::Display, u8"{}">(u8R"(
   -or, --output_range <num1> <num2>
 
     Sets the index range of output log lines to produce.
@@ -278,7 +291,7 @@ namespace UEBabyPram::LogFilter
 		}
 		else if (topic == "op" || topic == "out_path")
 		{
-			Log::Log<comment_log, Log::LogLevel::Display, u8"{}">(u8R"(
+			LogToConsole<Log::LogLevel::Display, u8"{}">(u8R"(
   -op, --out_path <directory>
 
     Sets the output directory for filtered files.
@@ -293,7 +306,7 @@ namespace UEBabyPram::LogFilter
 		}
 		else if (topic == "ostd" || topic == "output_std")
 		{
-			Log::Log<comment_log, Log::LogLevel::Display, u8"{}">(u8R"(
+			LogToConsole<Log::LogLevel::Display, u8"{}">(u8R"(
   -ostd, --output_std
 
     Outputs filtered results to stdout instead of writing to files.
@@ -304,7 +317,7 @@ namespace UEBabyPram::LogFilter
 		}
 		else if (topic == "omc" || topic == "output_mode_custom")
 		{
-			Log::Log<comment_log, Log::LogLevel::Display, u8"{}">(u8R"(
+			LogToConsole<Log::LogLevel::Display, u8"{}">(u8R"(
   -omc, --output_mode_custom <regex> <format>
 
     Sets custom output mode with a regex matcher and format template.
@@ -339,7 +352,7 @@ namespace UEBabyPram::LogFilter
 		}
 		else
 		{
-			Log::Log<comment_log, Log::LogLevel::Error, L"Unknown topic <{}>, use -h to see available topics">(topic);
+			LogToConsole<Log::LogLevel::Error, L"Unknown topic <{}>, use -h to see available topics">(topic);
 		}
 	}
 
@@ -382,13 +395,13 @@ namespace UEBabyPram::LogFilter
 						setting.input_file.emplace_back(std::move(sub_argv));
 					}
 					else {
-						Log::Log<comment_log, Log::LogLevel::Error, L"File <{}> is not a acceptable file">(sub_argv.generic_wstring());
+						LogToConsole<Log::LogLevel::Error, L"File <{}> is not a acceptable file">(sub_argv.generic_wstring());
 						return -1;
 					}
 					++i;
 				}
 				else {
-					Log::Log<comment_log, Log::LogLevel::Error, L"Unsupport command -f --file, use -h file for detailed help">();
+					LogToConsole<Log::LogLevel::Error, L"Unsupport command -f --file, use -h file for detailed help">();
 					return -1;
 				}
 			}
@@ -404,13 +417,13 @@ namespace UEBabyPram::LogFilter
 					}
 					if (!processor.AddStatement({ reinterpret_cast<char8_t const*>(str.data()), str.size() }))
 					{
-						Log::Log<comment_log, Log::LogLevel::Error, L"Invalid condition <{}>, use -h condition for detailed help">(str);
+						LogToConsole<Log::LogLevel::Error, L"Invalid condition <{}>, use -h condition for detailed help">(str);
 						return -1;
 					}
 					++i;
 				}
 				else {
-					Log::Log<comment_log, Log::LogLevel::Error, L"Unsupport command -c --condition, use -h condition for detailed help">();
+					LogToConsole<Log::LogLevel::Error, L"Unsupport command -c --condition, use -h condition for detailed help">();
 					return -1;
 				}
 			}
@@ -434,12 +447,12 @@ namespace UEBabyPram::LogFilter
 						++i;
 					}
 					else {
-						Log::Log<comment_log, Log::LogLevel::Error, L"-p --path <path> : path should be a directory, which is <{}>">(sub_argv.generic_u16string());
+						LogToConsole<Log::LogLevel::Error, L"-p --path <path> : path should be a directory, which is <{}>">(sub_argv.generic_u16string());
 						return -1;
 					}
 				}
 				else {
-					Log::Log<comment_log, Log::LogLevel::Error, L"Unsupport command -p --path, use -h path for detailed help">();
+					LogToConsole<Log::LogLevel::Error, L"Unsupport command -p --path, use -h path for detailed help">();
 					return -1;
 				}
 			}
@@ -465,7 +478,7 @@ namespace UEBabyPram::LogFilter
 					setting.output_expand = sub_argv;
 				}
 				else {
-					Log::Log<comment_log, Log::LogLevel::Error, L"Unsupport command -e --extension, use -h extension for detailed help">();
+					LogToConsole<Log::LogLevel::Error, L"Unsupport command -e --extension, use -h extension for detailed help">();
 					return -1;
 				}
 				++i;
@@ -482,13 +495,13 @@ namespace UEBabyPram::LogFilter
 					auto info2 = Potato::Format::DirectDeformat(sub_argv2, max);
 					if (!info || !info2 || min > max)
 					{
-						Log::Log<comment_log, Log::LogLevel::Error, L"-or or --output_range require a valid range (num1 <= num2)">();
+						LogToConsole<Log::LogLevel::Error, L"-or or --output_range require a valid range (num1 <= num2)">();
 						return -1;
 					}
 					setting.output_span = {min, max};
 				}
 				else {
-					Log::Log<comment_log, Log::LogLevel::Error, L"Unsupport command -or --output_range, use -h output_range for detailed help">();
+					LogToConsole<Log::LogLevel::Error, L"Unsupport command -or --output_range, use -h output_range for detailed help">();
 					return -1;
 				}
 				++i;
@@ -505,12 +518,12 @@ namespace UEBabyPram::LogFilter
 						++i;
 					}
 					else {
-						Log::Log<comment_log, Log::LogLevel::Error, L"-op --out_path <path> : path should be a directory, which is <{}>">(path.generic_u16string());
+						LogToConsole<Log::LogLevel::Error, L"-op --out_path <path> : path should be a directory, which is <{}>">(path.generic_u16string());
 						return -1;
 					}
 				}
 				else {
-					Log::Log<comment_log, Log::LogLevel::Error, L"Unsupport command -op --out_path, use -h out_path for detailed help">();
+					LogToConsole<Log::LogLevel::Error, L"Unsupport command -op --out_path, use -h out_path for detailed help">();
 					return -1;
 				}
 			}
@@ -530,13 +543,13 @@ namespace UEBabyPram::LogFilter
 					std::u8string_view format_format_u8{ reinterpret_cast<char8_t const*>(format_format.data()), format_format.size() };
 					if (!fomatter.AddStatement(reg_format_u8, format_format_u8, error_message))
 					{
-						Log::Log<comment_log, Log::LogLevel::Error, L"Invalid custom format <{}>, use -h output_mode_custom for detailed help">(error_message);
+						LogToConsole<Log::LogLevel::Error, L"Invalid custom format <{}>, use -h output_mode_custom for detailed help">(error_message);
 						return -1;
 					}
 					i += 2;
 				}
 				else {
-					Log::Log<comment_log, Log::LogLevel::Error, L"Unsupport command -omc --output_mode_custom, use -h output_mode_custom for detailed help">();
+					LogToConsole<Log::LogLevel::Error, L"Unsupport command -omc --output_mode_custom, use -h output_mode_custom for detailed help">();
 					return -1;
 				}
 			}
@@ -558,12 +571,12 @@ namespace UEBabyPram::LogFilter
 						++i;
 					}
 					else {
-						Log::Log<comment_log, Log::LogLevel::Error, L"-p --path <path> : path should be a directory, which is <{}>">(path.generic_u16string());
+						LogToConsole<Log::LogLevel::Error, L"-p --path <path> : path should be a directory, which is <{}>">(path.generic_u16string());
 						return -1;
 					}
 				}
 				else {
-					Log::Log<comment_log, Log::LogLevel::Error, L"Unsupport command -p --path, use -h path for detailed help">();
+					LogToConsole<Log::LogLevel::Error, L"Unsupport command -p --path, use -h path for detailed help">();
 					return -1;
 				}
 			}
@@ -573,7 +586,7 @@ namespace UEBabyPram::LogFilter
 			}
 			else
 			{
-				Log::Log<comment_log, Log::LogLevel::Error, L"Unsupport command {}">(argv_string);
+				LogToConsole<Log::LogLevel::Error, L"Unsupport command {}">(argv_string);
 				return -1;
 			}
 		}

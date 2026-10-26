@@ -71,30 +71,44 @@ $ := <Query> ;
 
 	using UEBabyPram::InsightFilter::EventQuery;
 	using UEBabyPram::InsightParser::DurationSec;
+	using Potato::Misc::IndexSpan;
 
 	// The partial query which the QueryTail and the TimeTail build.
 	struct QueryTailData
 	{
-		std::vector<Potato::Misc::IndexSpan<DurationSec>> time_ranges;
+		std::vector<IndexSpan<DurationSec>> time_ranges;
 		std::shared_ptr<re2::RE2> thread_matcher;
 	};
 
-	using TimeRange = Potato::Misc::IndexSpan<DurationSec>;
+	using TimeRange = IndexSpan<DurationSec>;
 
 	// Compile the regular expression which is carried by the CaretReg token, the token text
-	// is "^pattern^" and the delimiters are stripped.
+	// is "^pattern^" and the delimiters are stripped. Throws std::u8string, which is the message
+	// which ParseEventQuery returns, when re2 does not accept the pattern.
 	std::shared_ptr<re2::RE2> BuildMatcher(std::u8string_view token)
 	{
 		if (token.size() < 2)
 		{
-			throw std::runtime_error("the regular expression token is not delimited by '^'");
+			std::u8string message = u8"the regular expression is not delimited by '^': ";
+			message += token;
+			throw message;
 		}
 
 		std::string_view pattern{ reinterpret_cast<char const*>(token.data()) + 1, token.size() - 2 };
-		auto matcher = std::make_shared<re2::RE2>(pattern);
+		re2::RE2::Options options;
+		// The error is returned by ParseEventQuery, re2 should not print it a second time.
+		options.set_log_errors(false);
+		auto matcher = std::make_shared<re2::RE2>(pattern, options);
 		if (!matcher->ok())
 		{
-			throw std::runtime_error(matcher->error());
+			std::u8string message = u8"the regular expression is not acceptable: ";
+			// The message of re2 is ASCII, so the encoding never fails, and it usually names the
+			// pattern itself, ex: "missing ): foo(".
+			Potato::Encode::UnicodeEncoder<char, char8_t>::EncodeTo(
+				std::string_view{ matcher->error() },
+				std::back_inserter(message)
+			);
+			throw message;
 		}
 		return matcher;
 	}
@@ -107,7 +121,9 @@ $ := <Query> ;
 		auto result = std::from_chars(begin, end, value);
 		if (result.ec != std::errc{} || result.ptr != end)
 		{
-			throw std::runtime_error("the integer token is not acceptable");
+			std::u8string message = u8"the integer is not acceptable: ";
+			message += token;
+			throw message;
 		}
 		return value;
 	}
@@ -120,7 +136,9 @@ $ := <Query> ;
 		auto result = std::from_chars(begin, end, value, std::chars_format::general);
 		if (result.ec != std::errc{} || result.ptr != end)
 		{
-			throw std::runtime_error("the decimal token is not acceptable");
+			std::u8string message = u8"the decimal is not acceptable: ";
+			message += token;
+			throw message;
 		}
 		return value;
 	}
@@ -147,7 +165,7 @@ namespace UEBabyPram::InsightFilter
 		return ebnf;
 	}
 
-	std::optional<EventQuery> ParseEventQuery(std::u8string_view query)
+	std::variant<EventQuery, std::u8string> ParseEventQuery(std::u8string_view query)
 	{
 		using namespace Potato::EBNF;
 
@@ -262,14 +280,44 @@ namespace UEBabyPram::InsightFilter
 
 			if (!Process(processor, query))
 			{
-				return std::nullopt;
+				std::u8string message = u8"the query does not follow the grammar which GetFilterEbnf() describes";
+				// The processor stops at the text which it is not able to accept and reports the
+				// position where it stopped, so the rest of the text is the offending part. The
+				// position is clamped, it points to the end of the text when the text ended too
+				// early.
+				std::size_t position = std::min(processor.GetRequireTokenIndex(), query.size());
+				if (position < query.size())
+				{
+					message += u8", the text from here is not accepted: <";
+					message += query.substr(position);
+					message += u8">";
+				}
+				else if (query.empty())
+				{
+					message += u8", the query is empty";
+				}
+				else {
+					message += u8", the text ended too early";
+				}
+				return message;
 			}
 
 			return processor.GetData<EventQuery>();
 		}
-		catch (std::exception const&)
+		catch (std::u8string error)
 		{
-			return std::nullopt;
+			return error;
+		}
+		catch (std::exception const& error)
+		{
+			// The query is built with std::any, so a failed type cast (std::bad_any_cast) is the
+			// only expected standard exception here, it means that the text is not acceptable.
+			std::u8string message = u8"the query is not acceptable: ";
+			Potato::Encode::UnicodeEncoder<char, char8_t>::EncodeTo(
+				std::string_view{ error.what() },
+				std::back_inserter(message)
+			);
+			return message;
 		}
 	}
 }

@@ -346,6 +346,7 @@ export namespace UEBabyPram::InsightParser
 		
 		EventView FindNextEvent(std::span<EventID const> event_id_span, Potato::Misc::IndexSpan<> index_range) const;
 
+		EventView FindChildEvent(std::span<EventID const> event_id_span, EventView parent_event = {}) const;
 		EventView FindParentEvent(std::span<EventID const> event_id_span, EventView child_event) const;
 
 		struct ExcludeTimeStatis

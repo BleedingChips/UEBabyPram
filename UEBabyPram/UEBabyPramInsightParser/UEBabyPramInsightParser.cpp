@@ -458,6 +458,17 @@ namespace UEBabyPram::InsightParser
 		};
 	}
 
+	ThreadCPUEventView::EventView ThreadCPUEventView::FindChildEvent(std::span<EventID const> event_id_span, EventView parent_event) const
+	{
+		if (parent_event)
+		{
+			return FindNextEvent(event_id_span, { parent_event.index_range.Begin() + 1, parent_event .index_range.End()});
+		}
+		else {
+			return FindNextEvent(event_id_span);
+		}
+	}
+
 	ThreadCPUEventView::EventView ThreadCPUEventView::FindParentEvent(std::span<EventID const> event_id_span, EventView child_event) const
 	{
 		if (child_event && child_event.depth != 0)

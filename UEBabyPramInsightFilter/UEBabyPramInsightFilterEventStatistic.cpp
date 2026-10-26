@@ -1,8 +1,11 @@
 module;
 #include <cassert>
+#include <re2/re2.h>
 module UEBabyPramInsightFilterEventStatistic;
 
 import UEBabyPramInsightFilterParser;
+import UEBabyPramInsightFilterEventFilter;
+import UEBabyPramInsightFilterEventQuery;
 import UEBabyPramInsightParser;
 import Potato;
 import std;
@@ -11,72 +14,91 @@ namespace UEBabyPram::InsightFilter
 {
 	using namespace InsightParser;
 
+	namespace
+	{
+		// The pattern of a matcher in wide characters, the report is printed in wide characters.
+		std::wstring EncodePattern(re2::RE2 const& matcher)
+		{
+			std::wstring pattern;
+			Potato::Encode::UnicodeEncoder<char, wchar_t>::EncodeTo(
+				std::string_view{ matcher.pattern() },
+				std::back_inserter(pattern)
+			);
+			return pattern;
+		}
+
+		// Whether the two time ranges have a common time, the ranges which only touch each other at their
+		// end are not overlapped.
+		bool IsTimeRangeOverlapped(Potato::Misc::IndexSpan<DurationSec> left, Potato::Misc::IndexSpan<DurationSec> right)
+		{
+			switch (left <=> right)
+			{
+			case Potato::Misc::IndexSpanOrdering::LeftOverlapBegin:
+			case Potato::Misc::IndexSpanOrdering::RightOverlapEnd:
+			case Potato::Misc::IndexSpanOrdering::Contained:
+			case Potato::Misc::IndexSpanOrdering::Contains:
+			case Potato::Misc::IndexSpanOrdering::Equal:
+				return true;
+			default:
+				return false;
+			}
+		}
+
+		// One match of the query system which survives the collapsing of the identical calls.
+		struct MatchedOccurrence
+		{
+			ThreadCPUEventView::EventView event_view;
+			// The name of the matched event, it points into the string storage of the events manager, which
+			// is not written while the stack tree is walked, so the view is valid for the whole call.
+			std::wstring_view event_name;
+			std::size_t query_index = 0;
+		};
+	}
+
 	EventStatisticParser::EventStatisticParser(Config in_config)
 		: resource(in_config.resource)
 		, context_switch_list(ContextSwitchEventList::Config{ &resource })
 		, events_manager(EventSpecManager::Config{ 10000, 1000, false, &resource })
-		, matcher(std::move(in_config.matcher))
+		, query_mapping(EventQueryMapping::Config{ std::move(in_config.queries), &resource })
 		, event_statistics(&resource)
 		, top_count(in_config.top_count)
 	{
-		// The matcher is compiled and checked by the creator of the config, an invalid matcher has
-		// to be reported there, the parser never reports the error of the matcher.
-		assert(matcher && matcher->ok());
+		// The queries are built and checked by the creator of the config, so the parser only takes the
+		// ones which are ready to be analyzed.
+		auto queries = query_mapping.GetQueries();
+		assert(!queries.empty());
 	}
 
-	// The name of the event is resolved from the events manager, and the statistic which already
-	// carries that name is found with the name index, so every event name is grouped as soon as it
-	// is discovered, and a new statistic is only created for a name which is seen for the first time.
-	std::size_t EventStatisticParser::AddEventStatistic(EventID id)
+	void EventStatisticParser::OnThreadDiscovered(ThreadID thread_id, ThreadSystemID thread_system_id, std::string_view thread_name)
 	{
-		std::wstring_view event_name = events_manager.GetEventSpec(id).name_view;
-
-		for (std::size_t index = 0; index < event_statistics.size(); ++index)
-		{
-			auto& statistic = event_statistics[index];
-			assert(!statistic.event_ids.empty());
-			auto cur_name = events_manager.GetEventSpec(statistic.event_ids.front()).name_view;
-			if (event_name == cur_name)
-			{
-				statistic.event_ids.emplace_back(id);
-				return index;
-			}
-		}
-
-		std::size_t index = event_statistics.size();
-		event_statistics.emplace_back(&resource).event_ids.push_back(id);
-		return index;
+		// The thread condition of every query is resolved from the name of the thread once, so the walk
+		// of the stack tree only looks the thread of the tree up in the query which it belongs to, and
+		// IsThreadRequired() is answered from the same ids.
+		query_mapping.AddThread(thread_id, thread_name);
 	}
 
 	void EventStatisticParser::OnCPUEventDiscovered(EventID id, std::wstring_view event_name, std::wstring_view file_name, std::size_t file_line)
 	{
-		// Every event is stored, the name of the enclosing events is needed to build the call chain
-		// of the longest occurrences, those events are matched by the matcher in general.
-		// The return value of AddEvent tells whether this is the first time the event is stored,
-		// so the name is only checked once per event spec.
+		// Every event spec is stored, the name of an event is resolved from the manager when its
+		// statistic is reported, and the events which only complete a call chain are resolved by the
+		// query system, which needs the name of every event as well.
+		// The return value of AddEvent tells whether this is the first time the event is stored, so the
+		// name of an event spec is only resolved once.
 		if (events_manager.AddEvent(id, event_name, file_name, file_line))
 		{
-			// Keep the id of the matched event, so that the sample of every occurrence in the stack
-			// tree is found by a single lookup.
-			if (!event_name.empty() && IsEventNameMatched(*matcher, event_name, encoded_event_name))
-			{
-				AddEventStatistic(id);
-			}
+			query_mapping.AddEvent(id, event_name);
 		}
 	}
 
 	void EventStatisticParser::OnCPUScopeEventDiscovered(EventID id, std::u8string_view event_name)
 	{
 		// The event of the CPU scope logger carries no file and no line, its name is the only
-		// information of the spec, but it is carried by the stack tree as well, so it is handled
-		// the same way as the event of the event spec. The name is already UTF-8, which is what the
-		// matcher needs, so it is matched in place without any conversion.
+		// information of the spec, but it is carried by the stack tree as well, so it is resolved the
+		// same way as the event of the event spec. The name is already UTF-8, which is what the matcher
+		// needs, so it is resolved in place without any conversion.
 		if (events_manager.AddEvent(id, event_name, {}, 0))
 		{
-			if (!event_name.empty() && IsEventNameMatched(*matcher, event_name))
-			{
-				AddEventStatistic(id);
-			}
+			query_mapping.AddEvent(id, event_name);
 		}
 	}
 
@@ -92,6 +114,14 @@ namespace UEBabyPram::InsightFilter
 			|| flag == ParserRequireFlag::CONTEXT_SWITCH;
 	}
 
+	bool EventStatisticParser::IsThreadRequired(ThreadID thread_id) const
+	{
+		// A query which carries no thread condition counts every thread, so this is only false when every
+		// query carries a thread condition which the thread is not matched by, and such a thread carries
+		// no event which has to be counted.
+		return query_mapping.IsThreadMatched(thread_id);
+	}
+
 	void EventStatisticParser::ContextSwitchEvent(ThreadSystemID thread_id, std::size_t core_name, Potato::Misc::IndexSpan<DurationSec> duration)
 	{
 		// The context switch events are complete only when the whole trace is analyzed, so they are
@@ -101,45 +131,106 @@ namespace UEBabyPram::InsightFilter
 
 	void EventStatisticParser::OnCPUStackTree(ThreadCPUEventView event_scope)
 	{
-		for (EventStatistic& ite : event_statistics)
-		{
-			std::size_t index_offset = 0;
-			while (index_offset < event_scope.view.size())
+		// The query system has already filtered the thread, the time and the whole call chain of every
+		// query, so every match which it visits is an occurrence which the query counts, and the
+		// statistics of the match only have to be accumulated.
+		//
+		// Two matches of one query may be the same call, though: an event name may appear in more than one
+		// chain element, and the elements of a chain do not have to be the nearest descendants, so the
+		// same name can be reported by several elements with overlapping time ranges. The matches of one
+		// query are collected first, and the ones whose time ranges overlap are collapsed into the longest
+		// one, the shorter ones are the same call seen from another element. The matches of two queries
+		// are never compared, so the same name is still counted independently by both of them.
+		std::pmr::vector<MatchedOccurrence> occurrences(&resource);
+
+		query_mapping.ForEachMatchedEvent(event_scope, [&](EventQueryMapping::EventMatch const& match) {
+			std::wstring_view event_name = events_manager.GetEventSpec(match.event_view.event_id).name_view;
+
+			for (std::size_t index = 0; index < occurrences.size();)
 			{
-				auto current_event = FindStatisticEvent(event_scope, ite, index_offset);
-				if (current_event)
+				auto const& exist = occurrences[index];
+				if (
+					exist.query_index == match.query_index
+					&& exist.event_name == event_name
+					&& IsTimeRangeOverlapped(exist.event_view.time_range, match.event_view.time_range)
+					)
 				{
-					RecordEventOccurrence(event_scope, current_event, ite);
-					index_offset = current_event.index_range.End();
+					// The longer range is the one which is counted, the shorter one is the same call and it
+					// is ignored. The occurrence which is kept is replaced when the new one is longer, and
+					// the new one is not counted at all when a longer one is already kept.
+					if (exist.event_view.time_range.Size() >= match.event_view.time_range.Size())
+					{
+						return;
+					}
+
+					occurrences.erase(occurrences.begin() + index);
 					continue;
 				}
-				else {
-					break;
+
+				++index;
+			}
+
+			occurrences.push_back(MatchedOccurrence{ match.event_view, event_name, match.query_index });
+		});
+
+		// The occurrences which are left are the calls which have to be counted, the exclude time of an
+		// occurrence is the duration of its subtree without the time of its child events.
+		for (auto const& occurrence : occurrences)
+		{
+			DurationSec exclude_time = DurationSec::zero();
+			if (auto exclude_statistic = event_scope.GetExcludeTime(occurrence.event_view); exclude_statistic)
+			{
+				exclude_time = exclude_statistic->active_time;
+			}
+
+			RecordEventOccurrence(
+				event_scope,
+				occurrence.event_view,
+				exclude_time,
+				GetNameStatistic(occurrence.query_index, occurrence.event_view.event_id)
+			);
+		}
+	}
+
+	EventStatisticParser::EventStatistic& EventStatisticParser::GetNameStatistic(std::size_t query_index, EventID id)
+	{
+		assert(query_index < query_mapping.GetQueries().size());
+		std::wstring_view event_name = events_manager.GetEventSpec(id).name_view;
+
+		// The statistic is keyed by the query and by the name of the event: one name keeps one statistic
+		// inside one query, and two queries never share a statistic.
+		for (auto& statistic : event_statistics)
+		{
+			if (statistic.query_index != query_index)
+			{
+				continue;
+			}
+
+			assert(!statistic.event_ids.empty());
+			auto current_name = events_manager.GetEventSpec(statistic.event_ids.front()).name_view;
+			if (event_name == current_name)
+			{
+				// The same id is counted by every one of its occurrences, so it is only kept once.
+				if (std::find(statistic.event_ids.begin(), statistic.event_ids.end(), id) == statistic.event_ids.end())
+				{
+					statistic.event_ids.push_back(id);
 				}
+				return statistic;
 			}
 		}
+
+		// A new statistic is only created for a name which the query does not count yet, so every name
+		// which the query matches keeps its own timing.
+		auto& statistic = event_statistics.emplace_back(&resource);
+		statistic.query_index = query_index;
+		statistic.event_ids.push_back(id);
+		return statistic;
 	}
 
-	// The search of the occurrence is the place where the rule of which event counts as an
-	// occurrence of the statistic will grow, so it is kept apart from the walk of the stack tree.
-	auto EventStatisticParser::FindStatisticEvent(ThreadCPUEventView event_scope, EventStatistic const& statistic, std::size_t offset) const -> ThreadCPUEventView::EventView
+	void EventStatisticParser::RecordEventOccurrence(ThreadCPUEventView event_scope, ThreadCPUEventView::EventView event_view, DurationSec exclude_time, EventStatistic& statistic)
 	{
-		return event_scope.FindNextEvent(
-			{ statistic.event_ids.data(), statistic.event_ids.size() },
-			offset
-		);
-	}
-
-	void EventStatisticParser::RecordEventOccurrence(ThreadCPUEventView event_scope, ThreadCPUEventView::EventView event_view, EventStatistic& statistic)
-	{
-		// The duration of the occurrence is the whole time which it takes, and the exclude time is
-		// its duration without the time spent in the child events.
+		// The duration of the occurrence is the whole time which it takes.
 		DurationSec duration = event_view.time_range.Size();
-		DurationSec exclude_time = DurationSec::zero();
-		if (auto exclude_statistic = event_scope.GetExcludeTime(event_view); exclude_statistic)
-		{
-			exclude_time = exclude_statistic->active_time;
-		}
 
 		// Accumulate the occurrence into the statistic of its event name, the duration of the single
 		// occurrence is kept for the median and the standard deviation.
@@ -245,94 +336,163 @@ namespace UEBabyPram::InsightFilter
 		}
 	}
 
+	void EventStatisticParser::PrintEventStatistic(Potato::Log::LogPrinter& printer, EventStatistic const& statistic) const
+	{
+		using InsightFilter::OutputLog;
+
+		// The statistic which has no occurrence carries no timing information, so it is not reported.
+		if (statistic.count == 0)
+		{
+			return;
+		}
+
+		// The name of the event is not stored by the statistic, it is taken from the events manager with
+		// the first id of the statistic.
+		std::wstring_view event_name = L"<Unknow>";
+		if (!statistic.event_ids.empty())
+		{
+			auto event_spec = events_manager.GetEventSpec(statistic.event_ids.front());
+			if (!event_spec.name_view.empty())
+			{
+				event_name = event_spec.name_view;
+			}
+		}
+
+		// The statistic is only reported when it has at least one occurrence, so the count is never zero
+		// here.
+		double mean_duration = (statistic.total_duration / static_cast<double>(statistic.count)).count() * 1000.0;
+		double mean_exclude_time = (statistic.total_exclude_time / static_cast<double>(statistic.count)).count() * 1000.0;
+
+		OutputLog<L"            Name:<{:}>, Count:<{}>, Total D:<{:.3f}ms>, Mean D:<{:.3f}ms>, Median D:<{:.3f}ms>, Std D:<{:.3f}ms>, Total E:<{:.3f}ms>, Mean E:<{:.3f}ms>">(
+			printer,
+			event_name,
+			statistic.count,
+			statistic.total_duration.count() * 1000.0,
+			mean_duration,
+			statistic.median_duration.count() * 1000.0,
+			statistic.duration_standard_deviation.count() * 1000.0,
+			statistic.total_exclude_time.count() * 1000.0,
+			mean_exclude_time
+		);
+
+		if (statistic.top_occurrences.empty())
+		{
+			return;
+		}
+
+		OutputLog<L"                Top <{}> Longest Occurrence:">(printer, statistic.top_occurrences.size());
+
+		std::size_t index = 0;
+		for (auto const& occurrence : statistic.top_occurrences)
+		{
+			DisplayTimePoint begin_time{ occurrence.time_range.Begin() };
+			DisplayTimePoint end_time{ occurrence.time_range.End() };
+
+			// The name of the thread is not kept by the occurrence, it is resolved from the thread id
+			// which is kept at the time of the occurrence. The thread info may be missing when the thread
+			// was never discovered.
+			std::string_view thread_name{ "<Unknow>" };
+			if (auto thread_info = GetThreadInfo(occurrence.thread_id); thread_info && !thread_info->thread_name.empty())
+			{
+				thread_name = thread_info->thread_name;
+			}
+
+			OutputLog<L"                    <{:<4}> TName:<{:}>, D:<{:.3f}ms>, E:<{:.3f}ms>, ENCS:<{:.3f}ms>, TR: [{}, {}]">(
+				printer,
+				index,
+				thread_name,
+				occurrence.time_range.Size().count() * 1000.0,
+				occurrence.exclude_time.count() * 1000.0,
+				occurrence.exclude_time_without_context_switch.count() * 1000.0,
+				begin_time,
+				end_time
+			);
+
+			++index;
+		}
+	}
+
 	bool EventStatisticParser::PrintToLog(Potato::Log::LogPrinter& printer)
 	{
 		using InsightFilter::OutputLog;
 
 		OutputLog<L"EventStatisticParser Output:">(printer);
 
-		// Every statistic is reported on its own line, so the statistics are not summed up here.
-		OutputLog<L"    Event Regex <{}>">(
-			printer,
-			std::string_view{ matcher->pattern() }
-		);
-
 		OutputLog<L"    (D: Duration of the single occurrence; E: Exclude Time, the duration without the time of the child events; ENCS: Exclude Time WithOut Context Switch Time; Mean D / Median D / Std D: the mean, the median and the standard deviation of the single duration; TName: the name of the thread which the occurrence happened on; TR: Time Range of the occurrence)">(
 			printer
 		);
 
-		for (auto const& statistic : event_statistics)
+		auto queries = query_mapping.GetQueries();
+		for (std::size_t query_index = 0; query_index < queries.size(); ++query_index)
 		{
-			// The statistic which has no occurrence carries no timing information, so it is not
-			// reported at all.
-			if (statistic.count == 0)
+			auto const& query = queries[query_index];
+
+			// The query is printed back from the regular expressions of its elements, the elements which
+			// the '[' and ']' surround are the ones whose timing is collected, the ones which the '(' and
+			// ')' surround are only matched as a part of the call chain.
+			std::wstring header = std::format(L"    Query <{}>:", query_index);
+			for (std::size_t node_index = 0; node_index < query.nodes.size(); ++node_index)
+			{
+				auto const& node = query.nodes[node_index];
+				header += node_index == 0 ? L" " : L" -> ";
+
+				bool is_statistic = node.kind == EventQuery::ChainElement::Kind::QueryAndStatistic;
+				header += is_statistic ? L"[" : L"(";
+				header += EncodePattern(*node.matcher);
+				header += is_statistic ? L"]" : L")";
+			}
+
+			if (query.thread_matcher)
+			{
+				header += L" & Thread=(";
+				header += EncodePattern(*query.thread_matcher);
+				header += L")";
+			}
+
+			if (!query.time_ranges.empty())
+			{
+				header += L" & Time=";
+				for (std::size_t range_index = 0; range_index < query.time_ranges.size(); ++range_index)
+				{
+					if (range_index != 0)
+					{
+						header += L", ";
+					}
+					auto const& range = query.time_ranges[range_index];
+					header += std::format(
+						L"[{}, {}]",
+						DisplayTimePoint{ range.Begin() },
+						DisplayTimePoint{ range.End() }
+					);
+				}
+			}
+
+			OutputLog<L"{}">(printer, header);
+
+			// The statistics which belong to this query, every one of them is keyed by the query and by the
+			// name of the event, so the statistics of two queries are never mixed.
+			std::size_t counted_name_count = 0;
+			for (auto const& statistic : event_statistics)
+			{
+				if (statistic.query_index == query_index && statistic.count != 0)
+				{
+					++counted_name_count;
+				}
+			}
+
+			if (counted_name_count == 0)
 			{
 				continue;
 			}
 
-			// The name of the event is not stored by the statistic, it is taken from the events
-			// manager with the first id of the statistic.
-			std::wstring_view event_name = L"<Unknow>";
-			if (!statistic.event_ids.empty())
+			OutputLog<L"        <{}> Event Name(s):">(printer, counted_name_count);
+
+			for (auto const& statistic : event_statistics)
 			{
-				auto event_spec = events_manager.GetEventSpec(statistic.event_ids.front());
-				if (!event_spec.name_view.empty())
+				if (statistic.query_index == query_index)
 				{
-					event_name = event_spec.name_view;
+					PrintEventStatistic(printer, statistic);
 				}
-			}
-
-			// The statistic is only reported when it has at least one occurrence, so the count is
-			// never zero here.
-			double mean_duration = (statistic.total_duration / static_cast<double>(statistic.count)).count() * 1000.0;
-			double mean_exclude_time = (statistic.total_exclude_time / static_cast<double>(statistic.count)).count() * 1000.0;
-
-			OutputLog<L"    Name:<{:}>, Count:<{}>, Total D:<{:.3f}ms>, Mean D:<{:.3f}ms>, Median D:<{:.3f}ms>, Std D:<{:.3f}ms>, Total E:<{:.3f}ms>, Mean E:<{:.3f}ms>">(
-				printer,
-				event_name,
-				statistic.count,
-				statistic.total_duration.count() * 1000.0,
-				mean_duration,
-				statistic.median_duration.count() * 1000.0,
-				statistic.duration_standard_deviation.count() * 1000.0,
-				statistic.total_exclude_time.count() * 1000.0,
-				mean_exclude_time
-			);
-
-			if (statistic.top_occurrences.empty())
-			{
-				continue;
-			}
-
-			OutputLog<L"        Top <{}> Longest Occurrence:">(printer, statistic.top_occurrences.size());
-
-			std::size_t index = 0;
-			for (auto const& occurrence : statistic.top_occurrences)
-			{
-				DisplayTimePoint begin_time{ occurrence.time_range.Begin() };
-				DisplayTimePoint end_time{ occurrence.time_range.End() };
-
-				// The name of the thread is not kept by the occurrence, it is resolved from the thread
-				// id which is kept at the time of the occurrence. The thread info may be missing when
-				// the thread was never discovered.
-				std::string_view thread_name{ "<Unknow>" };
-				if (auto thread_info = GetThreadInfo(occurrence.thread_id); thread_info && !thread_info->thread_name.empty())
-				{
-					thread_name = thread_info->thread_name;
-				}
-
-				OutputLog<L"            <{:<4}> TName:<{:}>, D:<{:.3f}ms>, E:<{:.3f}ms>, ENCS:<{:.3f}ms>, TR: [{}, {}]">(
-					printer,
-					index,
-					thread_name,
-					occurrence.time_range.Size().count() * 1000.0,
-					occurrence.exclude_time.count() * 1000.0,
-					occurrence.exclude_time_without_context_switch.count() * 1000.0,
-					begin_time,
-					end_time
-				);
-
-				++index;
 			}
 		}
 

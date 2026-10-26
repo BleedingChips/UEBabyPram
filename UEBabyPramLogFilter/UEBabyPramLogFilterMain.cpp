@@ -4,56 +4,8 @@ import UEBabyPramLogCLI;
 import Potato;
 import std;
 
-constexpr auto log_filter = Potato::TMP::TypeString(u8"LogFilter");
-
-namespace Potato::Log
-{
-	template<Potato::Log::LogLevel level>
-	struct LogCategoryFormatter<log_filter, level>
-	{
-		template<typename OutputIterator, typename ...Parameters>
-		OutputIterator operator()(OutputIterator iterator, std::basic_format_string<wchar_t, std::type_identity_t<Parameters>...> const& pattern, Parameters&& ...parameters)
-		{
-			if constexpr (level == Potato::Log::LogLevel::Error)
-			{
-				Potato::Log::FormatedSystemTime time;
-				iterator = std::format_to(
-					std::move(iterator),
-					L"{}:",
-					level
-				);
-			}
-			return std::format_to(
-				std::move(iterator),
-				pattern,
-				std::forward<Parameters>(parameters)...
-			);
-		}
-	};
-}
-
-static bool forbid_log = false;
-
-namespace Potato::Log
-{
-	template<>
-	struct LogCategoryProperty<log_filter>
-	{
-		static bool IsLogEnable(LogLevel level)
-		{
-			if (forbid_log)
-			{
-				return level > LogLevel::Log;
-			}
-			else {
-				return true;
-			}
-		}
-	};
-}
-
-
 using namespace UEBabyPram;
+using namespace UEBabyPram::LogFilter;
 using namespace Potato;
 
 std::filesystem::path GetTemporaryPath(std::filesystem::path const& reference_path)
@@ -81,13 +33,13 @@ int main(int argc, char* argv[])
 	}
 	catch (std::exception const& exc)
 	{
-		Log::Log<log_filter, Log::LogLevel::Error, L"{}">(std::string_view{ exc.what() });
+		LogToConsole<Log::LogLevel::Error, L"{}">(std::string_view{ exc.what() });
 	}
 	
 
 	if (setting.input_file.empty())
 	{
-		Log::Log<log_filter, Log::LogLevel::Error, L"Require an target file with -f or --file, see -h or --help for more infomation">();
+		LogToConsole<Log::LogLevel::Error, L"Require an target file with -f or --file, see -h or --help for more infomation">();
 		return -1;
 	}
 
@@ -104,7 +56,7 @@ int main(int argc, char* argv[])
 
 	if (setting.target == UEBabyPram::LogFilter::OutputTarget::STD)
 	{
-		forbid_log = true;
+		SetConsoleLogSuppressed(true);
 	}
 
 	Potato::Task::Context context;
@@ -113,7 +65,7 @@ int main(int argc, char* argv[])
 	{
 		context.Commit(
 			[&, file_path](Potato::Task::Context&, Potato::Task::Node::Parameter&, Potato::Task::Node&) {
-				Potato::Log::Log<log_filter, Potato::Log::LogLevel::Log, u8"Input <{}>">(file_path.generic_u8string());
+				LogToConsole<Log::LogLevel::Log, u8"Input <{}>">(file_path.generic_u8string());
 				Potato::Document::DocumentReader reader(file_path);
 				if (!reader)
 				{
@@ -362,7 +314,7 @@ int main(int argc, char* argv[])
 							file_path.generic_string(),
 							count
 						);
-						Log::Log<log_filter, Log::LogLevel::Display, "{} {}: {};">(out_buffer, line_report, formated_line);
+						LogToConsole<Log::LogLevel::Display, "{} {}: {};">(out_buffer, line_report, formated_line);
 					}
 
 					reader.Close();
@@ -380,13 +332,13 @@ int main(int argc, char* argv[])
 							out_path
 						);
 
-						Potato::Log::Log<log_filter, Potato::Log::LogLevel::Log, u8"Output <{}>, <{}> Logs Matched, {}">(
+						LogToConsole<Log::LogLevel::Log, u8"Output <{}>, <{}> Logs Matched, {}">(
 							out_path.generic_u16string(), count, line_report
 						);
 					}
 				}
 				else {
-					Potato::Log::Log<log_filter, Potato::Log::LogLevel::Log, u8"Unable To Handle File <{}>">(file_path.generic_u16string());
+					LogToConsole<Log::LogLevel::Log, u8"Unable To Handle File <{}>">(file_path.generic_u16string());
 				}
 			}
 		);
@@ -394,7 +346,7 @@ int main(int argc, char* argv[])
 	context.CreateThreads(context.GetSuggestThreadCount());
 	context.ExecuteContextThreadUntilNoExistTask();
 
-	Potato::Log::Log<log_filter, Potato::Log::LogLevel::Log, u8"All Done">();
+	LogToConsole<Log::LogLevel::Log, u8"All Done">();
 
 
 	return 0;

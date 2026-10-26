@@ -51,9 +51,12 @@ export namespace UEBabyPram::InsightFilter
 	};
 
 	// Build the event query from the text, the text is not owned by the query and the
-	// regular expressions are compiled into the query. Returns std::nullopt when the text
-	// is not a valid query, or when one of its regular expressions is not acceptable.
-	std::optional<EventQuery> ParseEventQuery(std::u8string_view query);
+	// regular expressions are compiled into the query. Returns std::u8string instead of the query
+	// when the text is not acceptable, which means that it does not follow the grammar of
+	// GetFilterEbnf(), or that one of its regular expressions is not accepted by re2. The message is
+	// human readable UTF-8 and it names the part of the text which is not accepted, so the caller is
+	// able to report it as it is. When the query is returned instead, its chain is never empty.
+	std::variant<EventQuery, std::u8string> ParseEventQuery(std::u8string_view query);
 
 	// The EBNF table of the event query grammar, it is built once and kept for the whole
 	// process, so the temporary resources of the table are only kept in the process as well.
