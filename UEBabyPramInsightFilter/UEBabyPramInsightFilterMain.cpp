@@ -33,7 +33,7 @@ int main(int argc, char* argv[])
 
 	auto start_time = std::chrono::system_clock::now();
 
-	Potato::Log::Log<L"Start With UTrace File {}">(setting.insight_path.generic_wstring());
+	Potato::Log::Log<L"Start With UTrace File <{}>">(setting.insight_path.generic_wstring());
 
 	Potato::Document::DocumentReader Reader(setting.insight_path);
 	UEBabyPram::InsightParser::ExecuteParser(Reader, *setting.parser);
@@ -41,8 +41,8 @@ int main(int argc, char* argv[])
 
 	auto end_time = std::chrono::system_clock::now();
 
-	Potato::Log::Log<"\nDone With Time: <{}> microseconds">(
-		std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time).count()
+	Potato::Log::Log<"\nDone With Time: <{}s>">(
+		std::chrono::duration_cast<std::chrono::seconds>(end_time - start_time).count()
 	);
 
 	return 0;

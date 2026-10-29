@@ -16,7 +16,7 @@ namespace UEBabyPram::InsightFilter
 	GameThreadParser::GameThreadParser(Config in_config)
 		: resource(in_config.resource)
 		, context_switch_list(ContextSwitchEventList::Config{ &resource })
-		, events_manager(EventSpecManager::Config{10000, 1000, false, &resource})
+		, events_manager(EventSpecManager::Config{ false, &resource })
 		, event_records(&resource)
 		, max_record_frame(in_config.max_record_frame)
 		, max_exclude_time_count(in_config.max_exclude_time_count)

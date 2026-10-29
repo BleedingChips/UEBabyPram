@@ -59,184 +59,304 @@ namespace UEBabyPram::InsightParser
 		assert(depth == 0);
 	}
 
-	auto SubEventSpecManager::GetEventSpec(EventID id, std::pmr::wstring const& string_storage) const ->EventSpecView
+	SubEventSpecManager::SubEventSpecManager(Config config)
+		: need_file(config.need_file)
+		, sequential_spec_blocks(config.resource)
+		, random_spec_blocks(config.resource)
+		, string_blocks(config.resource)
+		, resource(config.resource)
+		, encoded_string(config.resource)
+	{
+	}
+
+	SubEventSpecManager::~SubEventSpecManager()
+	{
+		// The blocks are owned by the manager, the storage of a block is freed to the resource which it was
+		// allocated from.
+		for (auto block : string_blocks)
+		{
+			resource->deallocate(block, sizeof(StringBlock), alignof(StringBlock));
+		}
+
+		for (auto block : sequential_spec_blocks)
+		{
+			resource->deallocate(block, sizeof(SpecBlock), alignof(SpecBlock));
+		}
+
+		for (auto& block : random_spec_blocks)
+		{
+			resource->deallocate(block.block, sizeof(SpecBlock), alignof(SpecBlock));
+		}
+	}
+
+	auto SubEventSpecManager::StoreString(std::u8string_view string, EventID id, bool is_file) -> std::u8string_view
+	{
+		if (string.empty())
+		{
+			return {};
+		}
+
+		// The string which is longer than a quarter of the block is replaced by the fixed string with the id of
+		// the event, and the replacement is written instead of it. The quarter of the block is the worst case
+		// of the encoding, which is four bytes of UTF-8 for one wide character, so the replacement and every
+		// other string are written into one block.
+		if (string.size() > string_block_capacity / 4)
+		{
+			return StoreString(MakeReplacedString(id, is_file), id, is_file);
+		}
+
+		// The characters of the string are UTF-8 already, so they are written into the blocks as they are.
+		return WriteString(std::span< char8_t const>{ string.data(), string.size() });
+	}
+
+	auto SubEventSpecManager::StoreString(std::wstring_view string, EventID id, bool is_file) -> std::u8string_view
+	{
+		if (string.empty())
+		{
+			return {};
+		}
+
+		if (string.size() > string_block_capacity / 4)
+		{
+			return StoreString(MakeReplacedString(id, is_file), id, is_file);
+		}
+
+		// The wide characters are encoded into UTF-8 while they are written into the blocks.
+		return WriteString(std::span<wchar_t const>{ string.data(), string.size() });
+	}
+
+	template<typename FromCharT>
+	auto SubEventSpecManager::WriteString(std::span<FromCharT const> string) -> std::u8string_view
+	{
+		using EncoderT = Potato::Encode::UnicodeEncoder<FromCharT, char8_t>;
+
+		// The string is written after the characters which are already written into the block which is being
+		// written, and the encoder tells how much of the source it wrote. The characters of a string are never
+		// split into two blocks, so when the room of the block is not enough, the part which was written is
+		// dropped and the string is written into a new block instead.
+		if (current_block != nullptr)
+		{
+			auto offset = current_block_count;
+			auto info = EncoderT::EncodeTo(
+				string,
+				std::span<char8_t>{ current_block->characters.data() + offset, string_block_capacity - offset }
+			);
+
+			if (info.source_space == string.size())
+			{
+				current_block_count += info.target_space;
+				return std::u8string_view{ current_block->characters.data() + offset, info.target_space };
+			}
+		}
+
+		// The string is written into a new block from its beginning, and the block becomes the block which is
+		// being written. The string is not longer than a quarter of the block, so its characters always fit
+		// into the new block, even in the worst case of the encoding.
+		auto block = static_cast<StringBlock*>(resource->allocate(sizeof(StringBlock), alignof(StringBlock)));
+		std::construct_at(block);
+		string_blocks.push_back(block);
+		current_block = block;
+		current_block_count = 0;
+
+		auto info = EncoderT::EncodeTo(
+			string,
+			std::span<char8_t>{ block->characters.data(), string_block_capacity }
+		);
+
+		assert(info.source_space == string.size());
+		if (info.source_space != string.size())
+		{
+			return {};
+		}
+
+		current_block_count = info.target_space;
+		return std::u8string_view{ block->characters.data(), info.target_space };
+	}
+
+	auto SubEventSpecManager::MakeReplacedString(EventID id, bool is_file) -> std::u8string_view
+	{
+		// The fixed string of a string which is too long for a block, the id of the event and the kind of the
+		// string keep the replaced strings of two events apart.
+		encoded_string.clear();
+		if (is_file)
+		{
+			std::format_to(std::back_inserter(encoded_string), "FileOutOfRange({})", id.id);
+		}
+		else {
+			std::format_to(std::back_inserter(encoded_string), "NameOutOfRange({})", id.id);
+		}
+
+		// The replacement is far shorter than the quarter of the block, so the string which is replaced by it is
+		// never replaced again.
+		assert(encoded_string.size() < string_block_capacity / 4);
+
+		// The replacement is ASCII, so its characters are UTF-8 already and the string is viewed without any
+		// conversion.
+		return std::u8string_view{
+			reinterpret_cast<char8_t const*>(encoded_string.data()),
+			encoded_string.size()
+		};
+	}
+
+	auto SubEventSpecManager::FindSpecBlock(std::size_t index) -> SpecBlock*
+	{
+		return const_cast<SpecBlock*>(std::as_const(*this).FindSpecBlock(index));
+	}
+
+	auto SubEventSpecManager::FindSpecBlock(std::size_t index) const -> SpecBlock const*
+	{
+		// The blocks of the sequential queue begin at 0 and they are next to each other, so the block of the index
+		// is the index divided by the capacity of a block.
+		auto block_index = index / spec_block_capacity;
+		if (block_index < sequential_spec_blocks.size())
+		{
+			return sequential_spec_blocks[block_index];
+		}
+
+		// The blocks of the random queue are not next to each other, every one of them carries the index which it
+		// begins at, so the block of the index is found by searching the beginning of the blocks.
+		for (auto& random_block : random_spec_blocks)
+		{
+			if (random_block.begin_index <= index && index < random_block.begin_index + spec_block_capacity)
+			{
+				return random_block.block;
+			}
+		}
+
+		return nullptr;
+	}
+
+	auto SubEventSpecManager::CreateSpecBlock(std::size_t index) -> SpecBlock*
+	{
+		// The block is aligned to its capacity, so the index of the block inside it is the remainder of the index,
+		// and the block of the index is found by the index divided by the capacity.
+		auto begin_index = (index / spec_block_capacity) * spec_block_capacity;
+
+		auto block = static_cast<SpecBlock*>(resource->allocate(sizeof(SpecBlock), alignof(SpecBlock)));
+		// Every spec of the block is initialized by the default value of EventSpecView, so a spec which is not
+		// stored yet carries no id, and the id of the spec tells whether it is assigned.
+		std::construct_at(block);
+
+		// The block is moved into the sequential queue when it is next to the last block of it, and it is kept in
+		// the random queue otherwise, which finds the block of an index by the index which it begins at.
+		if (begin_index == sequential_spec_blocks.size() * spec_block_capacity)
+		{
+			sequential_spec_blocks.push_back(block);
+
+			// The new block may make the blocks of the random queue next to the sequential queue, so the random
+			// queue is scanned again after a block is moved into the sequential queue, until none of its blocks
+			// fits any more.
+			bool moved = true;
+			while (moved)
+			{
+				moved = false;
+				for (auto ite = random_spec_blocks.begin(); ite != random_spec_blocks.end(); ++ite)
+				{
+					if (ite->begin_index == sequential_spec_blocks.size() * spec_block_capacity)
+					{
+						sequential_spec_blocks.push_back(ite->block);
+						random_spec_blocks.erase(ite);
+						moved = true;
+						break;
+					}
+				}
+			}
+		}
+		else {
+			random_spec_blocks.push_back(RandomSpecBlock{ block, begin_index });
+		}
+
+		return block;
+	}
+
+	auto SubEventSpecManager::AllocateEventSpec(EventID id) -> EventSpecView*
+	{
+		if (!id)
+		{
+			return nullptr;
+		}
+
+		// The block of the id is created when it does not exist yet, and the spec of the id is the slot of it
+		// inside the block, the block of an index always begins at its aligned index.
+		auto block = FindSpecBlock(id.id);
+		if (block == nullptr)
+		{
+			block = CreateSpecBlock(id.id);
+		}
+
+		auto& ref = block->specs[id.id % spec_block_capacity];
+		if (ref.id)
+		{
+			return nullptr;
+		}
+
+		ref.id = id;
+		return &ref;
+	}
+
+	bool SubEventSpecManager::AddEvent(EventID id, std::wstring_view event_name, std::wstring_view file, std::size_t line)
+	{
+		auto ref = AllocateEventSpec(id);
+		if (ref == nullptr)
+		{
+			return false;
+		}
+
+		if (need_file)
+		{
+			ref->line = line;
+		}
+
+		// The name and the file of the spec are written into the blocks of the strings as they are, the wide
+		// characters are encoded into UTF-8 while they are written.
+		ref->name_view = StoreString(event_name, id, false);
+		if (need_file)
+		{
+			ref->file_view = StoreString(file, id, true);
+		}
+		return true;
+	}
+
+	bool SubEventSpecManager::AddEvent(EventID id, std::u8string_view event_name, std::u8string_view file, std::size_t line)
+	{
+		auto ref = AllocateEventSpec(id);
+		if (ref == nullptr)
+		{
+			return false;
+		}
+
+		if (need_file)
+		{
+			ref->line = line;
+		}
+
+		// The name of the event of the CPU scope logger is already UTF-8, so it is written into the blocks of the
+		// strings without any conversion.
+		ref->name_view = StoreString(event_name, id, false);
+		if (need_file)
+		{
+			ref->file_view = StoreString(file, id, true);
+		}
+		return true;
+	}
+
+	auto SubEventSpecManager::GetEventSpec(EventID id) const ->EventSpecView
 	{
 		if (id)
 		{
-			if (id.id < max_spec_count)
+			// The spec of the id is the slot of it inside the block, and a spec which is not assigned carries no
+			// id, so the empty spec of an event which is not stored is not returned.
+			auto block = FindSpecBlock(id.id);
+			if (block != nullptr)
 			{
-				if (id.id < events.size())
+				auto const& ref = block->specs[id.id % spec_block_capacity];
+				if (ref.id)
 				{
-					auto& ref = events[id.id];
-					EventSpecView view;
-					view.id = ref.id;
-					view.line = ref.line;
-					view.name_view = ref.name_index.Slice(std::wstring_view{ string_storage });
-					view.file_view = ref.file_index.Slice(std::wstring_view{ string_storage });
-					return view;
-				}
-			}
-			else {
-				auto find = out_range_spec.find(id);
-				if (find != out_range_spec.end())
-				{
-					EventSpecView view;
-					view.id = find->second.id;
-					view.line = find->second.line;
-					view.name_view = find->second.name_index.Slice(std::wstring_view{ string_storage });
-					view.file_view = find->second.file_index.Slice(std::wstring_view{ string_storage });
-					return view;
+					return ref;
 				}
 			}
 		}
 		return {};
-	}
-
-	bool SubEventSpecManager::AddEvent(std::pmr::wstring& string_storage, EventID id, std::wstring_view event_name, std::wstring_view file, std::size_t line)
-	{
-		if (id)
-		{
-			if (id.id < max_spec_count)
-			{
-				if (events.size() < id.id + 1)
-				{
-					events.resize(id.id + 1);
-				}
-				auto& ref = events[id.id];
-				if (ref.id)
-				{
-					return false;
-				}
-				else {
-					auto old_string_index = string_storage.size();
-					string_storage.append(event_name);
-					auto new_string_index = string_storage.size();
-					if (need_file)
-					{
-						string_storage.append(file);
-						ref.line = line;
-					}
-					auto new_file_index = string_storage.size();
-					ref.id = id;
-					ref.name_index = { old_string_index, new_string_index };
-					ref.file_index = { new_string_index, new_file_index };
-					ref.debug_name_view = ref.name_index.Slice(std::wstring_view{ string_storage });
-					ref.debug_file = ref.file_index.Slice(std::wstring_view{ string_storage });
-					return true;
-				}
-			}
-			else {
-				Spec spec;
-				spec.id = id;
-				spec.line = line;
-				auto re = out_range_spec.insert(std::pair(id, spec));
-				if (re.second)
-				{
-					auto old_string_index = string_storage.size();
-					string_storage.append(event_name);
-					auto new_string_index = string_storage.size();
-					if (need_file)
-					{
-						string_storage.append(file);
-						re.first->second.line = line;
-					}
-					auto new_file_index = string_storage.size();
-					re.first->second.name_index = { old_string_index, new_string_index };
-					re.first->second.file_index = { new_string_index, new_file_index };
-					re.first->second.debug_name_view = re.first->second.name_index.Slice(std::wstring_view{ string_storage });
-					re.first->second.debug_file = re.first->second.file_index.Slice(std::wstring_view{ string_storage });
-					return true;
-				}
-			}
-		}
-		return false;
-	}
-
-	bool SubEventSpecManager::AddEvent(std::pmr::wstring& string_storage, EventID id, std::u8string_view event_name, std::wstring_view file, std::size_t line)
-	{
-		if (id)
-		{
-			if (id.id < max_spec_count)
-			{
-				if (events.size() < id.id + 1)
-				{
-					events.resize(id.id + 1);
-				}
-				auto& ref = events[id.id];
-				if (ref.id)
-				{
-					return false;
-				}
-				else {
-					auto old_string_index = string_storage.size();
-					Potato::Encode::UnicodeEncoder<char8_t, wchar_t>::EncodeTo(
-						event_name,
-						std::back_insert_iterator(string_storage)
-					);
-					auto new_string_index = string_storage.size();
-					if (need_file)
-					{
-						string_storage.append(file);
-						ref.line = line;
-					}
-					auto new_file_index = string_storage.size();
-					ref.id = id;
-					ref.name_index = { old_string_index, new_string_index };
-					ref.file_index = { new_string_index, new_file_index };
-					ref.debug_name_view = ref.name_index.Slice(std::wstring_view{ string_storage });
-					ref.debug_file = ref.file_index.Slice(std::wstring_view{ string_storage });
-					return true;
-				}
-			}
-			else {
-				Spec spec;
-				spec.id = id;
-				spec.line = line;
-				auto re = out_range_spec.insert(std::pair(id, spec));
-				if (re.second)
-				{
-					auto old_string_index = string_storage.size();
-					Potato::Encode::UnicodeEncoder<char8_t, wchar_t>::EncodeTo(
-						event_name,
-						std::back_insert_iterator(string_storage)
-					);
-					auto new_string_index = string_storage.size();
-					if (need_file)
-					{
-						string_storage.append(file);
-						re.first->second.line = line;
-					}
-					auto new_file_index = string_storage.size();
-					re.first->second.name_index = { old_string_index, new_string_index };
-					re.first->second.file_index = { new_string_index, new_file_index };
-					re.first->second.debug_name_view = re.first->second.name_index.Slice(std::wstring_view{ string_storage });
-					re.first->second.debug_file = re.first->second.file_index.Slice(std::wstring_view{ string_storage });
-					return true;
-				}
-			}
-		}
-		return false;
-	}
-
-	void SubEventSpecManager::RefreshDebugView(std::pmr::wstring& string_storage)
-	{
-		for (auto& ite : events)
-		{
-			if (ite.id)
-			{
-				ite.debug_file = ite.file_index.Slice(std::wstring_view{ string_storage });
-				ite.debug_name_view = ite.name_index.Slice(std::wstring_view{ string_storage });
-			}
-		}
-
-		for (auto& ite : out_range_spec)
-		{
-			if (ite.first)
-			{
-				ite.second.debug_file = ite.second.file_index.Slice(std::wstring_view{ string_storage });
-				ite.second.debug_name_view = ite.second.name_index.Slice(std::wstring_view{ string_storage });
-			}
-		}
 	}
 
 	auto EventSpecManager::GetEventSpec(EventID id) const ->EventSpecView
@@ -246,10 +366,10 @@ namespace UEBabyPram::InsightParser
 			if (id.id > std::numeric_limits<std::uint32_t>::max() / 2)
 			{
 				auto real_uint32 = ~static_cast<std::uint32_t>(id.id);
-				return metadata_events.GetEventSpec({ real_uint32 }, string_storage);
+				return metadata_events.GetEventSpec({ real_uint32 });
 			}
 			else {
-				return events.GetEventSpec(id, string_storage);
+				return events.GetEventSpec(id);
 			}
 		}
 		return {};
@@ -257,75 +377,126 @@ namespace UEBabyPram::InsightParser
 
 	bool EventSpecManager::AddEvent(EventID id, std::wstring_view event_name, std::wstring_view file, std::size_t line)
 	{
-		bool result = false;
-		auto old_data = string_storage.data();
 		if (id.id > std::numeric_limits<std::uint32_t>::max() / 2)
 		{
 			auto real_uint32 = ~static_cast<std::uint32_t>(id.id);
-			result = metadata_events.AddEvent(string_storage, { real_uint32 }, event_name, {}, 0);
+			return metadata_events.AddEvent({ real_uint32 }, event_name, {}, 0);
 		}
-		else {
-			result = events.AddEvent(string_storage, id, event_name, file, line);
-		}
-		if (result && string_storage.data() != old_data)
-		{
-			events.RefreshDebugView(string_storage);
-			metadata_events.RefreshDebugView(string_storage);
-		}
-		return result;
+
+		return events.AddEvent(id, event_name, file, line);
 	}
 
-	bool EventSpecManager::AddEvent(EventID id, std::u8string_view event_name, std::wstring_view file, std::size_t line)
+	bool EventSpecManager::AddEvent(EventID id, std::u8string_view event_name, std::u8string_view file, std::size_t line)
 	{
-		bool result = false;
-		auto old_data = string_storage.data();
 		if (id.id > std::numeric_limits<std::uint32_t>::max() / 2)
 		{
 			auto real_uint32 = ~static_cast<std::uint32_t>(id.id);
-			result = metadata_events.AddEvent(string_storage, { real_uint32 }, event_name, {}, 0);
+			return metadata_events.AddEvent({ real_uint32 }, event_name, {}, 0);
 		}
-		else {
-			result = events.AddEvent(string_storage, id, event_name, file, line);
-		}
-		if (result && string_storage.data() != old_data)
-		{
-			events.RefreshDebugView(string_storage);
-			metadata_events.RefreshDebugView(string_storage);
-		}
-		return result;
+
+		return events.AddEvent(id, event_name, file, line);
 	}
 
 	void ContextSwitchEventList::AddContextSwitchEvent(ThreadSystemID thread_id, std::size_t active_core, Potato::Misc::IndexSpan<DurationSec> active_time)
 	{
-		auto find = thread_list.find(thread_id);
-		if (find == thread_list.end())
+		// The list of the thread is found with a linear search, and it is appended when an event of the
+		// thread is added for the first time.
+		auto find = std::find_if(thread_list.begin(), thread_list.end(), [thread_id](ThreadList const& list) {
+			return list.thread_system_id == thread_id;
+			});
+
+		ThreadList* list = nullptr;
+		if (find != thread_list.end())
 		{
-			ThreadList list{thread_id, fast_check_point_count, &resource};
-			list.thread_system_id = thread_id;
-			find = std::get<0>(thread_list.insert(std::pair(thread_id, std::move(list))));
+			list = &*find;
 		}
-		find->second.events.emplace_back(active_core, active_time);
-		if ((find->second.events.size() % fast_check_point_count) == 0)
+		else {
+			// The append may move the storage of the list, so the appended list is taken from the vector
+			// itself instead of the iterator which was searched with.
+			list = &thread_list.emplace_back(thread_id, &resource);
+		}
+
+		list->AddEvent(ThreadList::Event{ active_core, active_time });
+	}
+
+	ContextSwitchEventList::ThreadList::ThreadList(ThreadSystemID in_thread_id, std::pmr::memory_resource* in_resource)
+		: thread_system_id(in_thread_id)
+		, blocks(in_resource)
+		, fast_check_point(in_resource)
+		, resource(in_resource)
+	{
+	}
+
+	ContextSwitchEventList::ThreadList::~ThreadList()
+	{
+		// The blocks are owned by the list, the storage of a block is freed to the resource which it was
+		// allocated from.
+		for (auto block : blocks)
 		{
-			find->second.fast_check_point.emplace_back(active_time.Begin());
+			block->~EventBlock();
+			resource->deallocate(block, sizeof(EventBlock), alignof(EventBlock));
 		}
+	}
+
+	std::size_t ContextSwitchEventList::ThreadList::GetEventCount() const
+	{
+		// The count is cached by the list, it is never computed from the blocks.
+		return event_count;
+	}
+
+	auto ContextSwitchEventList::ThreadList::GetEvent(std::size_t index) const -> Event const&
+	{
+		assert(index < GetEventCount());
+		return blocks[index / event_block_capacity]->events[index % event_block_capacity];
+	}
+
+	void ContextSwitchEventList::ThreadList::AddEvent(Event event)
+	{
+		// The position of the event inside its block, an aligned position means that the last block is full
+		// and a new one has to be allocated. The first event of the thread takes the position 0 as well,
+		// which is the first block.
+		std::size_t index_in_block = event_count % event_block_capacity;
+		if (index_in_block == 0)
+		{
+			// The block is only allocated when the last one is full, so the events which are already stored
+			// are never moved.
+			auto block = static_cast<EventBlock*>(resource->allocate(sizeof(EventBlock), alignof(EventBlock)));
+			std::construct_at(block);
+			blocks.push_back(block);
+
+			// The fast check point of the block is the time of its first event, and it is recorded when the
+			// block is created, so the coarse search skips the blocks which are entirely before the target
+			// point. The check point is the boundary which the block starts at, so the first block has none,
+			// it is the block which the search starts with.
+			if (event_count != 0)
+			{
+				fast_check_point.emplace_back(event.active_time_range.Begin());
+			}
+		}
+
+		auto& block = *blocks.back();
+		block.events[index_in_block] = event;
+		event_count += 1;
 	}
 
 	std::size_t ContextSwitchEventList::ThreadList::FastLocateFirstEventIndex(DurationSec target_point) const
 	{
+		// Every check point is the boundary which a block starts at, so the count of the check points which
+		// the target point has reached is the index of the block which the search has to start with.
 		std::size_t start_index = 0;
 		for (; start_index < fast_check_point.size(); ++start_index)
 		{
 			if (fast_check_point[start_index] > target_point)
 				break;
 		}
-		return start_index * fast_check_point_count;
+		return start_index * event_block_capacity;
 	}
 	std::size_t ContextSwitchEventList::ThreadList::LocateFirstEventIndex(DurationSec target_point, std::size_t index_offset) const
 	{
-		for (; index_offset < events.size(); ++index_offset)
+		auto event_count = GetEventCount();
+		for (; index_offset < event_count; ++index_offset)
 		{
-			if (events[index_offset].active_time_range.End() > target_point)
+			if (GetEvent(index_offset).active_time_range.End() > target_point)
 			{
 				break;
 			}
@@ -335,10 +506,11 @@ namespace UEBabyPram::InsightParser
 
 	auto ContextSwitchEventList::ThreadList::GetContextSwitchStatis(Potato::Misc::IndexSpan<DurationSec> time_range) const ->Statis
 	{
+		auto event_count = GetEventCount();
 		auto fast_start = FastLocateFirstEventIndex(time_range.Begin());
 		auto start = LocateFirstEventIndex(time_range.Begin(), fast_start);
 		
-		if (start >= events.size())
+		if (start >= event_count)
 		{
 			return Statis{
 				time_range.Size(),
@@ -348,9 +520,9 @@ namespace UEBabyPram::InsightParser
 		
 		auto end = LocateFirstEventIndex(time_range.End(), start);
 
-		if (end >= events.size())
+		if (end >= event_count)
 		{
-			end = events.size() - 1;
+			end = event_count - 1;
 		}
 
 		std::size_t active_count = 0;
@@ -358,8 +530,8 @@ namespace UEBabyPram::InsightParser
 
 		DurationSec overlapping_time = DurationSec::zero();
 
-		auto start_time = events[start].active_time_range.Begin();
-		auto end_time_range = events[end].active_time_range;
+		auto start_time = GetEvent(start).active_time_range.Begin();
+		auto end_time_range = GetEvent(end).active_time_range;
 
 		if(start_time < time_range.Begin())
 			overlapping_time += time_range.Begin() - start_time;
@@ -377,7 +549,7 @@ namespace UEBabyPram::InsightParser
 
 		for (auto i : Potato::Misc::IndexSpan<>(start, end + 1))
 		{
-			total_duration += events[i].active_time_range.Size();
+			total_duration += GetEvent(i).active_time_range.Size();
 		}
 
 		total_duration -= overlapping_time;
@@ -393,10 +565,12 @@ namespace UEBabyPram::InsightParser
 
 	auto ContextSwitchEventList::GetContextSwitchStatis(ThreadSystemID thread_id, Potato::Misc::IndexSpan<DurationSec> time_range) const ->Statis
 	{
-		auto find = thread_list.find(thread_id);
+		auto find = std::find_if(thread_list.begin(), thread_list.end(), [thread_id](ThreadList const& list) {
+			return list.thread_system_id == thread_id;
+			});
 		if (find != thread_list.end())
 		{
-			return find->second.GetContextSwitchStatis(time_range);
+			return find->GetContextSwitchStatis(time_range);
 		}
 		return {time_range.Size(), 0};
 	}

@@ -48,9 +48,9 @@ namespace UEBabyPram::InsightFilter
 		struct MatchedOccurrence
 		{
 			ThreadCPUEventView::EventView event_view;
-			// The name of the matched event, it points into the string storage of the events manager, which
-			// is not written while the stack tree is walked, so the view is valid for the whole call.
-			std::wstring_view event_name;
+			// The name of the matched event, it points into the string blocks of the events manager, which are
+			// never moved while the analysis is running, so the view is valid for the whole call.
+			std::u8string_view event_name;
 			std::size_t query_index = 0;
 		};
 	}
@@ -58,7 +58,7 @@ namespace UEBabyPram::InsightFilter
 	EventStatisticParser::EventStatisticParser(Config in_config)
 		: resource(in_config.resource)
 		, context_switch_list(ContextSwitchEventList::Config{ &resource })
-		, events_manager(EventSpecManager::Config{ 10000, 1000, false, &resource })
+		, events_manager(EventSpecManager::Config{ false, &resource })
 		, query_mapping(EventQueryMapping::Config{ std::move(in_config.queries), &resource })
 		, event_statistics(&resource)
 		, top_count(in_config.top_count)
@@ -144,7 +144,7 @@ namespace UEBabyPram::InsightFilter
 		std::pmr::vector<MatchedOccurrence> occurrences(&resource);
 
 		query_mapping.ForEachMatchedEvent(event_scope, [&](EventQueryMapping::EventMatch const& match) {
-			std::wstring_view event_name = events_manager.GetEventSpec(match.event_view.event_id).name_view;
+			std::u8string_view event_name = events_manager.GetEventSpec(match.event_view.event_id).name_view;
 
 			for (std::size_t index = 0; index < occurrences.size();)
 			{
@@ -195,7 +195,7 @@ namespace UEBabyPram::InsightFilter
 	EventStatisticParser::EventStatistic& EventStatisticParser::GetNameStatistic(std::size_t query_index, EventID id)
 	{
 		assert(query_index < query_mapping.GetQueries().size());
-		std::wstring_view event_name = events_manager.GetEventSpec(id).name_view;
+		std::u8string_view event_name = events_manager.GetEventSpec(id).name_view;
 
 		// The statistic is keyed by the query and by the name of the event: one name keeps one statistic
 		// inside one query, and two queries never share a statistic.
@@ -348,7 +348,7 @@ namespace UEBabyPram::InsightFilter
 
 		// The name of the event is not stored by the statistic, it is taken from the events manager with
 		// the first id of the statistic.
-		std::wstring_view event_name = L"<Unknow>";
+		std::u8string_view event_name = u8"<Unknow>";
 		if (!statistic.event_ids.empty())
 		{
 			auto event_spec = events_manager.GetEventSpec(statistic.event_ids.front());

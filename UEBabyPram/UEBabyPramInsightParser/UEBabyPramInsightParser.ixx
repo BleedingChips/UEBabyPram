@@ -131,109 +131,201 @@ export namespace UEBabyPram::InsightParser
 
 		struct ThreadList
 		{
-			ThreadList(ThreadSystemID thread_id, std::size_t fast_check_point_count, std::pmr::memory_resource* resource) :
-				thread_system_id(thread_id), fast_check_point_count(fast_check_point_count), events(resource), fast_check_point(resource)
-			{ }
-			ThreadList(ThreadList const& list) = default;
-			ThreadList(ThreadList&&) = default;
+			// How many events one block of the events holds.
+			static constexpr std::size_t event_block_capacity = 1024 * 16;
 
-			ThreadSystemID thread_system_id;
 			struct Event
 			{
 				std::size_t active_core = std::numeric_limits<std::size_t>::max();
 				Potato::Misc::IndexSpan<DurationSec> active_time_range;
 			};
-			std::pmr::vector<Event> events;
+
+			// One block of the events, the events of the block are filled from its beginning, so the block
+			// does not have to keep its own count, the count of the thread tells how many events of the last
+			// block are used.
+			struct EventBlock
+			{
+				std::array<Event, event_block_capacity> events;
+			};
+
+			ThreadList(ThreadSystemID thread_id, std::pmr::memory_resource* resource);
+			ThreadList(ThreadList const& list) = delete;
+			ThreadList(ThreadList&& list) = default;
+			~ThreadList();
+
+			// The count of the events of the thread, it is cached by the list itself so it never has to be
+			// computed from the blocks, and the event at the index of it.
+			std::size_t GetEventCount() const;
+			Event const& GetEvent(std::size_t index) const;
+			// Append one event, the block of the events is only allocated when the last one is full, and the
+			// fast check point of the block is recorded with the block itself.
+			void AddEvent(Event event);
+
+			ThreadSystemID thread_system_id;
+			// How many events of the thread are stored, it is the position where the next event is added to
+			// as well, the events of a block are filled one by one from its beginning.
+			std::size_t event_count = 0;
+			// The blocks of the events, the last one is the block which the next event is added to.
+			std::pmr::vector<EventBlock*> blocks;
+			// The boundary which every block of the events starts at, which is the time of the first event of
+			// the block, so the coarse search of the events skips the blocks which are entirely before the
+			// target point. The first block has no boundary, so the count of the entries is the count of the
+			// blocks minus one, and the entry of a block is added when the block is created.
 			std::pmr::vector<DurationSec> fast_check_point;
 			std::size_t FastLocateFirstEventIndex(DurationSec target_point) const;
 			std::size_t LocateFirstEventIndex(DurationSec target_point, std::size_t index_offset) const;
 			Statis GetContextSwitchStatis(Potato::Misc::IndexSpan<DurationSec> time_range) const;
-			const std::size_t fast_check_point_count;
+			// The resource which the blocks of the events are allocated from and freed to.
+			std::pmr::memory_resource* resource;
 		};
-		std::pmr::unordered_map<ThreadSystemID, ThreadList> thread_list;
-		const std::size_t fast_check_point_count = 300;
+
+		// The events of the context switch of every thread are kept in the blocks of
+		// ThreadList::event_block_capacity events: a block is only allocated when the last one is full, so
+		// an event which is added never moves the events which are already stored, and the memory of the
+		// events which are not added yet is not taken at all. The fast check points of the thread are kept
+		// with the same granularity, one boundary per block, so the block is both the storage unit and the
+		// search step of the events.
+		// Every thread keeps its own list, the list is found with a linear search by the thread id, and a
+		// thread which is not in the list yet is appended when one of its events is added for the first
+		// time.
+		std::pmr::vector<ThreadList> thread_list;
 	};
 
 	struct SubEventSpecManager
 	{
+		// How many characters one block of the strings holds.
+		static constexpr std::size_t string_block_capacity = 1024 * 16;
+		// How many specs one block of the specs holds.
+		static constexpr std::size_t spec_block_capacity = 4096;
+
 		struct Config
 		{
-			std::size_t max_vector_storage = 1000;
 			bool need_file = true;
 			std::pmr::memory_resource* resource = std::pmr::get_default_resource();
 		};
 
+		// The spec of one event, which is also the storage of the spec: the name and the file are the views
+		// of the blocks of the strings, so they stay valid while the manager is alive.
 		struct EventSpecView
 		{
 			EventID id;
-			std::wstring_view name_view = L"UnknowEvent";
-			std::wstring_view file_view;
+			std::u8string_view name_view = u8"UnknowEvent";
+			std::u8string_view file_view;
 			std::size_t line = 0;
 			operator bool() const { return id; }
 		};
 
-		SubEventSpecManager(Config config = {})
-			: events(config.resource), 
-			out_range_spec(config.resource), max_spec_count(config.max_vector_storage),
-			need_file(config.need_file)
-		{
-		}
-
-		SubEventSpecManager(SubEventSpecManager const&) = default;
+		SubEventSpecManager(Config config = {});
+		SubEventSpecManager(SubEventSpecManager const&) = delete;
 		SubEventSpecManager(SubEventSpecManager&&) = default;
+		~SubEventSpecManager();
 
-		bool AddEvent(std::pmr::wstring& string_storage, EventID id, std::wstring_view event_name, std::wstring_view file, std::size_t line);
-		bool AddEvent(std::pmr::wstring& string_storage, EventID id, std::u8string_view event_name, std::wstring_view file, std::size_t line);
-		void RefreshDebugView(std::pmr::wstring& string_storage);
-		EventSpecView GetEventSpec(EventID id, std::pmr::wstring const& string_storage) const;
+		// Store the name and the file of one event, false is returned when the event is already stored.
+		bool AddEvent(EventID id, std::wstring_view event_name, std::wstring_view file, std::size_t line);
+		bool AddEvent(EventID id, std::u8string_view event_name, std::u8string_view file, std::size_t line);
+		EventSpecView GetEventSpec(EventID id) const;
 
 		// Visit every stored event spec through the visitor, the order is unspecified.
-		// The string views of the visited EventSpecView are only valid while the visitor is running,
-		// because they point into the string_storage which the manager keeps appending to.
+		// The string views of the visited EventSpecView point into the blocks of the strings, which are never
+		// moved, so they stay valid while the manager is alive.
 		template<typename VisitorT>
-		void ForEachEvent(std::pmr::wstring const& string_storage, VisitorT&& visitor) const
+		void ForEachEvent(VisitorT&& visitor) const
 		{
-			std::wstring_view storage_view{ string_storage };
-			auto visit_spec = [&](Spec const& spec) {
-				visitor(EventSpecView{
-					spec.id,
-					spec.name_index.Slice(storage_view),
-					spec.file_index.Slice(storage_view),
-					spec.line
-					});
-				};
-			for (auto& ite : events)
+			for (auto block : sequential_spec_blocks)
 			{
-				if (ite.id)
+				for (auto& spec : block->specs)
 				{
-					visit_spec(ite);
+					if (spec.id)
+					{
+						visitor(spec);
+					}
 				}
 			}
-			for (auto& ite : out_range_spec)
+			for (auto& random_block : random_spec_blocks)
 			{
-				if (ite.first)
+				for (auto& spec : random_block.block->specs)
 				{
-					visit_spec(ite.second);
+					if (spec.id)
+					{
+						visitor(spec);
+					}
 				}
 			}
 		}
 
 	protected:
 
-		struct Spec
+		// The characters of the strings of the events, they are kept in the blocks of string_block_capacity
+		// characters. A string is written into the block which has room for it, and a string never crosses
+		// the boundary of a block, so the characters of a string are always a slice of one block.
+		struct StringBlock
 		{
-			EventID id;
-			Potato::Misc::IndexSpan<> name_index;
-			std::wstring_view debug_name_view;
-			Potato::Misc::IndexSpan<> file_index;
-			std::wstring_view debug_file;
-			std::size_t line;
+			std::array<char8_t, string_block_capacity> characters;
 		};
 
+		// One block of the specs, it always begins at its aligned index, which means that the block of the spec
+		// index is the index divided by spec_block_capacity, and the spec inside the block is the remainder.
+		struct SpecBlock
+		{
+			std::array<EventSpecView, spec_block_capacity> specs;
+		};
+
+		// One block of the random queue, which carries the index of the first spec of the block, so the block of
+		// an index is found without knowing which block the index belongs to.
+		struct RandomSpecBlock
+		{
+			SpecBlock* block = nullptr;
+			std::size_t begin_index = 0;
+		};
+
+		// Find the block which the spec index is in, or nullptr when the block is not created yet.
+		SpecBlock* FindSpecBlock(std::size_t index);
+		SpecBlock const* FindSpecBlock(std::size_t index) const;
+		// Create the block which the spec index is in, and put it into the queue which it belongs to.
+		SpecBlock* CreateSpecBlock(std::size_t index);
+
+		// The slot of the spec which the id is stored in, its block is created when the block of the id does not
+		// exist yet, and nullptr is returned when the spec of the id is already assigned.
+		EventSpecView* AllocateEventSpec(EventID id);
+
+		// Write the name or the file of the event into the blocks of the strings and return the view of it.
+		// The string which is longer than a quarter of the block is replaced by MakeReplacedString(), so the
+		// characters of every string are written into one block: a quarter of the block is the worst case of
+		// the encoding, which is four bytes of UTF-8 for one wide character.
+		std::u8string_view StoreString(std::u8string_view string, EventID id, bool is_file);
+		std::u8string_view StoreString(std::wstring_view string, EventID id, bool is_file);
+		// Write the characters of the source into the blocks of the strings, the characters are encoded into
+		// UTF-8 while they are written, and the view of the written characters is returned.
+		template<typename FromCharT>
+		std::u8string_view WriteString(std::span<FromCharT const> string);
+		// The fixed string which replaces the string which is too long for a block of the strings, it carries
+		// the id of the event and whether it is the file of the event, so the replaced strings stay told apart.
+		// The replacement is written into encoded_string, which is why the view of it is returned, the
+		// characters of it are ASCII, so the view of it is UTF-8 without any conversion.
+		std::u8string_view MakeReplacedString(EventID id, bool is_file);
+
 		const bool need_file;
-		const std::size_t max_spec_count;
-		std::pmr::vector<Spec> events;
-		std::pmr::unordered_map<EventID, Spec> out_range_spec;
+		// The blocks of the specs whose ids follow each other from 0: the block of the spec index is the index
+		// divided by spec_block_capacity, so the block of an id is found without any search.
+		std::pmr::vector<SpecBlock*> sequential_spec_blocks;
+		// The blocks of the specs whose ids are not next to the last block of the sequential queue, every block
+		// carries the index which it begins at, so the block of an id is found by searching the blocks.
+		std::pmr::vector<RandomSpecBlock> random_spec_blocks;
+		// The blocks of the characters, they own the characters of the strings of the events.
+		std::pmr::vector<StringBlock*> string_blocks;
+		// The block which is being written, it is where the next string is written into, and it is empty when no
+		// string is stored yet.
+		StringBlock* current_block = nullptr;
+		// How many characters are written into current_block, which is where the next character is written to.
+		// The count is kept here instead of the block, because it only means something together with the block
+		// which is being written.
+		std::size_t current_block_count = 0;
+		// The resource which the blocks of the characters are allocated from and freed to.
+		std::pmr::memory_resource* resource;
+		// The storage of the fixed string of MakeReplacedString(), it is reused, so the replacement of a string
+		// which is too long does not allocate. The characters of the replacement are ASCII, so the string is
+		// viewed as UTF-8 without any conversion.
+		std::pmr::string encoded_string;
 	};
 
 	struct EventSpecManager
@@ -243,44 +335,43 @@ export namespace UEBabyPram::InsightParser
 
 		struct Config
 		{
-			std::size_t max_spec_count = 8000;
-			std::size_t max_meta_data_spec_count = 1000;
 			bool need_file = true;
 			std::pmr::memory_resource* resource = std::pmr::get_default_resource();
 		};
 
 		EventSpecManager(Config config = {})
-			: string_storage(config.resource),
-			events(
-				SubEventSpecManager::Config{ config.max_spec_count, config.need_file, config.resource }
+			: events(
+				SubEventSpecManager::Config{ config.need_file, config.resource }
 			),
 			metadata_events(
-				SubEventSpecManager::Config{ config.max_meta_data_spec_count, false, config.resource }
+				SubEventSpecManager::Config{ false, config.resource }
 			)
 		{
 
 		}
 
 		EventSpecManager(EventSpecManager&&) = default;
-		EventSpecManager(EventSpecManager const&) = default;
+		EventSpecManager(EventSpecManager const&) = delete;
 
 		EventSpecView GetEventSpec(EventID id) const;
 
+		// The name and the file of the interface are stored as they are, the characters are encoded into UTF-8
+		// while they are written into the blocks of the strings of the manager of the events.
 		bool AddEvent(EventID id, std::wstring_view event_name, std::wstring_view file, std::size_t line);
-		bool AddEvent(EventID id, std::u8string_view event_name, std::wstring_view file, std::size_t line);
+		bool AddEvent(EventID id, std::u8string_view event_name, std::u8string_view file, std::size_t line);
 
 		// Visit every event spec which is managed by this manager, the order is unspecified.
-		// The string views of the visited EventSpecView are only valid while the visitor is running.
+		// The string views of the visited EventSpecView point into the blocks of the strings of the managers
+		// below, so they stay valid while this manager is alive.
 		template<typename VisitorT>
 		void ForEachEvent(VisitorT&& visitor) const
 		{
-			events.ForEachEvent(string_storage, visitor);
-			metadata_events.ForEachEvent(string_storage, visitor);
+			events.ForEachEvent(visitor);
+			metadata_events.ForEachEvent(visitor);
 		}
 
 	protected:
 
-		std::pmr::wstring string_storage;
 		SubEventSpecManager events;
 		SubEventSpecManager metadata_events;
 	};

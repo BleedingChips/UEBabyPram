@@ -70,7 +70,7 @@ export namespace UEBabyPram::InsightFilter
 
 		struct CrossFrameEventRecord
 		{
-			std::wstring_view event_name;
+			std::u8string_view event_name;
 			std::size_t count = 0;
 			DurationSec durations = DurationSec::zero();
 			DurationSec durations_without_context_switch = DurationSec::zero();

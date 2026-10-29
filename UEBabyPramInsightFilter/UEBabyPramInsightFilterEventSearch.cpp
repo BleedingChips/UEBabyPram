@@ -16,7 +16,7 @@ namespace UEBabyPram::InsightFilter
 
 	EventSearchParser::EventSearchParser(Config in_config)
 		: resource(in_config.resource)
-		, events_manager(EventSpecManager::Config{ 10000, 1000, true, &resource })
+		, events_manager(EventSpecManager::Config{ true, &resource })
 		, event_name_statistics(&resource)
 		, matched_event_ids(&resource)
 		, matcher(std::move(in_config.matcher))
@@ -114,9 +114,23 @@ namespace UEBabyPram::InsightFilter
 				return;
 			}
 			++matched_event_count;
+
+			// The strings of the event spec are UTF-8, the report keeps them in wide characters.
+			std::pmr::wstring event_name{ &resource };
+			Potato::Encode::UnicodeEncoder<char8_t, wchar_t>::EncodeTo(
+				event_spec.name_view,
+				std::back_inserter(event_name)
+			);
+
+			std::pmr::wstring file{ &resource };
+			Potato::Encode::UnicodeEncoder<char8_t, wchar_t>::EncodeTo(
+				event_spec.file_view,
+				std::back_inserter(file)
+			);
+
 			discovered_locations.push_back(DiscoveredLocation{
-				std::pmr::wstring{ event_spec.name_view, &resource },
-				std::pmr::wstring{ event_spec.file_view, &resource },
+				std::move(event_name),
+				std::move(file),
 				event_spec.line
 				});
 			});
