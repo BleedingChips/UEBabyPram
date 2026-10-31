@@ -461,6 +461,70 @@ export namespace UEBabyPram::InsightParser
 		}
 	};
 
+	// The recorder of the frames of the game thread.
+	//
+	// The two events which begin a frame are written into the recorder, they are FEngineLoop::Tick and Frame, and
+	// the thread which the frames are recorded on is written into it as well, which is GameThread, so the recorder
+	// only keeps the ids of the three of them and it answers whether an id is one of them.
+	//
+	// One event name may be carried by several event ids (the same name may be declared in several places, and the
+	// event of the CPU scope logger is a separate id as well), so the ids of a watched name are kept in a list, and
+	// an id is one of the watched events when it is one of them.
+	//
+	// A frame is a stack tree of the game thread whose first event is one of the two watched events, and the time
+	// range of the frame is the whole time range of that stack tree, so the frames are collected as the stack
+	// trees are analyzed.
+	struct GameFrameRecoder
+	{
+		// The names which the recorder watches, they are the only names which it accepts.
+		static constexpr std::u8string_view tick_event_name = u8"FEngineLoop::Tick";
+		static constexpr std::u8string_view frame_event_name = u8"Frame";
+		static constexpr std::string_view game_thread_name = "GameThread";
+
+		GameFrameRecoder() = default;
+
+		// Record the id of the event when its name is one of the watched events, true is only returned when the name
+		// is watched, so the caller knows that the id is kept. The same id is only kept once.
+		bool RecordEvent(EventID id, std::wstring_view event_name);
+		bool RecordEvent(EventID id, std::u8string_view event_name);
+		// Record the ids of the thread when its name is the watched thread, true is only returned when it is.
+		bool RecordThread(ThreadID id, ThreadSystemID system_id, std::string_view thread_name);
+
+		// Whether the id is the event of FEngineLoop::Tick, of Frame, or one of the two.
+		bool IsTickEvent(EventID id) const;
+		bool IsFrameEvent(EventID id) const;
+		bool IsFrameBeginningEvent(EventID id) const;
+		// Whether the stack tree begins with one of the two events which begin a frame, which is what tells a frame
+		// from the other stack trees of the thread.
+		bool IsFrameBeginningEvent(ThreadCPUEventView event_scope) const;
+		// Whether the id is the watched thread, which is the game thread.
+		bool IsGameThread(ThreadID id) const;
+
+		// The ids which the watched names are recorded with, and the ids of the watched thread. A list is empty
+		// while the name is not discovered, and the ids of the thread are invalid.
+		std::span<EventID const> GetTickEventIDs() const { return tick_event_ids; }
+		std::span<EventID const> GetFrameEventIDs() const { return frame_event_ids; }
+		ThreadID GetGameThreadID() const { return game_thread_id; }
+		ThreadSystemID GetGameThreadSystemID() const { return game_thread_system_id; }
+
+		// Record the time range of the frame when the stack tree is the one of the game thread and it begins with one
+		// of the watched events, the range of a frame is the whole range of its stack tree. True is returned when the
+		// range is recorded.
+		bool OnCPUStackTree(ThreadCPUEventView event_scope);
+
+		// The time ranges of the frames which are recorded, in the order in which the frames are analyzed.
+		std::span<Potato::Misc::IndexSpan<DurationSec> const> GetFrameTimeRanges() const { return frame_time_ranges; }
+
+	protected:
+
+		// The ids of the watched events and the ids of the watched thread, an id which is not recorded is invalid.
+		std::vector<EventID> tick_event_ids;
+		std::vector<EventID> frame_event_ids;
+		ThreadID game_thread_id;
+		ThreadSystemID game_thread_system_id;
+		std::vector<Potato::Misc::IndexSpan<DurationSec>> frame_time_ranges;
+	};
+
 	struct ParserInterface;
 
 	struct ParserThreadTimeLine : public ThreadTimeLineInterface

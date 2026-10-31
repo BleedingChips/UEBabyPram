@@ -927,4 +927,127 @@ namespace UEBabyPram::InsightParser
 			}
 		}
 	}
+
+	bool GameFrameRecoder::RecordEvent(EventID id, std::wstring_view event_name)
+	{
+		if (!id)
+		{
+			return false;
+		}
+
+		// The names are written into the recorder, so only the two of them are accepted.
+		if (event_name == L"FEngineLoop::Tick")
+		{
+			if (std::find(tick_event_ids.begin(), tick_event_ids.end(), id) == tick_event_ids.end())
+			{
+				tick_event_ids.push_back(id);
+			}
+			return true;
+		}
+
+		if (event_name == L"Frame")
+		{
+			if (std::find(frame_event_ids.begin(), frame_event_ids.end(), id) == frame_event_ids.end())
+			{
+				frame_event_ids.push_back(id);
+			}
+			return true;
+		}
+
+		return false;
+	}
+
+	bool GameFrameRecoder::RecordEvent(EventID id, std::u8string_view event_name)
+	{
+		if (!id)
+		{
+			return false;
+		}
+
+		// The name of the event of the CPU scope logger is UTF-8, so it is compared with the watched names without
+		// any conversion.
+		if (event_name == tick_event_name)
+		{
+			if (std::find(tick_event_ids.begin(), tick_event_ids.end(), id) == tick_event_ids.end())
+			{
+				tick_event_ids.push_back(id);
+			}
+			return true;
+		}
+
+		if (event_name == frame_event_name)
+		{
+			if (std::find(frame_event_ids.begin(), frame_event_ids.end(), id) == frame_event_ids.end())
+			{
+				frame_event_ids.push_back(id);
+			}
+			return true;
+		}
+
+		return false;
+	}
+
+	bool GameFrameRecoder::RecordThread(ThreadID id, ThreadSystemID system_id, std::string_view thread_name)
+	{
+		// The thread which the frames are recorded on is written into the recorder, so no other thread is accepted.
+		if (!id || thread_name != game_thread_name)
+		{
+			return false;
+		}
+
+		game_thread_id = id;
+		game_thread_system_id = system_id;
+		return true;
+	}
+
+	bool GameFrameRecoder::IsTickEvent(EventID id) const
+	{
+		return id && std::find(tick_event_ids.begin(), tick_event_ids.end(), id) != tick_event_ids.end();
+	}
+
+	bool GameFrameRecoder::IsFrameEvent(EventID id) const
+	{
+		return id && std::find(frame_event_ids.begin(), frame_event_ids.end(), id) != frame_event_ids.end();
+	}
+
+	bool GameFrameRecoder::IsFrameBeginningEvent(EventID id) const
+	{
+		return IsTickEvent(id) || IsFrameEvent(id);
+	}
+
+	bool GameFrameRecoder::IsFrameBeginningEvent(ThreadCPUEventView event_scope) const
+	{
+		// The stack tree begins with the event which begins the frame, and the other stack trees of the thread are
+		// the trees of the events which are not a frame.
+		if (event_scope.view.empty())
+		{
+			return false;
+		}
+
+		return IsFrameBeginningEvent(event_scope.view.front().event_id);
+	}
+
+	bool GameFrameRecoder::IsGameThread(ThreadID id) const
+	{
+		return id && id == game_thread_id;
+	}
+
+	bool GameFrameRecoder::OnCPUStackTree(ThreadCPUEventView event_scope)
+	{
+		// The frame is a stack tree of the game thread only, and it begins with one of the watched events.
+		if (!IsGameThread(event_scope.thread_id) || !IsFrameBeginningEvent(event_scope))
+		{
+			return false;
+		}
+
+		// The time range of the frame is the whole time range of its stack tree.
+		auto time_range = event_scope.GetTimeRange();
+		if (!time_range)
+		{
+			return false;
+		}
+
+		frame_time_ranges.push_back(*time_range);
+		return true;
+	}
 }
