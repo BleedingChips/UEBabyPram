@@ -10,6 +10,7 @@ import UEBabyPramInsightFilterGameThread;
 import UEBabyPramInsightFilterEventFilter;
 import UEBabyPramInsightFilterEventSearch;
 import UEBabyPramInsightFilterEventStatistic;
+import UEBabyPramInsightFilterEventDetail;
 import UEBabyPramInsightFilterThreadSearch;
 import UEBabyPramInsightParser;
 import Potato;
@@ -33,6 +34,7 @@ Usage:
   UEBabyPramInsightFilter -f <path of the .utrace file> [options]
   UEBabyPramInsightFilter -f <path of the .utrace file> -r <regex> [options]
   UEBabyPramInsightFilter -f <path of the .utrace file> -es <query> [options]
+  UEBabyPramInsightFilter -f <path of the .utrace file> -ed <query> [options]
   UEBabyPramInsightFilter -f <path of the .utrace file> -ts <regex> [options]
 
 Options:
@@ -50,7 +52,7 @@ Options:
       The same event name may be defined in several places, so every location is reported.
       The event of the CPU scope logger carries no location, it is reported with
       an unknown file and line 0.
-      -r, -es and -ts can not be used at the same time.
+      -r, -es, -ed and -ts can not be used at the same time.
 
   -es, --event_stat <query>
       Query of the events whose timing should be collected, the grammar is:
@@ -72,7 +74,13 @@ Options:
       collected event, and the thread name has to match the whole thread name.
       -es can be given more than once, every query keeps its own statistics, so the same event name
       may be reported several times, once per query which collects it.
-      -r, -es and -ts can not be used at the same time.
+      -r, -es, -ed and -ts can not be used at the same time.
+
+  -ed, --event_detail <query>
+      Query of the stack trees which should be saved and reported, the grammar is the same as -es.
+      Every stack tree whose thread, time and call chain are matched by the query is copied, at most
+      -mvc stack trees are kept, and the copies are reported when the whole trace is analyzed.
+      -r, -es, -ed and -ts can not be used at the same time.
 
   -ts, --thread_search <regex>
       Regular expression of the thread name, in the re2 (RE2) syntax, the same syntax as -r.
@@ -80,13 +88,21 @@ Options:
       When it is set, every thread whose name is matched is reported with the thread id and
       the system thread id.
       An empty regex (ex: -ts "") matches every thread of the trace.
-      -r, -es and -ts can not be used at the same time.
+      -r, -es, -ed and -ts can not be used at the same time.
 
   -mlc, --max_location_count <count>
       How many matched event locations should be reported with -r, 0 for no limit, default is 256.
 
   -tx, --top_count <count>
       How many of the longest occurrences should be reported with -es, default is 5.
+
+  -mc, --max_context_depth <depth>
+      The maximum depth difference between a top occurrence and the parent and child events
+      which are reported with -es, the events beyond it are neither recorded nor reported,
+      default is 6.
+
+  -mvc, --max_view_count <count>
+      How many stack trees should be saved and reported with -ed, default is 20.
 
   -mrf, --max_record_frame <count>
       How many of the longest game frames should be recorded and reported, default is 10.
@@ -108,9 +124,11 @@ Options:
 		GameThreadParser::Config config;
 		EventSearchParser::Config search_config;
 		EventStatisticParser::Config statistic_config;
+		EventDetailParser::Config detail_config;
 		ThreadSearchParser::Config thread_config;
 		bool search_event = false;
 		bool statistic_event = false;
+		bool detail_event = false;
 		bool search_thread = false;
 		std::u8string path_buffer;
 
@@ -225,6 +243,37 @@ Options:
 					return -1;
 				}
 			}
+			else if (argv_string == "-ed" || argv_string == "--event_detail")
+			{
+				if (i + 1 < argc)
+				{
+					// The query is built from the argument, and the error of an unacceptable query is
+					// reported here, so the parser only receives a query which is ready to be analyzed.
+					std::u8string query_text;
+					Encode::STDInputEncoder<char8_t>::EncodeTo(argv[i + 1], std::back_insert_iterator{ query_text });
+					auto query_result = ParseEventQuery(query_text);
+					if (auto error = std::get_if<std::u8string>(&query_result); error != nullptr)
+					{
+						std::wstring message;
+						Encode::UnicodeEncoder<char8_t, wchar_t>::EncodeTo(*error, std::back_inserter(message));
+						Log::Log<CommandLineLogCategory, Log::LogLevel::Error, L"-ed --event_detail <query> : <{}>, use -h for detailed help">(
+							message
+						);
+						return -1;
+					}
+
+					// The detail parser keeps the stack trees which the query matches, only one query
+					// is accepted by it, and the text is reported with the saved views.
+					detail_config.query = std::move(std::get<EventQuery>(query_result));
+					detail_config.query_text = std::move(query_text);
+					detail_event = true;
+					++i;
+				}
+				else {
+					Log::Log<CommandLineLogCategory, Log::LogLevel::Error, L"Unsupport command -ed --event_detail, use -h for detailed help">();
+					return -1;
+				}
+			}
 			else if (argv_string == "-ts" || argv_string == "--thread_search")
 			{
 				if (i + 1 < argc)
@@ -272,6 +321,48 @@ Options:
 				}
 				else {
 					Log::Log<CommandLineLogCategory, Log::LogLevel::Error, L"Unsupport command -tx --top_count, use -h for detailed help">();
+					return -1;
+				}
+			}
+			else if (argv_string == "-mc" || argv_string == "--max_context_depth")
+			{
+				if (i + 1 < argc)
+				{
+					std::size_t value = 0;
+					std::string_view sub_argv = argv[i + 1];
+					if (Format::DirectDeformat(sub_argv, value))
+					{
+						statistic_config.max_context_depth = value;
+						++i;
+					}
+					else {
+						Log::Log<CommandLineLogCategory, Log::LogLevel::Error, L"-mc --max_context_depth <depth> : <{}> is not a valid depth, use -h for detailed help">(sub_argv);
+						return -1;
+					}
+				}
+				else {
+					Log::Log<CommandLineLogCategory, Log::LogLevel::Error, L"Unsupport command -mc --max_context_depth, use -h for detailed help">();
+					return -1;
+				}
+			}
+			else if (argv_string == "-mvc" || argv_string == "--max_view_count")
+			{
+				if (i + 1 < argc)
+				{
+					std::size_t value = 0;
+					std::string_view sub_argv = argv[i + 1];
+					if (Format::DirectDeformat(sub_argv, value))
+					{
+						detail_config.max_view_count = value;
+						++i;
+					}
+					else {
+						Log::Log<CommandLineLogCategory, Log::LogLevel::Error, L"-mvc --max_view_count <count> : <{}> is not a valid count, use -h for detailed help">(sub_argv);
+						return -1;
+					}
+				}
+				else {
+					Log::Log<CommandLineLogCategory, Log::LogLevel::Error, L"Unsupport command -mvc --max_view_count, use -h for detailed help">();
 					return -1;
 				}
 			}
@@ -351,15 +442,25 @@ Options:
 			return -1;
 		}
 
-		if (search_thread && (search_event || statistic_event))
+		if (detail_event && (search_event || statistic_event))
 		{
-			Log::Log<CommandLineLogCategory, Log::LogLevel::Error, L"-ts --thread_search can not be used with -r --regex or -es --event_stat, use -h for detailed help">();
+			Log::Log<CommandLineLogCategory, Log::LogLevel::Error, L"-ed --event_detail can not be used with -r --regex or -es --event_stat, use -h for detailed help">();
+			return -1;
+		}
+
+		if (search_thread && (search_event || statistic_event || detail_event))
+		{
+			Log::Log<CommandLineLogCategory, Log::LogLevel::Error, L"-ts --thread_search can not be used with -r --regex, -es --event_stat or -ed --event_detail, use -h for detailed help">();
 			return -1;
 		}
 
 		if (search_thread)
 		{
 			setting.parser = std::make_unique<ThreadSearchParser>(std::move(thread_config));
+		}
+		else if (detail_event)
+		{
+			setting.parser = std::make_unique<EventDetailParser>(std::move(detail_config));
 		}
 		else if (statistic_event)
 		{

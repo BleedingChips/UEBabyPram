@@ -1,0 +1,96 @@
+module;
+
+#include <cassert>
+
+export module UEBabyPramInsightFilterEventDetail;
+
+import UEBabyPramInsightFilterParser;
+import UEBabyPramInsightFilterEventFilter;
+import UEBabyPramInsightFilterEventQuery;
+import UEBabyPramInsightParser;
+import Potato;
+import std;
+
+namespace UEBabyPram::InsightFilter
+{
+	using namespace UEBabyPram::InsightParser;
+}
+
+export namespace UEBabyPram::InsightFilter
+{
+	// Keep a copy of the stack trees which the event query matches, and report the copies when the
+	// whole trace is analyzed.
+	//
+	// The query is the same call chain which EventStatisticParser counts (see EventQuery and
+	// GetFilterEbnf()): a stack tree is kept when one of its events completes the chain, the thread
+	// condition and the time ranges of the query are matched as well, so a stack tree which the query
+	// does not count is not kept.
+	//
+	// One kept stack tree is one copy (Config::max_view_count of them are kept at most, the rest of the
+	// stack trees which the query matches are ignored). The events of the stack tree are copied into
+	// the storage of the parser, because the view of the stack tree only points into the storage of
+	// the analysis, which is reused after the stack tree is analyzed.
+	struct EventDetailParser : public Parser
+	{
+		struct Config
+		{
+			// The query which the stack trees are kept by, it is built from its text by
+			// ParseEventQuery, ex: std::get<EventQuery>(ParseEventQuery(u8"(^Tick^)->[^Update^]")).
+			// The command line reports the error of a query which is not acceptable, so the parser
+			// only receives a query which is ready to be analyzed.
+			EventQuery query;
+			// The text which the query is built from, it is only reported with the saved views.
+			std::u8string query_text;
+			// How many stack trees are kept at most, every stack tree is one copy, 0 for none.
+			std::size_t max_view_count = 20;
+			std::pmr::memory_resource* resource = std::pmr::get_default_resource();
+		};
+
+		// One saved stack tree: the identity of the thread and a copy of the events of the whole stack
+		// tree. The view which the parser receives only points into the storage of the analysis, so the
+		// events are copied here, and the saved view can be reported after the analysis is done.
+		struct StoredView
+		{
+			StoredView(std::pmr::memory_resource* resource = std::pmr::get_default_resource())
+				: events(resource) {}
+
+			ThreadID thread_id;
+			ThreadSystemID system_thread_id;
+			std::optional<std::size_t> frame_count;
+			std::pmr::vector<ThreadCPUEvent> events;
+		};
+
+		EventDetailParser(Config config = {});
+		EventDetailParser(EventDetailParser const&) = delete;
+		EventDetailParser(EventDetailParser&&) = default;
+
+		virtual void OnThreadDiscovered(ThreadID thread_id, ThreadSystemID thread_system_id, std::string_view thread_name) override;
+		virtual void OnCPUEventDiscovered(EventID id, std::wstring_view event_name, std::wstring_view file_name, std::size_t file_line) override;
+		virtual void OnCPUScopeEventDiscovered(EventID id, std::u8string_view event_name) override;
+		virtual void OnCPUStackTree(ThreadCPUEventView event_scope) override;
+		virtual bool IsParserRequired(ParserRequireFlag flag) const override;
+		// Only the threads which the query counts are analyzed, a query which carries a thread
+		// condition only counts the threads which its matcher matched.
+		virtual bool IsThreadRequired(ThreadID thread_id) const override;
+		// Report every saved stack tree with the events which it carries, the analysis has to be done
+		// before this is called.
+		bool PrintToLog(Potato::Log::LogPrinter& printer) override;
+
+		// The stack trees which are saved, the order is the analysis order.
+		std::span<StoredView const> GetStoredViews() const { return stored_views; }
+
+	protected:
+
+		// Report every saved stack tree with the events which it carries.
+		void PrintStoredViews(Potato::Log::LogPrinter& printer) const;
+
+		std::pmr::unsynchronized_pool_resource resource;
+		EventSpecManager events_manager;
+		// The query system which is built from Config::query, the ids of the events are resolved into
+		// it when they are discovered, so the stack tree is never matched by a name.
+		EventQueryMapping query_mapping;
+		std::pmr::vector<StoredView> stored_views;
+		std::u8string query_text;
+		std::size_t max_view_count = 20;
+	};
+}

@@ -41,7 +41,9 @@ export namespace UEBabyPram::InsightFilter
 	//     built from the stored occurrences in AllAnalyzeDone(),
 	//   - the time ranges of the top N (Config::top_count) longest occurrences, with the exclude time
 	//     of every one of them and its exclude time without the context switch time, which is built
-	//     in AllAnalyzeDone() when the context switch events are complete.
+	//     in AllAnalyzeDone() when the context switch events are complete,
+	//   - the ancestors and the direct children of every top occurrence, with the exclude time of
+	//     every one of them in that occurrence.
 	// One event name may be carried by several event ids, the ids which carry a name are merged into
 	// the statistic of that name, so every name is counted separately.
 	struct EventStatisticParser : public Parser
@@ -59,18 +61,55 @@ export namespace UEBabyPram::InsightFilter
 			// How many of the longest occurrences of every event name are kept as a time range,
 			// 0 for none.
 			std::size_t top_count = 5;
+			// The maximum depth difference between the top occurrence and the parent and child events
+			// which are kept with it, 0 for none. The ancestors above the occurrence and the descendants
+			// below it are only kept when their depth difference is not greater than this value, the
+			// events beyond it are neither recorded nor reported.
+			std::size_t max_context_depth = 6;
 			std::pmr::memory_resource* resource = std::pmr::get_default_resource();
 		};
 
+		// One event of the call context of an occurrence: the event itself, the time which it consumed in
+		// the occurrence, its exclude time and its context switch time. The event is kept by id, the name
+		// is resolved with the events manager when the occurrence is reported.
+		struct ContextEvent
+		{
+			EventID event_id;
+			// The whole time which the event consumed in the occurrence, i.e. the size of its time range.
+			DurationSec duration = DurationSec::zero();
+			// The duration of the event without the time spent in its child events.
+			DurationSec exclude_time = DurationSec::zero();
+			// The time which the thread spent out of the CPU in the whole time range of the event, it is
+			// built in AllAnalyzeDone(), when the context switch events are complete.
+			DurationSec context_switch_time = DurationSec::zero();
+			// The whole time range of the event in the stack tree, it is kept to resolve the context
+			// switch time of the event in AllAnalyzeDone().
+			Potato::Misc::IndexSpan<DurationSec> time_range;
+			// The depth of the event in the stack tree.
+			std::size_t depth = 0;
+			// The placeholder of the descendants which are beyond the depth limit, it carries no
+			// information and it is printed as an ellipsis.
+			bool is_ellipsis = false;
+		};
+
 		// One of the longest occurrences of an event name, the time range of the occurrence, its
-		// exclude time, the exclude time without the time which the thread was switched out of the
-		// CPU and the thread which the occurrence happened on are kept, so that the occurrence can
-		// be reported.
+		// exclude time, the context switch time, the exclude time without the context switch time,
+		// the thread which the occurrence happened on and the call context of the occurrence are
+		// kept, so that the occurrence can be reported.
 		struct TopEventOccurrence
 		{
+			TopEventOccurrence(std::pmr::memory_resource* resource = std::pmr::get_default_resource())
+				: parent_events(resource), child_events(resource) {}
+
 			Potato::Misc::IndexSpan<DurationSec> time_range;
+			// The depth of the occurrence in the stack tree.
+			std::size_t depth = 0;
 			// The duration of the occurrence without the time spent in the child events.
 			DurationSec exclude_time = DurationSec::zero();
+			// The time which the thread spent out of the CPU in the whole time range of the occurrence,
+			// which is the context switch time of the occurrence. It is built in AllAnalyzeDone(), when
+			// the context switch events are complete.
+			DurationSec context_switch_time = DurationSec::zero();
 			// The exclude time without the time which the thread was switched out of the CPU in the
 			// whole time range of the occurrence. It is initialized to the exclude time, and the time
 			// out of the CPU is removed in AllAnalyzeDone(), when the context switch events are
@@ -80,6 +119,12 @@ export namespace UEBabyPram::InsightFilter
 			// name is resolved from the thread info in PrintToLog, so the occurrence does not have
 			// to own a copy of the name.
 			ThreadID thread_id;
+			// The ancestors of the occurrence, from the outermost one to the direct parent, the call
+			// order is kept so that the chain can be reported.
+			std::pmr::vector<ContextEvent> parent_events;
+			// The descendants of the occurrence which are not deeper than the depth limit, in the
+			// order of the call, a placeholder stands for the omitted deeper descendants.
+			std::pmr::vector<ContextEvent> child_events;
 		};
 
 		// The statistics of one event name of one query, which is the key of the statistic.
@@ -176,5 +221,8 @@ export namespace UEBabyPram::InsightFilter
 		std::pmr::vector<EventStatistic> event_statistics;
 
 		std::size_t top_count = 5;
+		// The maximum depth difference between the top occurrence and the parent and child events which
+		// are kept with it, 0 for none.
+		std::size_t max_context_depth = 6;
 	};
 }

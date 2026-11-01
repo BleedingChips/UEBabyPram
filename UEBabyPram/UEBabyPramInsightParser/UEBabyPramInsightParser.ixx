@@ -474,6 +474,12 @@ export namespace UEBabyPram::InsightParser
 	// A frame is a stack tree of the game thread whose first event is one of the two watched events, and the time
 	// range of the frame is the whole time range of that stack tree, so the frames are collected as the stack
 	// trees are analyzed.
+	//
+	// The time ranges of the frames are kept in the blocks of frame_block_capacity frames: a block is only
+	// allocated when the last one is full, so the frames which are already stored are never moved, and the memory
+	// of the frames which are not recorded yet is not taken at all. The fast check points are kept with the same
+	// granularity, one boundary per block, which is the begin of the first frame of the block, so the block is
+	// both the storage unit and the coarse search step of the frames.
 	struct GameFrameRecoder
 	{
 		// The names which the recorder watches, they are the only names which it accepts.
@@ -481,7 +487,18 @@ export namespace UEBabyPram::InsightParser
 		static constexpr std::u8string_view frame_event_name = u8"Frame";
 		static constexpr std::string_view game_thread_name = "GameThread";
 
-		GameFrameRecoder() = default;
+		// How many frames one block of the frames holds.
+		static constexpr std::size_t frame_block_capacity = 4096;
+
+		struct Config
+		{
+			std::pmr::memory_resource* resource = std::pmr::get_default_resource();
+		};
+
+		GameFrameRecoder(Config config = {});
+		GameFrameRecoder(GameFrameRecoder const&) = delete;
+		GameFrameRecoder(GameFrameRecoder&&) = default;
+		~GameFrameRecoder();
 
 		// Record the id of the event when its name is one of the watched events, true is only returned when the name
 		// is watched, so the caller knows that the id is kept. The same id is only kept once.
@@ -512,17 +529,61 @@ export namespace UEBabyPram::InsightParser
 		// range is recorded.
 		bool OnCPUStackTree(ThreadCPUEventView event_scope);
 
-		// The time ranges of the frames which are recorded, in the order in which the frames are analyzed.
-		std::span<Potato::Misc::IndexSpan<DurationSec> const> GetFrameTimeRanges() const { return frame_time_ranges; }
+		// The count of the frames which are recorded.
+		std::size_t GetFrameCount() const { return frame_count; }
+		// The time range of the recorded frame at the index, in the order in which the frames are analyzed.
+		Potato::Misc::IndexSpan<DurationSec> const& GetFrameTimeRange(std::size_t index) const;
+
+		// The whole time range which the recorded frames cover, which is the range from the begin of the first frame
+		// to the end of the last frame. Nullopt is returned when no frame is recorded.
+		std::optional<Potato::Misc::IndexSpan<DurationSec>> GetTotalTimeRange() const;
+		// The index of the first frame whose end is greater than the time point, i.e. the frame which contains the
+		// point or the first frame after it. The count of the frames is returned when there is no such frame.
+		std::size_t LocateFirstFrameIndex(DurationSec time_point) const;
+		// The index span (the end is exclusive) of the frames which the time range covers, a frame is covered when
+		// its range intersects the time range. {0, 0} is returned when the time range is on the left or on the right
+		// of the frames, or when no frame intersects it.
+		Potato::Misc::IndexSpan<> GetFrameIndexRange(Potato::Misc::IndexSpan<DurationSec> time_range) const;
 
 	protected:
+
+		// One block of the frames, the frames of the block are filled from its beginning, so the block does not
+		// have to keep its own count, the count of the frames tells how many frames of the last block are used.
+		struct FrameBlock
+		{
+			std::array<Potato::Misc::IndexSpan<DurationSec>, frame_block_capacity> frames;
+		};
+
+		// Append one frame, the block of the frames is only allocated when the last one is full, so the frames
+		// which are already stored are never moved.
+		void AddFrameTimeRange(Potato::Misc::IndexSpan<DurationSec> time_range);
+
+		// The block of the frames which the coarse search has to start with, the boundary which every block starts
+		// at is the begin of its first frame, so the blocks which are entirely before the target point are skipped.
+		std::size_t FastLocateFirstFrameIndex(DurationSec time_point) const;
+		// The first frame whose end is greater than the time point, it starts to scan at the index offset.
+		std::size_t LocateFirstFrameEndIndex(DurationSec time_point, std::size_t index_offset) const;
+		// The first frame whose begin is not before the time point, it starts to scan at the index offset.
+		std::size_t LocateFirstFrameBeginIndex(DurationSec time_point, std::size_t index_offset) const;
 
 		// The ids of the watched events and the ids of the watched thread, an id which is not recorded is invalid.
 		std::vector<EventID> tick_event_ids;
 		std::vector<EventID> frame_event_ids;
 		ThreadID game_thread_id;
 		ThreadSystemID game_thread_system_id;
-		std::vector<Potato::Misc::IndexSpan<DurationSec>> frame_time_ranges;
+
+		// How many frames of the thread are stored, it is the position where the next frame is added to as well,
+		// the frames of a block are filled one by one from its beginning.
+		std::size_t frame_count = 0;
+		// The blocks of the frames, the last one is the block which the next frame is added to.
+		std::pmr::vector<FrameBlock*> frame_blocks;
+		// The boundary which every block of the frames starts at, which is the time of the first frame of the block,
+		// so the coarse search skips the blocks which are entirely before the target point. The first block has no
+		// boundary, so the count of the entries is the count of the blocks minus one, and the entry of a block is
+		// added when the block is created.
+		std::pmr::vector<DurationSec> fast_check_point;
+		// The resource which the blocks of the frames are allocated from and freed to.
+		std::pmr::memory_resource* resource;
 	};
 
 	struct ParserInterface;

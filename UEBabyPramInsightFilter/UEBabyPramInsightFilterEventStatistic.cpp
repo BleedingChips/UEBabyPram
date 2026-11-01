@@ -62,6 +62,7 @@ namespace UEBabyPram::InsightFilter
 		, query_mapping(EventQueryMapping::Config{ std::move(in_config.queries), &resource })
 		, event_statistics(&resource)
 		, top_count(in_config.top_count)
+		, max_context_depth(in_config.max_context_depth)
 	{
 		// The queries are built and checked by the creator of the config, so the parser only takes the
 		// ones which are ready to be analyzed.
@@ -250,11 +251,16 @@ namespace UEBabyPram::InsightFilter
 		// occurrence, its name is resolved when the occurrence is reported, and the exclude time
 		// without the context switch time is initialized to the exclude time, the context switch time
 		// is only removed in AllAnalyzeDone(), when the context switch events are complete.
-		auto& occurrence = statistic.top_occurrences.emplace_back();
+		auto& occurrence = statistic.top_occurrences.emplace_back(&resource);
 		occurrence.time_range = event_view.time_range;
+		occurrence.depth = event_view.depth;
 		occurrence.exclude_time = exclude_time;
 		occurrence.exclude_time_without_context_switch = exclude_time;
 		occurrence.thread_id = event_scope.thread_id;
+
+		// The occurrence is kicked out right away when it is the shortest one of a full list, and the
+		// time of its own children and parents is only collected after it is confirmed to be kept, so an
+		// occurrence which does not rank in the top N never walks its call context.
 		if (statistic.top_occurrences.size() > top_count)
 		{
 			auto shortest = std::min_element(
@@ -265,7 +271,111 @@ namespace UEBabyPram::InsightFilter
 				});
 			if (shortest != statistic.top_occurrences.end())
 			{
+				bool is_new_occurrence = shortest == std::prev(statistic.top_occurrences.end());
 				statistic.top_occurrences.erase(shortest);
+				if (is_new_occurrence)
+				{
+					return;
+				}
+			}
+		}
+
+		// The occurrence is kept in the top N of the statistic, so the time of the events of its call
+		// context is collected as well. The container may have been shifted by the erase above, so the
+		// occurrence is taken from the back of the list again.
+		auto& recorded_occurrence = statistic.top_occurrences.back();
+
+		// The ancestors of the occurrence are collected from the direct parent outwards, but only the
+		// ones which are not deeper than the depth limit, so the list is reversed after the walk to keep
+		// the call order, the outermost kept ancestor is the first one.
+		std::size_t parent_depth = 1;
+		auto parent_view = event_scope.FindParentEvent({}, event_view);
+		while (parent_view && parent_depth <= max_context_depth)
+		{
+			DurationSec parent_exclude_time = DurationSec::zero();
+			if (auto parent_statis = event_scope.GetExcludeTime(parent_view); parent_statis)
+			{
+				parent_exclude_time = parent_statis->active_time;
+			}
+			recorded_occurrence.parent_events.push_back(ContextEvent{
+				.event_id = parent_view.event_id,
+				.duration = parent_view.time_range.Size(),
+				.exclude_time = parent_exclude_time,
+				.time_range = parent_view.time_range,
+				.depth = parent_view.depth
+			});
+			parent_view = event_scope.FindParentEvent({}, parent_view);
+			++parent_depth;
+		}
+		std::reverse(recorded_occurrence.parent_events.begin(), recorded_occurrence.parent_events.end());
+
+		// The descendants of the occurrence are collected in the call order: the subtree of every recorded
+		// node is entered as well, so every child of a node which has several children is recorded. Only
+		// the descendants which are not deeper than the depth limit are kept; a node which is already at
+		// the limit keeps a placeholder for its children instead of them, and its subtree is not entered,
+		// so the events beyond the limit are neither recorded nor reported.
+		if (max_context_depth == 0)
+		{
+			auto child_view = event_scope.FindNextEvent({}, { event_view.index_range.Begin() + 1, event_view.index_range.End() });
+			if (child_view)
+			{
+				recorded_occurrence.child_events.push_back(ContextEvent{
+					.depth = event_view.depth + 1,
+					.is_ellipsis = true
+				});
+			}
+		}
+		else
+		{
+			std::size_t descendant_offset = event_view.index_range.Begin() + 1;
+			while (descendant_offset < event_view.index_range.End())
+			{
+				auto descendant_view = event_scope.FindNextEvent({}, { descendant_offset, event_view.index_range.End() });
+				if (!descendant_view)
+				{
+					break;
+				}
+
+				assert(descendant_view.depth > event_view.depth);
+				std::size_t depth_offset = descendant_view.depth - event_view.depth;
+				if (depth_offset > max_context_depth)
+				{
+					// The whole subtree of the event is deeper than the limit, so it is skipped.
+					descendant_offset = descendant_view.index_range.End();
+					continue;
+				}
+
+				DurationSec descendant_exclude_time = DurationSec::zero();
+				if (auto descendant_statis = event_scope.GetExcludeTime(descendant_view); descendant_statis)
+				{
+					descendant_exclude_time = descendant_statis->active_time;
+				}
+				recorded_occurrence.child_events.push_back(ContextEvent{
+					.event_id = descendant_view.event_id,
+					.duration = descendant_view.time_range.Size(),
+					.exclude_time = descendant_exclude_time,
+					.time_range = descendant_view.time_range,
+					.depth = descendant_view.depth
+				});
+
+				if (depth_offset == max_context_depth)
+				{
+					// The children of the event are beyond the limit, the placeholder takes their place
+					// and the subtree is not entered.
+					auto child_view = event_scope.FindNextEvent({}, { descendant_view.index_range.Begin() + 1, descendant_view.index_range.End() });
+					if (child_view)
+					{
+						recorded_occurrence.child_events.push_back(ContextEvent{
+							.depth = descendant_view.depth + 1,
+							.is_ellipsis = true
+						});
+					}
+					descendant_offset = descendant_view.index_range.End();
+				}
+				else
+				{
+					descendant_offset = descendant_view.index_range.Begin() + 1;
+				}
 			}
 		}
 	}
@@ -308,10 +418,12 @@ namespace UEBabyPram::InsightFilter
 			statistic.duration_standard_deviation = DurationSec{ std::sqrt(square_distance / static_cast<double>(statistic.count)) };
 
 			// The context switch events are complete now, so the time which the thread spent out of
-			// the CPU in the whole time range of the occurrence is removed from the exclude time,
-			// which the occurrence is initialized with. The thread which the occurrence happened on
-			// is resolved by its id, and a thread which carries no context switch event is treated
-			// as active in the whole range by GetContextSwitchStatis(), so its exclude time stays.
+			// the CPU in the whole time range of the occurrence is kept as the context switch time of
+			// the occurrence and removed from its exclude time, which the occurrence is initialized
+			// with. The thread which the occurrence happened on is resolved by its id, and a thread
+			// which carries no context switch event is treated as active in the whole range by
+			// GetContextSwitchStatis(), so its context switch time stays zero and its exclude time
+			// stays.
 			for (auto& occurrence : statistic.top_occurrences)
 			{
 				auto thread_info = GetThreadInfo(occurrence.thread_id);
@@ -322,10 +434,31 @@ namespace UEBabyPram::InsightFilter
 
 				auto context_switch_statis = context_switch_list.GetContextSwitchStatis(thread_info->thread_system_id, occurrence.time_range);
 				DurationSec switched_out_time = occurrence.time_range.Size() - context_switch_statis.removed_context_switch_time;
+				occurrence.context_switch_time = switched_out_time;
 				occurrence.exclude_time_without_context_switch = std::max(
 					DurationSec::zero(),
 					occurrence.exclude_time_without_context_switch - switched_out_time
 				);
+
+				// The context switch time of every event of the call context is resolved the same way,
+				// the placeholders carry no time range and they are skipped.
+				auto resolve_context_switch = [&](ContextEvent& context_event)
+				{
+					if (context_event.is_ellipsis)
+					{
+						return;
+					}
+					auto context_event_statis = context_switch_list.GetContextSwitchStatis(thread_info->thread_system_id, context_event.time_range);
+					context_event.context_switch_time = context_event.time_range.Size() - context_event_statis.removed_context_switch_time;
+				};
+				for (auto& parent_event : occurrence.parent_events)
+				{
+					resolve_context_switch(parent_event);
+				}
+				for (auto& child_event : occurrence.child_events)
+				{
+					resolve_context_switch(child_event);
+				}
 			}
 
 			// Report the longest occurrence of the top list first, the shortest one is the last, the
@@ -397,18 +530,111 @@ namespace UEBabyPram::InsightFilter
 				thread_name = thread_info->thread_name;
 			}
 
-			OutputLog<L"                    <{:<4}> TName:<{:}>, D:<{:.3f}ms>, E:<{:.3f}ms>, ENCS:<{:.3f}ms>, TR: [{}, {}]">(
+			OutputLog<L"                    <{:<4}> TName:<{:}>, D:<{:.3f}ms>, E:<{:.3f}ms>, ENCS:<{:.3f}ms>, CS:<{:.3f}ms>, TR: [{}, {}]">(
 				printer,
 				index,
 				thread_name,
 				occurrence.time_range.Size().count() * 1000.0,
 				occurrence.exclude_time.count() * 1000.0,
 				occurrence.exclude_time_without_context_switch.count() * 1000.0,
+				occurrence.context_switch_time.count() * 1000.0,
 				begin_time,
 				end_time
 			);
 
 			++index;
+		}
+
+		// The call context of every one of the top occurrences is reported after the top list as a call
+		// tree. The parents are the levels above the occurrence and the children are the levels below it,
+		// the occurrence itself is the last level of the parents and the first level of the children, and
+		// it is marked with '***[...]***', the other events are marked with '[...]' inside '<>'. Every
+		// level adds one '-' to the indentation, a '...' line stands for the levels which are omitted by
+		// the depth limit.
+		std::size_t occurrence_index = 0;
+		for (auto const& occurrence : statistic.top_occurrences)
+		{
+			auto resolve_name = [&](EventID id) -> std::u8string_view {
+				if (!id)
+				{
+					return u8"<Unknow>";
+				}
+				auto event_spec = events_manager.GetEventSpec(id);
+				return event_spec.name_view.empty() ? std::u8string_view{ u8"<Unknow>" } : event_spec.name_view;
+			};
+
+			DisplayTimePoint begin_time{ occurrence.time_range.Begin() };
+			DisplayTimePoint end_time{ occurrence.time_range.End() };
+			OutputLog<L"                Event <{}> Call Context: TR: [{}, {}]">(printer, occurrence_index, begin_time, end_time);
+			OutputLog<L"                Parents:">(printer);
+
+			// The ancestors which are above the first kept parent are omitted when the depth limit cuts
+			// the chain, the ellipsis takes their place.
+			bool has_omitted_parent = occurrence.parent_events.empty()
+				? occurrence.depth != 0
+				: occurrence.parent_events.front().depth != 0;
+			if (has_omitted_parent)
+			{
+				OutputLog<L"                    ...">(printer);
+			}
+
+			// The parents are stored from the outermost kept ancestor to the direct parent, and the
+			// current event is the last level of the parents.
+			std::wstring indent;
+			for (auto const& parent : occurrence.parent_events)
+			{
+				OutputLog<L"                    {}<{}>, D:<{:.3f}ms>, E:<{:.3f}ms>, CS:<{:.3f}ms>">(
+					printer,
+					indent,
+					resolve_name(parent.event_id),
+					parent.duration.count() * 1000.0,
+					parent.exclude_time.count() * 1000.0,
+					parent.context_switch_time.count() * 1000.0
+				);
+				indent += L'-';
+			}
+
+			OutputLog<L"                    {}***[{}]***, D:<{:.3f}ms>, E:<{:.3f}ms>, CS:<{:.3f}ms>">(
+				printer,
+				indent,
+				event_name,
+				occurrence.time_range.Size().count() * 1000.0,
+				occurrence.exclude_time.count() * 1000.0,
+				occurrence.context_switch_time.count() * 1000.0
+			);
+
+			OutputLog<L"                Children:">(printer);
+
+			// The first level of the children is the current event itself, it is the root of the
+			// children tree and it is printed without the '-' indentation.
+			OutputLog<L"                    ***[{}]***, D:<{:.3f}ms>, E:<{:.3f}ms>, CS:<{:.3f}ms>">(
+				printer,
+				event_name,
+				occurrence.time_range.Size().count() * 1000.0,
+				occurrence.exclude_time.count() * 1000.0,
+				occurrence.context_switch_time.count() * 1000.0
+			);
+
+			for (auto const& child : occurrence.child_events)
+			{
+				std::wstring child_indent(child.depth - occurrence.depth, L'-');
+				if (child.is_ellipsis)
+				{
+					OutputLog<L"                    {}...">(printer, child_indent);
+					continue;
+				}
+
+				OutputLog<L"                    {}<{}>, D:<{:.3f}ms>, E:<{:.3f}ms>, CS:<{:.3f}ms>">(
+					printer,
+					child_indent,
+					resolve_name(child.event_id),
+					child.duration.count() * 1000.0,
+					child.exclude_time.count() * 1000.0,
+					child.context_switch_time.count() * 1000.0
+				);
+			}
+
+			++occurrence_index;
 		}
 	}
 
@@ -418,7 +644,11 @@ namespace UEBabyPram::InsightFilter
 
 		OutputLog<L"EventStatisticParser Output:">(printer);
 
-		OutputLog<L"    (D: Duration of the single occurrence; E: Exclude Time, the duration without the time of the child events; ENCS: Exclude Time WithOut Context Switch Time; Mean D / Median D / Std D: the mean, the median and the standard deviation of the single duration; TName: the name of the thread which the occurrence happened on; TR: Time Range of the occurrence)">(
+		OutputLog<L"    (D: Duration of the single occurrence; E: Exclude Time, the duration without the time of the child events; ENCS: Exclude Time WithOut Context Switch Time; CS: Context Switch Time, the time which the thread spent out of the CPU in the time range of the occurrence; Mean D / Median D / Std D: the mean, the median and the standard deviation of the single duration; TName: the name of the thread which the occurrence happened on; TR: Time Range of the occurrence)">(
+			printer
+		);
+
+		OutputLog<L"    (The call context of every top occurrence is reported after the top list, every one of them is introduced with its index and time range: the parents are the levels above the occurrence and the last one of them is the occurrence itself, the children section starts with the occurrence itself and the levels below it follow, the occurrence which is being reported is wrapped with '***[...]***' and the other events are wrapped with '<...>', every level adds one '-' to the indentation, a '...' stands for the levels which the depth limit omits, and D, E and CS are the ones of every event in that occurrence)">(
 			printer
 		);
 

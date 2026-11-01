@@ -1032,6 +1032,150 @@ namespace UEBabyPram::InsightParser
 		return id && id == game_thread_id;
 	}
 
+	GameFrameRecoder::GameFrameRecoder(Config config)
+		: frame_blocks(config.resource)
+		, fast_check_point(config.resource)
+		, resource(config.resource)
+	{
+	}
+
+	GameFrameRecoder::~GameFrameRecoder()
+	{
+		// The blocks are owned by the recorder, the storage of a block is freed to the resource which it was
+		// allocated from.
+		for (auto block : frame_blocks)
+		{
+			block->~FrameBlock();
+			resource->deallocate(block, sizeof(FrameBlock), alignof(FrameBlock));
+		}
+	}
+
+	auto GameFrameRecoder::GetFrameTimeRange(std::size_t index) const -> Potato::Misc::IndexSpan<DurationSec> const&
+	{
+		assert(index < frame_count);
+		return frame_blocks[index / frame_block_capacity]->frames[index % frame_block_capacity];
+	}
+
+	void GameFrameRecoder::AddFrameTimeRange(Potato::Misc::IndexSpan<DurationSec> time_range)
+	{
+		// The position of the frame inside its block, an aligned position means that the last block is full
+		// and a new one has to be allocated. The first frame takes the position 0 as well, which is the first
+		// block.
+		std::size_t index_in_block = frame_count % frame_block_capacity;
+		if (index_in_block == 0)
+		{
+			// The block is only allocated when the last one is full, so the frames which are already stored
+			// are never moved.
+			auto block = static_cast<FrameBlock*>(resource->allocate(sizeof(FrameBlock), alignof(FrameBlock)));
+			std::construct_at(block);
+			frame_blocks.push_back(block);
+
+			// The fast check point of the block is the time of its first frame, and it is recorded when the
+			// block is created, so the coarse search skips the blocks which are entirely before the target
+			// point. The first block has none, it is the block which the search starts with.
+			if (frame_count != 0)
+			{
+				fast_check_point.emplace_back(time_range.Begin());
+			}
+		}
+
+		frame_blocks.back()->frames[index_in_block] = time_range;
+		frame_count += 1;
+	}
+
+	std::size_t GameFrameRecoder::FastLocateFirstFrameIndex(DurationSec time_point) const
+	{
+		// Every check point is the boundary which a block starts at, so the count of the check points which
+		// the target point has reached is the index of the block which the search has to start with.
+		std::size_t block_index = 0;
+		for (; block_index < fast_check_point.size(); ++block_index)
+		{
+			if (fast_check_point[block_index] > time_point)
+				break;
+		}
+		return block_index * frame_block_capacity;
+	}
+
+	std::size_t GameFrameRecoder::LocateFirstFrameEndIndex(DurationSec time_point, std::size_t index_offset) const
+	{
+		for (; index_offset < frame_count; ++index_offset)
+		{
+			if (GetFrameTimeRange(index_offset).End() > time_point)
+			{
+				break;
+			}
+		}
+		return index_offset;
+	}
+
+	std::size_t GameFrameRecoder::LocateFirstFrameBeginIndex(DurationSec time_point, std::size_t index_offset) const
+	{
+		for (; index_offset < frame_count; ++index_offset)
+		{
+			if (GetFrameTimeRange(index_offset).Begin() >= time_point)
+			{
+				break;
+			}
+		}
+		return index_offset;
+	}
+
+	auto GameFrameRecoder::GetTotalTimeRange() const -> std::optional<Potato::Misc::IndexSpan<DurationSec>>
+	{
+		if (frame_count == 0)
+		{
+			return std::nullopt;
+		}
+
+		// The frames are recorded in the analysis order, so the total range is from the begin of the first
+		// frame to the end of the last one.
+		return Potato::Misc::IndexSpan<DurationSec>{
+			GetFrameTimeRange(0).Begin(),
+			GetFrameTimeRange(frame_count - 1).End()
+		};
+	}
+
+	std::size_t GameFrameRecoder::LocateFirstFrameIndex(DurationSec time_point) const
+	{
+		return LocateFirstFrameEndIndex(time_point, FastLocateFirstFrameIndex(time_point));
+	}
+
+	auto GameFrameRecoder::GetFrameIndexRange(Potato::Misc::IndexSpan<DurationSec> time_range) const -> Potato::Misc::IndexSpan<>
+	{
+		if (frame_count == 0)
+		{
+			return {0, 0};
+		}
+
+		// The range is on the right of the last frame, or on the left of the first frame.
+		if (time_range.Begin() >= GetFrameTimeRange(frame_count - 1).End())
+		{
+			return {0, 0};
+		}
+		if (time_range.End() <= GetFrameTimeRange(0).Begin())
+		{
+			return {0, 0};
+		}
+
+		// The first frame which the range covers is the first frame whose end is after the begin of the range.
+		std::size_t start = LocateFirstFrameIndex(time_range.Begin());
+		if (start >= frame_count)
+		{
+			return {0, 0};
+		}
+
+		// The first frame which begins at or after the end of the range is the first frame which the range
+		// does not cover, so the frames between the start and it are the frames which the range covers.
+		std::size_t end_offset = std::max(start, FastLocateFirstFrameIndex(time_range.End()));
+		std::size_t end = LocateFirstFrameBeginIndex(time_range.End(), end_offset);
+		if (end <= start)
+		{
+			return {0, 0};
+		}
+
+		return {start, end};
+	}
+
 	bool GameFrameRecoder::OnCPUStackTree(ThreadCPUEventView event_scope)
 	{
 		// The frame is a stack tree of the game thread only, and it begins with one of the watched events.
@@ -1047,7 +1191,7 @@ namespace UEBabyPram::InsightParser
 			return false;
 		}
 
-		frame_time_ranges.push_back(*time_range);
+		AddFrameTimeRange(*time_range);
 		return true;
 	}
 }
