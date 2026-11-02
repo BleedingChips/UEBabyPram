@@ -65,7 +65,6 @@ namespace UEBabyPram::InsightParser
 		, random_spec_blocks(config.resource)
 		, string_blocks(config.resource)
 		, resource(config.resource)
-		, encoded_string(config.resource)
 	{
 	}
 
@@ -89,113 +88,66 @@ namespace UEBabyPram::InsightParser
 		}
 	}
 
-	auto SubEventSpecManager::StoreString(std::u8string_view string, EventID id, bool is_file) -> std::u8string_view
+	auto SubEventSpecManager::StoreString(std::u8string_view string) -> std::u8string_view
 	{
 		if (string.empty())
 		{
 			return {};
-		}
-
-		// The string which is longer than a quarter of the block is replaced by the fixed string with the id of
-		// the event, and the replacement is written instead of it. The quarter of the block is the worst case
-		// of the encoding, which is four bytes of UTF-8 for one wide character, so the replacement and every
-		// other string are written into one block.
-		if (string.size() > string_block_capacity / 4)
-		{
-			return StoreString(MakeReplacedString(id, is_file), id, is_file);
 		}
 
 		// The characters of the string are UTF-8 already, so they are written into the blocks as they are.
-		return WriteString(std::span< char8_t const>{ string.data(), string.size() });
+		return WriteString(string);
 	}
 
-	auto SubEventSpecManager::StoreString(std::wstring_view string, EventID id, bool is_file) -> std::u8string_view
+	auto SubEventSpecManager::StoreString(std::wstring_view string) -> std::u8string_view
 	{
 		if (string.empty())
 		{
 			return {};
 		}
 
-		if (string.size() > string_block_capacity / 4)
-		{
-			return StoreString(MakeReplacedString(id, is_file), id, is_file);
-		}
+		// The wide characters are encoded into UTF-8 by a local buffer, and the UTF-8 string is stored by the rule of
+		// the string which is UTF-8 already.
+		std::array<char8_t, 1024> encoded_buffer;
+		auto info = Potato::Encode::UnicodeEncoder<wchar_t, char8_t>::EncodeTo(
+			std::span<wchar_t const>{ string.data(), string.size() },
+			std::span<char8_t>{ encoded_buffer }
+		);
 
-		// The wide characters are encoded into UTF-8 while they are written into the blocks.
-		return WriteString(std::span<wchar_t const>{ string.data(), string.size() });
+		// The encoding stops when the buffer is full, so the characters which are encoded before that are stored, and
+		// the characters of the string which do not fit into the buffer are cut off.
+		return StoreString(std::u8string_view{ encoded_buffer.data(), info.target_space });
 	}
 
-	template<typename FromCharT>
-	auto SubEventSpecManager::WriteString(std::span<FromCharT const> string) -> std::u8string_view
+	auto SubEventSpecManager::WriteString(std::u8string_view string) -> std::u8string_view
 	{
-		using EncoderT = Potato::Encode::UnicodeEncoder<FromCharT, char8_t>;
-
-		// The string is written after the characters which are already written into the block which is being
-		// written, and the encoder tells how much of the source it wrote. The characters of a string are never
-		// split into two blocks, so when the room of the block is not enough, the part which was written is
-		// dropped and the string is written into a new block instead.
+		// The characters are written after the characters which are already written into the block which is being
+		// written, when the room of the block is enough for them.
 		if (current_block != nullptr)
 		{
-			auto offset = current_block_count;
-			auto info = EncoderT::EncodeTo(
-				string,
-				std::span<char8_t>{ current_block->characters.data() + offset, string_block_capacity - offset }
-			);
-
-			if (info.source_space == string.size())
+			auto room = string_block_capacity - current_block_count;
+			if (string.size() <= room)
 			{
-				current_block_count += info.target_space;
-				return std::u8string_view{ current_block->characters.data() + offset, info.target_space };
+				auto offset = current_block_count;
+				std::copy(string.begin(), string.end(), current_block->characters.data() + offset);
+				current_block_count += string.size();
+				return std::u8string_view{ current_block->characters.data() + offset, string.size() };
 			}
 		}
 
-		// The string is written into a new block from its beginning, and the block becomes the block which is
-		// being written. The string is not longer than a quarter of the block, so its characters always fit
-		// into the new block, even in the worst case of the encoding.
+		// The block is allocated for the string, and the block becomes the block which is being written. The
+		// characters of a string are always a slice of one block, so the characters which do not fit into the new
+		// block are cut off.
 		auto block = static_cast<StringBlock*>(resource->allocate(sizeof(StringBlock), alignof(StringBlock)));
 		std::construct_at(block);
 		string_blocks.push_back(block);
 		current_block = block;
 		current_block_count = 0;
 
-		auto info = EncoderT::EncodeTo(
-			string,
-			std::span<char8_t>{ block->characters.data(), string_block_capacity }
-		);
-
-		assert(info.source_space == string.size());
-		if (info.source_space != string.size())
-		{
-			return {};
-		}
-
-		current_block_count = info.target_space;
-		return std::u8string_view{ block->characters.data(), info.target_space };
-	}
-
-	auto SubEventSpecManager::MakeReplacedString(EventID id, bool is_file) -> std::u8string_view
-	{
-		// The fixed string of a string which is too long for a block, the id of the event and the kind of the
-		// string keep the replaced strings of two events apart.
-		encoded_string.clear();
-		if (is_file)
-		{
-			std::format_to(std::back_inserter(encoded_string), "FileOutOfRange({})", id.id);
-		}
-		else {
-			std::format_to(std::back_inserter(encoded_string), "NameOutOfRange({})", id.id);
-		}
-
-		// The replacement is far shorter than the quarter of the block, so the string which is replaced by it is
-		// never replaced again.
-		assert(encoded_string.size() < string_block_capacity / 4);
-
-		// The replacement is ASCII, so its characters are UTF-8 already and the string is viewed without any
-		// conversion.
-		return std::u8string_view{
-			reinterpret_cast<char8_t const*>(encoded_string.data()),
-			encoded_string.size()
-		};
+		auto size = std::min(string.size(), string_block_capacity);
+		std::copy(string.begin(), string.begin() + size, block->characters.data());
+		current_block_count = size;
+		return std::u8string_view{ block->characters.data(), size };
 	}
 
 	auto SubEventSpecManager::FindSpecBlock(std::size_t index) -> SpecBlock*
@@ -269,11 +221,13 @@ namespace UEBabyPram::InsightParser
 		return block;
 	}
 
-	auto SubEventSpecManager::AllocateEventSpec(EventID id) -> EventSpecView*
+	bool SubEventSpecManager::AllocateEventSpec(EventID id, EventSpecView*& spec)
 	{
+		spec = nullptr;
+
 		if (!id)
 		{
-			return nullptr;
+			return false;
 		}
 
 		// The block of the id is created when it does not exist yet, and the spec of the id is the slot of it
@@ -287,40 +241,40 @@ namespace UEBabyPram::InsightParser
 		auto& ref = block->specs[id.id % spec_block_capacity];
 		if (ref.id)
 		{
-			return nullptr;
+			// The id is already stored, so the strings which are stored with it are kept.
+			return false;
 		}
 
 		ref.id = id;
-		return &ref;
+		spec = &ref;
+		return true;
 	}
 
 	bool SubEventSpecManager::AddEvent(EventID id, std::wstring_view event_name, std::wstring_view file, std::size_t line)
 	{
-		auto ref = AllocateEventSpec(id);
-		if (ref == nullptr)
+		// The strings of the spec are only stored when the id is added for the first time.
+		EventSpecView* ref = nullptr;
+		if (!AllocateEventSpec(id, ref))
 		{
 			return false;
 		}
 
+		// The name and the file of the spec are written into the blocks of the strings as they are, the wide
+		// characters are encoded into UTF-8 while they are written.
+		ref->name_view = StoreString(event_name);
 		if (need_file)
 		{
 			ref->line = line;
-		}
-
-		// The name and the file of the spec are written into the blocks of the strings as they are, the wide
-		// characters are encoded into UTF-8 while they are written.
-		ref->name_view = StoreString(event_name, id, false);
-		if (need_file)
-		{
-			ref->file_view = StoreString(file, id, true);
+			ref->file_view = StoreString(file);
 		}
 		return true;
 	}
 
 	bool SubEventSpecManager::AddEvent(EventID id, std::u8string_view event_name, std::u8string_view file, std::size_t line)
 	{
-		auto ref = AllocateEventSpec(id);
-		if (ref == nullptr)
+		// The strings of the spec are only stored when the id is added for the first time.
+		EventSpecView* ref = nullptr;
+		if (!AllocateEventSpec(id, ref))
 		{
 			return false;
 		}
@@ -332,10 +286,10 @@ namespace UEBabyPram::InsightParser
 
 		// The name of the event of the CPU scope logger is already UTF-8, so it is written into the blocks of the
 		// strings without any conversion.
-		ref->name_view = StoreString(event_name, id, false);
+		ref->name_view = StoreString(event_name);
 		if (need_file)
 		{
-			ref->file_view = StoreString(file, id, true);
+			ref->file_view = StoreString(file);
 		}
 		return true;
 	}

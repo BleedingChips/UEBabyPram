@@ -132,7 +132,7 @@ export namespace UEBabyPram::InsightParser
 		struct ThreadList
 		{
 			// How many events one block of the events holds.
-			static constexpr std::size_t event_block_capacity = 1024 * 16;
+			static constexpr std::size_t event_block_capacity = 1024 * 4;
 
 			struct Event
 			{
@@ -194,9 +194,9 @@ export namespace UEBabyPram::InsightParser
 	struct SubEventSpecManager
 	{
 		// How many characters one block of the strings holds.
-		static constexpr std::size_t string_block_capacity = 1024 * 16;
+		static constexpr std::size_t string_block_capacity = 1024 * 8;
 		// How many specs one block of the specs holds.
-		static constexpr std::size_t spec_block_capacity = 4096;
+		static constexpr std::size_t spec_block_capacity = 2048;
 
 		struct Config
 		{
@@ -284,25 +284,21 @@ export namespace UEBabyPram::InsightParser
 		// Create the block which the spec index is in, and put it into the queue which it belongs to.
 		SpecBlock* CreateSpecBlock(std::size_t index);
 
-		// The slot of the spec which the id is stored in, its block is created when the block of the id does not
-		// exist yet, and nullptr is returned when the spec of the id is already assigned.
-		EventSpecView* AllocateEventSpec(EventID id);
+		// Allocate the slot of the spec of the id: the block of the id is created when it does not exist yet, and the
+		// slot is returned through the pointer. True is returned only when the spec is added for the first time, so
+		// the strings of the spec are only stored by the first add of the id.
+		bool AllocateEventSpec(EventID id, EventSpecView*& spec);
 
 		// Write the name or the file of the event into the blocks of the strings and return the view of it.
-		// The string which is longer than a quarter of the block is replaced by MakeReplacedString(), so the
-		// characters of every string are written into one block: a quarter of the block is the worst case of
-		// the encoding, which is four bytes of UTF-8 for one wide character.
-		std::u8string_view StoreString(std::u8string_view string, EventID id, bool is_file);
-		std::u8string_view StoreString(std::wstring_view string, EventID id, bool is_file);
-		// Write the characters of the source into the blocks of the strings, the characters are encoded into
-		// UTF-8 while they are written, and the view of the written characters is returned.
-		template<typename FromCharT>
-		std::u8string_view WriteString(std::span<FromCharT const> string);
-		// The fixed string which replaces the string which is too long for a block of the strings, it carries
-		// the id of the event and whether it is the file of the event, so the replaced strings stay told apart.
-		// The replacement is written into encoded_string, which is why the view of it is returned, the
-		// characters of it are ASCII, so the view of it is UTF-8 without any conversion.
-		std::u8string_view MakeReplacedString(EventID id, bool is_file);
+		std::u8string_view StoreString(std::u8string_view string);
+		// The wide characters are encoded into UTF-8 by a local buffer, and the UTF-8 string is stored with the same
+		// rule as the string which is UTF-8 already. The characters which do not fit into the buffer are cut off.
+		std::u8string_view StoreString(std::wstring_view string);
+		// Write the characters of the string into the blocks of the strings as they are, and return the view of them.
+		// The characters are written into the room which is left in the block which is being written when the room is
+		// enough, and a new block is created otherwise. The characters which do not fit into one block are cut off,
+		// because the characters of a string are always a slice of one block.
+		std::u8string_view WriteString(std::u8string_view string);
 
 		const bool need_file;
 		// The blocks of the specs whose ids follow each other from 0: the block of the spec index is the index
@@ -322,10 +318,6 @@ export namespace UEBabyPram::InsightParser
 		std::size_t current_block_count = 0;
 		// The resource which the blocks of the characters are allocated from and freed to.
 		std::pmr::memory_resource* resource;
-		// The storage of the fixed string of MakeReplacedString(), it is reused, so the replacement of a string
-		// which is too long does not allocate. The characters of the replacement are ASCII, so the string is
-		// viewed as UTF-8 without any conversion.
-		std::pmr::string encoded_string;
 	};
 
 	struct EventSpecManager
