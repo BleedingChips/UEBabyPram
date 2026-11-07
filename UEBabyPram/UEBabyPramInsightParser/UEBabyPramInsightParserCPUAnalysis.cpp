@@ -132,7 +132,7 @@ namespace UEBabyPram::InsightParser
 		case RouteId_EndThread:
 		{
 			const uint32 ThreadId = TraceServices::FTraceAnalyzerUtils::GetThreadIdField(Context);
-			if (!Parser.IsThreadRequire(ThreadId))
+			if (!Parser.IsThreadRequired(ThreadId))
 			{
 				return true;
 			}
@@ -167,7 +167,7 @@ namespace UEBabyPram::InsightParser
 		case RouteId_EventBatchV2: // backward compatibility
 		{
 			const uint32 ThreadId = Context.ThreadInfo.GetId();
-			if (!Parser.IsThreadRequire(ThreadId))
+			if (!Parser.IsThreadRequired(ThreadId))
 			{
 				return true;
 			}
@@ -195,7 +195,7 @@ namespace UEBabyPram::InsightParser
 		case RouteId_EndCapture: // backward compatibility
 		{
 			const uint32 ThreadId = TraceServices::FTraceAnalyzerUtils::GetThreadIdField(Context);
-			if (!Parser.IsThreadRequire(ThreadId))
+			if (!Parser.IsThreadRequired(ThreadId))
 			{
 				return true;
 			}

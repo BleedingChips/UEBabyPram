@@ -70,8 +70,10 @@ export namespace UEBabyPram::InsightFilter
 		virtual void OnCPUStackTree(ThreadCPUEventView event_scope) override;
 		virtual bool IsParserRequired(ParserRequireFlag flag) const override;
 		// Only the threads which the query counts are analyzed, a query which carries a thread
-		// condition only counts the threads which its matcher matched.
+		// condition only counts the threads which its matcher matched. The thread is known by its thread id and by
+		// its system thread id, so both of them are answered.
 		virtual bool IsThreadRequired(ThreadID thread_id) const override;
+		virtual bool IsThreadRequired(ThreadSystemID thread_system_id) const override;
 		// Report every saved stack tree with the events which it carries, the analysis has to be done
 		// before this is called.
 		bool PrintToLog(Potato::Log::LogPrinter& printer) override;

@@ -76,7 +76,7 @@ export namespace UEBabyPram::InsightFilter
 		struct Query
 		{
 			Query(std::pmr::memory_resource* resource)
-				: nodes(resource), thread_ids(resource), time_ranges(resource) {}
+				: nodes(resource), thread_ids(resource), thread_system_ids(resource), time_ranges(resource) {}
 
 			// The call chain, it is never empty.
 			std::pmr::vector<ChainNode> nodes;
@@ -86,6 +86,10 @@ export namespace UEBabyPram::InsightFilter
 			// The ids of the threads whose name is fully matched by the thread matcher, it is only
 			// filled for the query which carries the thread condition.
 			std::pmr::vector<ThreadID> thread_ids;
+			// The system ids of the same threads, the thread is known by both of them: the stack tree carries the
+			// thread id, and the events which are not carried by the stack tree, ex: the context switch event, carry
+			// the system thread id.
+			std::pmr::vector<ThreadSystemID> thread_system_ids;
 			// The time ranges of the query, it is empty when the query does not filter the time.
 			std::pmr::vector<Potato::Misc::IndexSpan<DurationSec>> time_ranges;
 		};
@@ -99,8 +103,10 @@ export namespace UEBabyPram::InsightFilter
 		void AddEvent(EventID id, std::wstring_view event_name);
 		void AddEvent(EventID id, std::u8string_view event_name);
 		// Resolve one discovered thread against the thread condition of every query, the query which
-		// carries no thread condition ignores it, it counts every thread.
-		void AddThread(ThreadID id, std::string_view thread_name);
+		// carries no thread condition ignores it, it counts every thread. The thread is kept with both of its ids,
+		// because the stack tree carries the thread id and the events which are not carried by the stack tree
+		// carry the system thread id.
+		void AddThread(ThreadID id, ThreadSystemID system_id, std::string_view thread_name);
 
 		std::span<Query const> GetQueries() const { return queries; }
 
@@ -109,6 +115,7 @@ export namespace UEBabyPram::InsightFilter
 		// condition which the thread is not matched by, and such a thread carries no event which has to
 		// be counted.
 		bool IsThreadMatched(ThreadID thread_id) const;
+		bool IsThreadMatched(ThreadSystemID thread_system_id) const;
 
 		// One event of the stack tree which completes a query and which a statistic element of the query
 		// counts, the event and the element which counts it.
@@ -149,6 +156,7 @@ export namespace UEBabyPram::InsightFilter
 		// Whether the query counts the occurrences which happened on the thread, a query which carries no
 		// thread condition counts them all.
 		static bool IsThreadMatched(Query const& query, ThreadID thread_id);
+		static bool IsThreadMatched(Query const& query, ThreadSystemID thread_system_id);
 
 		// Whether any time range of the query overlaps the range. It is used both for the whole stack tree
 		// (a query whose time ranges do not overlap the tree can not count any occurrence of it, so the

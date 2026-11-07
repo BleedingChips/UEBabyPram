@@ -4,6 +4,7 @@ export module UEBabyPramInsightFilterGameThread;
 
 import UEBabyPramInsightFilterParser;
 import UEBabyPramInsightParser;
+import UEBabyPramInsightParserContextSwitchStreamer;
 import Potato;
 import std;
 
@@ -32,6 +33,8 @@ export namespace UEBabyPram::InsightFilter
 		
 		void ContextSwitchEvent(ThreadSystemID thread_id, std::size_t core_name, Potato::Misc::IndexSpan<DurationSec> duration) override;
 		virtual bool IsThreadRequired(ThreadID thread_id) const override;
+		// The thread is only required when it is the game thread, which is the thread which the frames are recorded on.
+		virtual bool IsThreadRequired(ThreadSystemID thread_system_id) const override;
 		virtual bool IsParserRequired(ParserRequireFlag flag) const override { return true; }
 		virtual void AllAnalyzeDone() override;
 		bool PrintToLog(Potato::Log::LogPrinter& printer) override;
@@ -40,7 +43,9 @@ export namespace UEBabyPram::InsightFilter
 	protected:
 
 		std::pmr::unsynchronized_pool_resource resource;
-		ContextSwitchEventList context_switch_list;
+		// The streamer of the context switch events, the blocks of the events are streamed to the listener which every
+		// recorded frame creates for its own time range.
+		ContextSwitchStreamer context_switch_streamer;
 		EventSpecManager events_manager;
 
 		struct FrameRecord
@@ -51,6 +56,9 @@ export namespace UEBabyPram::InsightFilter
 			FrameRecord& operator=(FrameRecord&&) = default;
 			DurationSec duration = DurationSec::zero();
 			Potato::Misc::IndexSpan<DurationSec> time_range;
+			// The listener which collects the context switch blocks of the frame, it is created with the time range of the
+			// frame, so the frame reads the time which the game thread spent out of the CPU inside the frame.
+			std::shared_ptr<ContextSwitchStreamer::Listener> context_switch_listener;
 			std::pmr::vector<ThreadCPUEvent> events;
 		};
 

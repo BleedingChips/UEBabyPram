@@ -15,7 +15,7 @@ namespace UEBabyPram::InsightFilter
 
 	GameThreadParser::GameThreadParser(Config in_config)
 		: resource(in_config.resource)
-		, context_switch_list(ContextSwitchEventList::Config{ &resource })
+		, context_switch_streamer(ContextSwitchStreamer::Config{ 3, DurationSec{ 1 }, &resource })
 		, events_manager(EventSpecManager::Config{ false, &resource })
 		, event_records(&resource)
 		, max_record_frame(in_config.max_record_frame)
@@ -63,6 +63,13 @@ namespace UEBabyPram::InsightFilter
 		return true;
 	}
 
+	bool GameThreadParser::IsThreadRequired(ThreadSystemID thread_system_id) const
+	{
+		// The events which are not carried by the stack tree carry the system thread id of the thread, ex: the
+		// context switch event, and only the game thread is analyzed.
+		return game_thread_system_id && game_thread_system_id == thread_system_id;
+	}
+
 	void GameThreadParser::OnCPUStackTree(ThreadCPUEventView event_scope)
 	{
 		if (event_scope.thread_id == game_thread_id)
@@ -75,6 +82,9 @@ namespace UEBabyPram::InsightFilter
 				records.duration = current_time_range.Size();
 				records.events.insert(records.events.end(), event_scope.view.begin(), event_scope.view.end());
 				records.time_range = current_time_range;
+				// The listener of the frame is created with the time range of the frame, so the context switch events
+				// of the game thread which are in the frame are collected for it.
+				records.context_switch_listener = context_switch_streamer.AddListener(game_thread_system_id, current_time_range);
 				event_records.push_back(std::move(records));
 			}
 		}
@@ -83,6 +93,11 @@ namespace UEBabyPram::InsightFilter
 	void GameThreadParser::AllAnalyzeDone()
 	{
 		Parser::AllAnalyzeDone();
+
+		// The whole trace is analyzed, so the block which is still being written by the streamer is completed and
+		// given to the listeners of the frames, which is what makes the listeners carry the last events of the trace
+		// as well when their statistic is read below.
+		context_switch_streamer.Flush();
 
 		if (event_records.size() > 0)
 		{
@@ -136,6 +151,16 @@ namespace UEBabyPram::InsightFilter
 			if (event_records.size() > 0)
 			{
 				auto StatisRecord = [this](ThreadCPUEventView view, std::pmr::vector<CrossFrameEventRecord>& output, std::size_t frame_index) {
+					// The context switch statis of a range is asked from the listener of the frame, and a frame which
+					// carries no listener carries no context switch event, so the whole range is its active time.
+					auto context_switch_provider = [this, frame_index](Potato::Misc::IndexSpan<DurationSec> range) {
+						if (auto& listener = event_records[frame_index].context_switch_listener; listener)
+						{
+							return listener->GetContextSwitchStatis(range);
+						}
+						return ContextSwitchStreamer::Listener::Statis{ range.Size(), 0 };
+					};
+
 					std::size_t index_offset = 0;
 					while (index_offset < view.view.size())
 					{
@@ -149,7 +174,7 @@ namespace UEBabyPram::InsightFilter
 								});
 							if (find != output.end())
 							{
-								auto exclude_time = *view.GetExcludeTime(current_event, context_switch_list);
+								auto exclude_time = *view.GetExcludeTime(current_event, context_switch_provider);
 								find->durations += exclude_time.active_time;
 								find->durations_without_context_switch += exclude_time.active_time_without_context_switch;
 								find->count += 1;
@@ -162,7 +187,7 @@ namespace UEBabyPram::InsightFilter
 							else {
 								CrossFrameEventRecord new_record;
 								new_record.count = 1;
-								auto exclude_time = *view.GetExcludeTime(current_event, context_switch_list);
+								auto exclude_time = *view.GetExcludeTime(current_event, context_switch_provider);
 								new_record.durations = exclude_time.active_time;
 								new_record.durations_without_context_switch = exclude_time.active_time_without_context_switch;
 								new_record.event_name = event_spec.name_view;
@@ -326,7 +351,11 @@ namespace UEBabyPram::InsightFilter
 			//view.view = std::span(ite.event_ids.data(), ite.event_ids.size());
 			auto range = ite.time_range;
 
-			auto context_switch_static = context_switch_list.GetContextSwitchStatis(game_thread_system_id, range);
+			// The context switch time of the frame is read from the listener of the frame, a frame which carries no
+			// listener carries no context switch event, so the whole range is its active time.
+			auto context_switch_static = ite.context_switch_listener
+				? ite.context_switch_listener->GetContextSwitchStatis(range)
+				: ContextSwitchStreamer::Listener::Statis{ range.Size(), 0 };
 
 			DisplayTimePoint start_duration{ range.Begin() };
 			DisplayTimePoint end_duration{ range.End() };
@@ -409,6 +438,8 @@ namespace UEBabyPram::InsightFilter
 
 	void GameThreadParser::ContextSwitchEvent(ThreadSystemID thread_id, std::size_t core_name, Potato::Misc::IndexSpan<DurationSec> duration)
 	{
-		context_switch_list.AddContextSwitchEvent(thread_id, core_name, duration);
+		// The events are streamed to the listeners of the recorded frames, so a frame reads the time which the game
+		// thread spent out of the CPU from the blocks which its listener collected.
+		context_switch_streamer.AddContextSwitchEvent(thread_id, core_name, duration);
 	}
 }

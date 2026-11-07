@@ -54,12 +54,16 @@ namespace UEBabyPram::InsightParser
 		case RouteId_ContextSwitch:
 		{
 			const auto& EventData = Context.EventData;
-			auto StartTime = Context.EventTime.AsSeconds(EventData.GetValue<uint64>("StartTime"));
-			auto EndTime = Context.EventTime.AsSeconds(EventData.GetValue<uint64>("EndTime"));
 			auto ThreadId = EventData.GetValue<uint32>("ThreadId");
-			auto CoreNumber = EventData.GetValue<uint8>("CoreNumber");
 
-			Parser.ContextSwitchEvent(ThreadId, CoreNumber, StartTime, EndTime);
+			if (Parser.IsThreadResuiredSystemId(ThreadId))
+			{
+				auto StartTime = Context.EventTime.AsSeconds(EventData.GetValue<uint64>("StartTime"));
+				auto EndTime = Context.EventTime.AsSeconds(EventData.GetValue<uint64>("EndTime"));
+				auto CoreNumber = EventData.GetValue<uint8>("CoreNumber");
+
+				Parser.ContextSwitchEvent(ThreadId, CoreNumber, StartTime, EndTime);
+			}
 
 			/*
 			auto Result = ThreadMapping.FindByPredicate([=](ThreadIdMapping const& Mapping) {

@@ -35,7 +35,8 @@ namespace UEBabyPram::InsightParser
 	{
 		static uint32 GetInvalidMetadataSpecId() { return (uint32)-1; }
 		virtual uint32 AddMetaDataLayout(wchar_t const* format, wchar_t const* const* field_names, std::size_t field_names_len) { return 0; }
-		virtual bool IsThreadRequire(uint32 thread_id) const { return true; }
+		virtual bool IsThreadResuiredSystemId(uint32 thread_system_id) const { return true; }
+		virtual bool IsThreadRequired(uint32 thread_id) const { return true; }
 		virtual bool IsParserRequired(ParserRequireFlag mask) const { return true; }
 		virtual void ContextSwitchEvent(uint32 thread_id, uint32 active_core, double active_start_time, double active_end_time) {}
 		virtual void OnThreadDiscovered(uint32 thread_id, uint32 thread_system_id, char const* thread_name, std::size_t thread_name_len) {}

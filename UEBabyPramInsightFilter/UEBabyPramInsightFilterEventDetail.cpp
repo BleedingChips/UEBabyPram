@@ -32,7 +32,7 @@ namespace UEBabyPram::InsightFilter
 		// The thread condition of the query is resolved from the name of the thread once, so the
 		// stack tree only looks the thread of the tree up in the query, and IsThreadRequired() is
 		// answered from the same ids.
-		query_mapping.AddThread(thread_id, thread_name);
+		query_mapping.AddThread(thread_id, thread_system_id, thread_name);
 	}
 
 	void EventDetailParser::OnCPUEventDiscovered(EventID id, std::wstring_view event_name, std::wstring_view file_name, std::size_t file_line)
@@ -68,6 +68,22 @@ namespace UEBabyPram::InsightFilter
 	bool EventDetailParser::IsThreadRequired(ThreadID thread_id) const
 	{
 		return query_mapping.IsThreadMatched(thread_id);
+	}
+
+	bool EventDetailParser::IsThreadRequired(ThreadSystemID thread_system_id) const
+	{
+		// The events which are not carried by the stack tree carry the system thread id of the thread, ex: the
+		// context switch event, so the id of the thread is looked up by it first, and a thread which is not
+		// discovered yet carries no info which the query could be matched with.
+		auto thread_info = GetThreadInfo(thread_system_id);
+		if (!thread_info)
+		{
+			return false;
+		}
+
+		// The thread of the stack tree is resolved by the id of the thread, so the rest of the answer is the same as
+		// the answer of the thread id.
+		return IsThreadRequired(thread_info->thread_id);
 	}
 
 	void EventDetailParser::OnCPUStackTree(ThreadCPUEventView event_scope)

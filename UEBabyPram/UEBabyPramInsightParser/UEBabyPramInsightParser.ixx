@@ -1,5 +1,6 @@
 module;
 
+#include <cassert>
 #include "UEBabyPramInsightParserInterface.h"
 
 export module UEBabyPramInsightParser;
@@ -442,6 +443,53 @@ export namespace UEBabyPram::InsightParser
 		std::optional<ExcludeTimeStatis> GetExcludeTime(EventView view) const;
 		std::optional<ExcludeTimeStatis> GetExcludeTime(EventView view, ContextSwitchEventList const& list) const;
 
+		// The exclude time of the event, which is the time of the event which is not spent in its children, and the
+		// same time with the time which the thread spent out of the CPU removed. The statis of a time range is asked
+		// from the provider, so the view does not depend on the list or on the streamer of the context switch events:
+		// a provider is anything which answers the statis of a range with the removed context switch time and the
+		// switch count, ex: the list, or the listener of the streamer.
+		template<typename StatisProviderT>
+		std::optional<ExcludeTimeStatis> GetExcludeTime(EventView view, StatisProviderT const& statis_provider) const
+		{
+			if (view)
+			{
+				DurationSec start_point = view.time_range.Begin();
+
+				DurationSec exclude_time = DurationSec::zero();
+				DurationSec exclude_time_remove_context_switch = DurationSec::zero();
+				std::size_t context_switch_count = 0;
+
+				std::size_t offset = view.index_range.Begin() + 1;
+				while (true)
+				{
+					auto child_event = FindNextEvent({}, { offset, view.index_range.End() });
+
+					if (!child_event)
+					{
+						assert(start_point <= view.time_range.End());
+						exclude_time += Potato::Misc::IndexSpan<DurationSec>{ start_point, view.time_range.End() }.Size();
+						auto statis = statis_provider(Potato::Misc::IndexSpan<DurationSec>{ start_point, view.time_range.End() });
+						assert(statis.removed_context_switch_time.count() >= 0.0);
+						exclude_time_remove_context_switch += statis.removed_context_switch_time;
+						context_switch_count += statis.switch_count;
+						return ExcludeTimeStatis{ exclude_time, exclude_time_remove_context_switch, context_switch_count };
+					}
+
+					assert(start_point <= child_event.time_range.Begin());
+					exclude_time += Potato::Misc::IndexSpan<DurationSec>{ start_point, child_event.time_range.Begin() }.Size();
+					auto statis = statis_provider(Potato::Misc::IndexSpan<DurationSec>{ start_point, child_event.time_range.Begin() });
+					assert(statis.removed_context_switch_time.count() >= 0.0);
+					exclude_time_remove_context_switch += statis.removed_context_switch_time;
+					context_switch_count += statis.switch_count;
+
+					start_point = child_event.time_range.End();
+
+					offset = child_event.index_range.End();
+				}
+			}
+			return std::nullopt;
+		}
+
 		EventID GetTopEvent() const;
 		
 		std::optional<Potato::Misc::IndexSpan<DurationSec>> GetTimeRange() const {
@@ -614,6 +662,7 @@ export namespace UEBabyPram::InsightParser
 		virtual void OnCPUScopeEventDiscovered(EventID id, std::u8string_view event_name) {}
 		virtual	void AllAnalyzeDone() override;
 		virtual bool IsThreadRequired(ThreadID thread_id) const { return true; }
+		virtual bool IsThreadRequired(ThreadSystemID thread_system_id) const { return true; }
 		static std::wstring_view CoverStringView(wchar_t const* ScopeName, std::size_t ScopeNameLen);
 
 		struct CPUEventInfo
@@ -656,7 +705,8 @@ export namespace UEBabyPram::InsightParser
 		virtual uint32 AddMetaDataLayout(wchar_t const* format, wchar_t const* const* field_names, std::size_t field_names_len) override { return 0; }
 
 		//virtual void SetMetadataSpec(uint32 event_id, uint32 metadata_space_id) override {}
-		virtual bool IsThreadRequired(uint32 thread_id) const { return IsThreadRequired(ThreadID(thread_id)); }
+		virtual bool IsThreadRequired(uint32 thread_id) const override { return IsThreadRequired(ThreadID(thread_id)); }
+		virtual bool IsThreadResuiredSystemId(uint32 thread_system_id) const override { return IsThreadRequired(ThreadSystemID{thread_system_id}); }
 		//virtual uint32 AddMetaData(uint32 event_id, MetaDataFormat format, uint8 const* data, std::size_t meta_data_len, uint32 thread_id) override;
 		//virtual void SetMetadata(uint32 MetaDataId, MetaDataFormat format, uint8 const* meta_data, std::size_t meta_data_len, uint32 TimerId, uint32 ThreadId) override;
 		virtual void ContextSwitchEvent(uint32 thread_id, uint32 active_core, double active_start_time, double active_end_time) override {

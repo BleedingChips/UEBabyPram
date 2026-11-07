@@ -1,5 +1,7 @@
 module;
 #include <cassert>
+#include <cmath>
+#include <cstdio>
 #include <re2/re2.h>
 module UEBabyPramInsightFilterEventStatistic;
 
@@ -7,6 +9,7 @@ import UEBabyPramInsightFilterParser;
 import UEBabyPramInsightFilterEventFilter;
 import UEBabyPramInsightFilterEventQuery;
 import UEBabyPramInsightParser;
+import UEBabyPramInsightParserContextSwitchStreamer;
 import Potato;
 import std;
 
@@ -57,7 +60,7 @@ namespace UEBabyPram::InsightFilter
 
 	EventStatisticParser::EventStatisticParser(Config in_config)
 		: resource(in_config.resource)
-		, context_switch_list(ContextSwitchEventList::Config{ &resource })
+		, context_switch_streamer(ContextSwitchStreamer::Config{ 3, DurationSec{ 1 }, &resource })
 		, events_manager(EventSpecManager::Config{ false, &resource })
 		, query_mapping(EventQueryMapping::Config{ std::move(in_config.queries), &resource })
 		, event_statistics(&resource)
@@ -75,7 +78,7 @@ namespace UEBabyPram::InsightFilter
 		// The thread condition of every query is resolved from the name of the thread once, so the walk
 		// of the stack tree only looks the thread of the tree up in the query which it belongs to, and
 		// IsThreadRequired() is answered from the same ids.
-		query_mapping.AddThread(thread_id, thread_name);
+		query_mapping.AddThread(thread_id, thread_system_id, thread_name);
 	}
 
 	void EventStatisticParser::OnCPUEventDiscovered(EventID id, std::wstring_view event_name, std::wstring_view file_name, std::size_t file_line)
@@ -123,11 +126,27 @@ namespace UEBabyPram::InsightFilter
 		return query_mapping.IsThreadMatched(thread_id);
 	}
 
+	bool EventStatisticParser::IsThreadRequired(ThreadSystemID thread_system_id) const
+	{
+		// The thread is known by its system thread id as well, which is what the events carry which are not carried
+		// by the stack tree, ex: the context switch event, so the id of the thread is looked up by it first, and a
+		// thread which is not discovered yet carries no info which the query could be matched with.
+		auto thread_info = GetThreadInfo(thread_system_id);
+		if (!thread_info)
+		{
+			return false;
+		}
+
+		// The thread of the stack tree is resolved by the id of the thread, so the rest of the answer is the same as
+		// the answer of the thread id.
+		return IsThreadRequired(thread_info->thread_id);
+	}
+
 	void EventStatisticParser::ContextSwitchEvent(ThreadSystemID thread_id, std::size_t core_name, Potato::Misc::IndexSpan<DurationSec> duration)
 	{
-		// The context switch events are complete only when the whole trace is analyzed, so they are
-		// collected here and the time without them is built from the list in AllAnalyzeDone().
-		context_switch_list.AddContextSwitchEvent(thread_id, core_name, duration);
+		// The events are streamed to the listeners of the top occurrences, so an occurrence reads the time which its
+		// thread spent out of the CPU from the blocks which its listener collected.
+		context_switch_streamer.AddContextSwitchEvent(thread_id, core_name, duration);
 	}
 
 	void EventStatisticParser::OnCPUStackTree(ThreadCPUEventView event_scope)
@@ -258,6 +277,21 @@ namespace UEBabyPram::InsightFilter
 		occurrence.exclude_time_without_context_switch = exclude_time;
 		occurrence.thread_id = event_scope.thread_id;
 
+		// The listener of the context switch events of the occurrence is created with the time range of the stack
+		// tree which the occurrence is in, so the events of the thread which are in the range of the tree are
+		// collected for the occurrence, and the occurrence reads the time which its thread spent out of the CPU from
+		// the blocks which the listener collected.
+		if (auto thread_info = GetThreadInfo(event_scope.thread_id); thread_info)
+		{
+			if (auto stack_tree_time_range = event_scope.GetTimeRange(); stack_tree_time_range)
+			{
+				occurrence.context_switch_listener = context_switch_streamer.AddListener(
+					thread_info->thread_system_id,
+					*stack_tree_time_range
+				);
+			}
+		}
+
 		// The occurrence is kicked out right away when it is the shortest one of a full list, and the
 		// time of its own children and parents is only collected after it is confirmed to be kept, so an
 		// occurrence which does not rank in the top N never walks its call context.
@@ -384,6 +418,11 @@ namespace UEBabyPram::InsightFilter
 	{
 		Parser::AllAnalyzeDone();
 
+		// The whole trace is analyzed, so the block which is still being written by the streamer is completed and
+		// given to the listeners of the occurrences, which is what makes the listeners carry the last events of the
+		// trace as well when their statistic is read below.
+		context_switch_streamer.Flush();
+
 		for (auto& statistic : event_statistics)
 		{
 			if (statistic.count == 0)
@@ -420,19 +459,26 @@ namespace UEBabyPram::InsightFilter
 			// The context switch events are complete now, so the time which the thread spent out of
 			// the CPU in the whole time range of the occurrence is kept as the context switch time of
 			// the occurrence and removed from its exclude time, which the occurrence is initialized
-			// with. The thread which the occurrence happened on is resolved by its id, and a thread
-			// which carries no context switch event is treated as active in the whole range by
-			// GetContextSwitchStatis(), so its context switch time stays zero and its exclude time
-			// stays.
+			// with. The time is read from the listener which the occurrence collected its blocks with, and
+			// a range which carries no collected context switch event is treated as active in the whole
+			// range by GetContextSwitchStatis(), so its context switch time stays zero and its exclude
+			// time stays.
 			for (auto& occurrence : statistic.top_occurrences)
 			{
-				auto thread_info = GetThreadInfo(occurrence.thread_id);
-				if (!thread_info)
+				auto get_context_switch_statis = [&](Potato::Misc::IndexSpan<DurationSec> time_range)
 				{
-					continue;
-				}
+					// The listener of the occurrence carries the context switch events of the thread which are in the
+					// range of its stack tree, and an occurrence which has no listener carries no event of the thread,
+					// so the whole range is its active time.
+					if (occurrence.context_switch_listener)
+					{
+						return occurrence.context_switch_listener->GetContextSwitchStatis(time_range);
+					}
 
-				auto context_switch_statis = context_switch_list.GetContextSwitchStatis(thread_info->thread_system_id, occurrence.time_range);
+					return ContextSwitchStreamer::Listener::Statis{ time_range.Size(), 0 };
+				};
+
+				auto context_switch_statis = get_context_switch_statis(occurrence.time_range);
 				DurationSec switched_out_time = occurrence.time_range.Size() - context_switch_statis.removed_context_switch_time;
 				occurrence.context_switch_time = switched_out_time;
 				occurrence.exclude_time_without_context_switch = std::max(
@@ -448,7 +494,7 @@ namespace UEBabyPram::InsightFilter
 					{
 						return;
 					}
-					auto context_event_statis = context_switch_list.GetContextSwitchStatis(thread_info->thread_system_id, context_event.time_range);
+					auto context_event_statis = get_context_switch_statis(context_event.time_range);
 					context_event.context_switch_time = context_event.time_range.Size() - context_event_statis.removed_context_switch_time;
 				};
 				for (auto& parent_event : occurrence.parent_events)

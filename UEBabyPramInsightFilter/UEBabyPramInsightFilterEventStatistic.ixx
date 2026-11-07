@@ -8,6 +8,7 @@ import UEBabyPramInsightFilterParser;
 import UEBabyPramInsightFilterEventFilter;
 import UEBabyPramInsightFilterEventQuery;
 import UEBabyPramInsightParser;
+import UEBabyPramInsightParserContextSwitchStreamer;
 import Potato;
 import std;
 
@@ -119,6 +120,10 @@ export namespace UEBabyPram::InsightFilter
 			// name is resolved from the thread info in PrintToLog, so the occurrence does not have
 			// to own a copy of the name.
 			ThreadID thread_id;
+			// The listener which collects the context switch blocks of the thread for the occurrence: it is created
+			// with the time range of the stack tree which the occurrence is in, and it is the source of the context
+			// switch time of the occurrence.
+			std::shared_ptr<ContextSwitchStreamer::Listener> context_switch_listener;
 			// The ancestors of the occurrence, from the outermost one to the direct parent, the call
 			// order is kept so that the chain can be reported.
 			std::pmr::vector<ContextEvent> parent_events;
@@ -181,8 +186,10 @@ export namespace UEBabyPram::InsightFilter
 		virtual bool IsParserRequired(ParserRequireFlag flag) const override;
 		// Only the threads which at least one query counts are analyzed: a query which carries a thread
 		// condition only counts the threads which its matcher matched, so a thread which is matched by no
-		// query carries no event which has to be counted.
+		// query carries no event which has to be counted. The thread is known by its thread id and by its
+		// system thread id, so both of them are answered.
 		virtual bool IsThreadRequired(ThreadID thread_id) const override;
+		virtual bool IsThreadRequired(ThreadSystemID thread_system_id) const override;
 		virtual void AllAnalyzeDone() override;
 		bool PrintToLog(Potato::Log::LogPrinter& printer) override;
 
@@ -210,9 +217,10 @@ export namespace UEBabyPram::InsightFilter
 		void PrintEventStatistic(Potato::Log::LogPrinter& printer, EventStatistic const& statistic) const;
 
 		std::pmr::unsynchronized_pool_resource resource;
-		// The context switch events of every thread, they are only complete when the whole trace is
-		// analyzed, so the time without them is built from this list in AllAnalyzeDone().
-		ContextSwitchEventList context_switch_list;
+		// The streamer of the context switch events, the blocks of the events are streamed to the listeners which
+		// every top occurrence creates for the time range of its stack tree, and the occurrence reads the time which
+		// its thread spent out of the CPU from the blocks which its listener collected.
+		ContextSwitchStreamer context_switch_streamer;
 		EventSpecManager events_manager;
 		// The query system which is built from Config::queries, the ids of the events are resolved
 		// into it when they are discovered, so the stack tree is never matched by a name.

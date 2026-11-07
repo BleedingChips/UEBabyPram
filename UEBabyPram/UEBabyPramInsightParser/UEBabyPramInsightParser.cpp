@@ -659,43 +659,11 @@ namespace UEBabyPram::InsightParser
 
 	auto ThreadCPUEventView::GetExcludeTime(EventView view, ContextSwitchEventList const& list) const -> std::optional<ExcludeTimeStatis>
 	{
-		if (view)
-		{
-			DurationSec start_point = view.time_range.Begin();
-
-			DurationSec exclude_time = DurationSec::zero();
-			DurationSec exclude_time_remove_context_switch = DurationSec::zero();
-			std::size_t context_switch_count = 0;
-
-			std::size_t offset = view.index_range.Begin() + 1;
-			while (true)
-			{
-				auto child_event = FindNextEvent({}, { offset, view.index_range.End() });
-
-				if (!child_event)
-				{
-					assert(start_point <= view.time_range.End());
-					exclude_time += Potato::Misc::IndexSpan<DurationSec>{ start_point, view.time_range.End() }.Size();
-					auto statis = list.GetContextSwitchStatis(system_thread_id, { start_point, view.time_range.End() });
-					assert(statis.removed_context_switch_time.count() >= 0.0);
-					exclude_time_remove_context_switch += statis.removed_context_switch_time;
-					context_switch_count += statis.switch_count;
-					return ExcludeTimeStatis{ exclude_time, exclude_time_remove_context_switch, context_switch_count};
-				}
-
-				assert(start_point <= child_event.time_range.Begin());
-				exclude_time += Potato::Misc::IndexSpan<DurationSec>{ start_point, child_event.time_range.Begin() }.Size();
-				auto statis = list.GetContextSwitchStatis(system_thread_id, { start_point, child_event.time_range.Begin() });
-				assert(statis.removed_context_switch_time.count() >= 0.0);
-				exclude_time_remove_context_switch += statis.removed_context_switch_time;
-				context_switch_count += statis.switch_count;
-
-				start_point = child_event.time_range.End();
-
-				offset = child_event.index_range.End();
-			}
-		}
-		return std::nullopt;
+		// The statis of a range is asked from the list, the walk of the ranges is the same as the walk with any
+		// provider of the statis, so it is shared with the listener of the streamer of the context switch events.
+		return GetExcludeTime(view, [this, &list](Potato::Misc::IndexSpan<DurationSec> range) {
+			return list.GetContextSwitchStatis(system_thread_id, range);
+		});
 	}
 
 	std::wstring_view ParserInterface::CoverStringView(wchar_t const* ScopeName, std::size_t ScopeNameLen)

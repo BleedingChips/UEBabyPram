@@ -72,7 +72,7 @@ namespace UEBabyPram::InsightFilter
 		AddEvent(id, std::u8string_view{ encoded_event_name });
 	}
 
-	void EventQueryMapping::AddThread(ThreadID id, std::string_view thread_name)
+	void EventQueryMapping::AddThread(ThreadID id, ThreadSystemID system_id, std::string_view thread_name)
 	{
 		if (!id)
 		{
@@ -91,7 +91,10 @@ namespace UEBabyPram::InsightFilter
 			// The whole name has to be matched, the same as the name of an event.
 			if (re2::RE2::FullMatch(thread_name, *query.thread_matcher))
 			{
+				// The thread is kept with both of its ids, the stack tree carries the thread id and the events which
+				// are not carried by the stack tree carry the system thread id.
 				query.thread_ids.push_back(id);
+				query.thread_system_ids.push_back(system_id);
 			}
 		}
 	}
@@ -272,6 +275,19 @@ namespace UEBabyPram::InsightFilter
 		return false;
 	}
 
+	bool EventQueryMapping::IsThreadMatched(ThreadSystemID thread_system_id) const
+	{
+		for (auto const& query : queries)
+		{
+			if (IsThreadMatched(query, thread_system_id))
+			{
+				return true;
+			}
+		}
+
+		return false;
+	}
+
 	bool EventQueryMapping::IsThreadMatched(Query const& query, ThreadID thread_id)
 	{
 		// A query which carries no thread condition counts every thread, so it keeps no thread id.
@@ -281,6 +297,17 @@ namespace UEBabyPram::InsightFilter
 		}
 
 		return std::find(query.thread_ids.begin(), query.thread_ids.end(), thread_id) != query.thread_ids.end();
+	}
+
+	bool EventQueryMapping::IsThreadMatched(Query const& query, ThreadSystemID thread_system_id)
+	{
+		// A query which carries no thread condition counts every thread, so it keeps no system thread id.
+		if (!query.thread_matcher)
+		{
+			return true;
+		}
+
+		return std::find(query.thread_system_ids.begin(), query.thread_system_ids.end(), thread_system_id) != query.thread_system_ids.end();
 	}
 
 	bool EventQueryMapping::IsTimeRangeOverlapped(Query const& query, Potato::Misc::IndexSpan<DurationSec> time_range)
