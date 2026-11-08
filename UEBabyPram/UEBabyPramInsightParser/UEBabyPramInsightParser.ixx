@@ -443,52 +443,26 @@ export namespace UEBabyPram::InsightParser
 		std::optional<ExcludeTimeStatis> GetExcludeTime(EventView view) const;
 		std::optional<ExcludeTimeStatis> GetExcludeTime(EventView view, ContextSwitchEventList const& list) const;
 
-		// The exclude time of the event, which is the time of the event which is not spent in its children, and the
-		// same time with the time which the thread spent out of the CPU removed. The statis of a time range is asked
-		// from the provider, so the view does not depend on the list or on the streamer of the context switch events:
-		// a provider is anything which answers the statis of a range with the removed context switch time and the
-		// switch count, ex: the list, or the listener of the streamer.
-		template<typename StatisProviderT>
-		std::optional<ExcludeTimeStatis> GetExcludeTime(EventView view, StatisProviderT const& statis_provider) const
+		// The statistic of the context switch events of one time range, which the provider of the
+		// exclude time answers for every range it is asked about.
+		struct ContextSwitchStatis
 		{
-			if (view)
-			{
-				DurationSec start_point = view.time_range.Begin();
+			// The time of the range with the time which the thread spent out of the CPU removed, i.e.
+			// the time which the thread really spent on the CPU in the range.
+			DurationSec removed_context_switch_time = DurationSec::zero();
+			// How many context switch events of the thread are in the range.
+			std::size_t switch_count = 0;
+		};
 
-				DurationSec exclude_time = DurationSec::zero();
-				DurationSec exclude_time_remove_context_switch = DurationSec::zero();
-				std::size_t context_switch_count = 0;
+		// The provider of the context switch statistic of a time range. The view does not depend on the
+		// list or on the streamer of the context switch events: a provider is anything which answers
+		// the statistic of a range, ex: the list, or the listener of the streamer.
+		using ContextSwitchStatisProvider = Potato::TMP::FunctionRef<ContextSwitchStatis(Potato::Misc::IndexSpan<DurationSec>)>;
 
-				std::size_t offset = view.index_range.Begin() + 1;
-				while (true)
-				{
-					auto child_event = FindNextEvent({}, { offset, view.index_range.End() });
-
-					if (!child_event)
-					{
-						assert(start_point <= view.time_range.End());
-						exclude_time += Potato::Misc::IndexSpan<DurationSec>{ start_point, view.time_range.End() }.Size();
-						auto statis = statis_provider(Potato::Misc::IndexSpan<DurationSec>{ start_point, view.time_range.End() });
-						assert(statis.removed_context_switch_time.count() >= 0.0);
-						exclude_time_remove_context_switch += statis.removed_context_switch_time;
-						context_switch_count += statis.switch_count;
-						return ExcludeTimeStatis{ exclude_time, exclude_time_remove_context_switch, context_switch_count };
-					}
-
-					assert(start_point <= child_event.time_range.Begin());
-					exclude_time += Potato::Misc::IndexSpan<DurationSec>{ start_point, child_event.time_range.Begin() }.Size();
-					auto statis = statis_provider(Potato::Misc::IndexSpan<DurationSec>{ start_point, child_event.time_range.Begin() });
-					assert(statis.removed_context_switch_time.count() >= 0.0);
-					exclude_time_remove_context_switch += statis.removed_context_switch_time;
-					context_switch_count += statis.switch_count;
-
-					start_point = child_event.time_range.End();
-
-					offset = child_event.index_range.End();
-				}
-			}
-			return std::nullopt;
-		}
+		// The exclude time of the event, which is the time of the event which is not spent in its
+		// children, and the same time with the time which the thread spent out of the CPU removed. The
+		// statis of a time range is asked from the provider.
+		std::optional<ExcludeTimeStatis> GetExcludeTime(EventView view, ContextSwitchStatisProvider statis_provider) const;
 
 		EventID GetTopEvent() const;
 		

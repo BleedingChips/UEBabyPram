@@ -22,6 +22,7 @@ namespace
 	//   chain      := elem ( '->' elem )*
 	//   elem       := '(' CaretReg ')'   // query only
 	//               | '[' CaretReg ']'   // query and statistics
+	//               | '(' '%' ')'        // any event, query only
 	//   timerange  := '[' TimePoint ',' TimePoint ']'
 	//   TimePoint  := Integer 'm' Decimal 's' | Decimal 's' | Integer 's'
 	//               | Integer 'm' Integer 's'
@@ -29,7 +30,7 @@ namespace
 	// The event chain is required, the time and the thread parts are optional and
 	// joined by '&', the 'Time' part may carry more than one time range. The lexical
 	// terminals carry the masks CaretReg[1], Integer[2] and Decimal[3], the reduce
-	// masks are: 1 Query, 2/3 Chain, 4/5 ChainElem, 6/7/8 QueryTail, 9/10 TimeTail,
+	// masks are: 1 Query, 2/3 Chain, 4/5/19 ChainElem, 6/7/8 QueryTail, 9/10 TimeTail,
 	// 11 ThreadCond, 12/13 TimeRanges, 14 TimeRange, 15/16/17/18 TimePoint.
 	static std::u8string_view ebnf_string = u8R"(
 CaretReg := '\^[^\^]+\^' : [1] ;
@@ -48,6 +49,7 @@ $ := <Query> ;
 
 <ChainElem> := '(' CaretReg ')' : [4] ;
             := '[' CaretReg ']' : [5] ;
+            := '(' '%' ')' : [19] ;
 
 <QueryTail> := '&' 'Time' '=' <TimeRanges> <TimeTail> : [6] ;
             := <ThreadCond> : [7] ;
@@ -226,6 +228,14 @@ namespace UEBabyPram::InsightFilter
 					return EventQuery::ChainElement{
 						EventQuery::ChainElement::Kind::QueryAndStatistic,
 						production[1].Consume<std::shared_ptr<re2::RE2>>()
+					};
+				}
+				case 19:
+				{
+					// The element matches any event, it carries no regular expression.
+					return EventQuery::ChainElement{
+						EventQuery::ChainElement::Kind::Any,
+						std::shared_ptr<re2::RE2>{}
 					};
 				}
 				case 6:

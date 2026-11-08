@@ -233,6 +233,13 @@ namespace UEBabyPram::InsightFilter
 		OutputLog<L"EventSearchParser Output:">(printer);
 
 		// The matcher is checked by the creator of the config, the parser never reports its error.
+		OutputLog<L"    (Event Regex: the regular expression of the search; Scanned Event: how many event specs are stored; Matched Event: how many event specs are matched; Matched Name: how many event names are matched)">(
+			printer
+		);
+		OutputLog<L"    (Name: one matched event name; Location: how many definition locations the name has; Event: how many event specs carry the name; File: the source file path at the time the package which produced the trace was built, the user has to convert it to the local working directory path by themselves; Line: the definition line in the source file)">(
+			printer
+		);
+
 		OutputLog<L"    Event Regex <{}>, Scanned Event <{}>, Matched Event <{}>, Matched Name <{}>">(
 			printer,
 			std::string_view{ matcher->pattern() },
@@ -254,6 +261,9 @@ namespace UEBabyPram::InsightFilter
 			for (std::size_t location_index = 0; location_index < statistic.locations.size(); ++location_index)
 			{
 				auto& location = statistic.locations[location_index];
+
+				// The recorded path is the source file path of the build machine which packaged the
+				// trace, it is printed as it is, the user converts it to the local path by themselves.
 				std::wstring_view file_view = location.file.empty()
 					? std::wstring_view{ L"<Unknow>" }
 					: std::wstring_view{ location.file };

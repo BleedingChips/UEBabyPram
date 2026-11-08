@@ -8,6 +8,7 @@ import UEBabyPramInsightFilterParser;
 import UEBabyPramInsightFilterEventFilter;
 import UEBabyPramInsightFilterEventQuery;
 import UEBabyPramInsightParser;
+import UEBabyPramInsightParserContextSwitchStreamer;
 import Potato;
 import std;
 
@@ -42,13 +43,15 @@ export namespace UEBabyPram::InsightFilter
 			// The text which the query is built from, it is only reported with the saved views.
 			std::u8string query_text;
 			// How many stack trees are kept at most, every stack tree is one copy, 0 for none.
-			std::size_t max_view_count = 20;
+			std::size_t max_view_count = 10;
 			std::pmr::memory_resource* resource = std::pmr::get_default_resource();
 		};
 
 		// One saved stack tree: the identity of the thread and a copy of the events of the whole stack
 		// tree. The view which the parser receives only points into the storage of the analysis, so the
-		// events are copied here, and the saved view can be reported after the analysis is done.
+		// events are copied here, and the saved view can be reported after the analysis is done. The
+		// listener collects the context switch events of the time range of the stack tree, so the time
+		// which the thread spent off the CPU is reported for the view and for every event of it.
 		struct StoredView
 		{
 			StoredView(std::pmr::memory_resource* resource = std::pmr::get_default_resource())
@@ -57,6 +60,7 @@ export namespace UEBabyPram::InsightFilter
 			ThreadID thread_id;
 			ThreadSystemID system_thread_id;
 			std::optional<std::size_t> frame_count;
+			std::shared_ptr<ContextSwitchStreamer::Listener> context_switch_listener;
 			std::pmr::vector<ThreadCPUEvent> events;
 		};
 
@@ -68,12 +72,15 @@ export namespace UEBabyPram::InsightFilter
 		virtual void OnCPUEventDiscovered(EventID id, std::wstring_view event_name, std::wstring_view file_name, std::size_t file_line) override;
 		virtual void OnCPUScopeEventDiscovered(EventID id, std::u8string_view event_name) override;
 		virtual void OnCPUStackTree(ThreadCPUEventView event_scope) override;
+		// The context switch events are streamed to the listeners of the saved stack trees.
+		virtual void ContextSwitchEvent(ThreadSystemID thread_id, std::size_t core_name, Potato::Misc::IndexSpan<DurationSec> duration) override;
 		virtual bool IsParserRequired(ParserRequireFlag flag) const override;
 		// Only the threads which the query counts are analyzed, a query which carries a thread
 		// condition only counts the threads which its matcher matched. The thread is known by its thread id and by
 		// its system thread id, so both of them are answered.
 		virtual bool IsThreadRequired(ThreadID thread_id) const override;
 		virtual bool IsThreadRequired(ThreadSystemID thread_system_id) const override;
+		virtual void AllAnalyzeDone() override;
 		// Report every saved stack tree with the events which it carries, the analysis has to be done
 		// before this is called.
 		bool PrintToLog(Potato::Log::LogPrinter& printer) override;
@@ -83,16 +90,17 @@ export namespace UEBabyPram::InsightFilter
 
 	protected:
 
-		// Report every saved stack tree with the events which it carries.
-		void PrintStoredViews(Potato::Log::LogPrinter& printer) const;
-
 		std::pmr::unsynchronized_pool_resource resource;
+		// The streamer of the context switch events, every saved stack tree creates a listener for its
+		// own time range, so the time which the thread spent off the CPU is available for the view and
+		// for every event of it.
+		ContextSwitchStreamer context_switch_streamer;
 		EventSpecManager events_manager;
 		// The query system which is built from Config::query, the ids of the events are resolved into
 		// it when they are discovered, so the stack tree is never matched by a name.
 		EventQueryMapping query_mapping;
 		std::pmr::vector<StoredView> stored_views;
 		std::u8string query_text;
-		std::size_t max_view_count = 20;
+		std::size_t max_view_count = 10;
 	};
 }

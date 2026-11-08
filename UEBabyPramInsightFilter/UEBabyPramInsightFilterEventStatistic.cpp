@@ -592,11 +592,12 @@ namespace UEBabyPram::InsightFilter
 		}
 
 		// The call context of every one of the top occurrences is reported after the top list as a call
-		// tree. The parents are the levels above the occurrence and the children are the levels below it,
-		// the occurrence itself is the last level of the parents and the first level of the children, and
-		// it is marked with '***[...]***', the other events are marked with '[...]' inside '<>'. Every
-		// level adds one '-' to the indentation, a '...' line stands for the levels which are omitted by
-		// the depth limit.
+		// tree which is drawn with box drawing characters. The parents are the levels above the
+		// occurrence and the children are the levels below it, the occurrence itself is the last level
+		// of the parents and the first level of the children, and it is marked with '***[...]***', the
+		// other events are marked with '[...]' inside '<>'. The levels are connected with the box
+		// drawing characters (U+251C, U+2514, U+2500 and U+2502), and a '...' line stands for the
+		// levels which are omitted by the depth limit.
 		std::size_t occurrence_index = 0;
 		for (auto const& occurrence : statistic.top_occurrences)
 		{
@@ -624,25 +625,43 @@ namespace UEBabyPram::InsightFilter
 				OutputLog<L"                    ...">(printer);
 			}
 
-			// The parents are stored from the outermost kept ancestor to the direct parent, and the
-			// current event is the last level of the parents.
-			std::wstring indent;
+			// The parents are stored from the outermost kept ancestor to the direct parent, so every
+			// level is the only child of the level above it, the current event is the last level.
+			std::wstring parent_prefix;
+			bool first_parent = true;
 			for (auto const& parent : occurrence.parent_events)
 			{
+				std::wstring line_prefix;
+				if (!first_parent)
+				{
+					line_prefix = parent_prefix + L"\u2514\u2500 ";
+				}
+
 				OutputLog<L"                    {}<{}>, D:<{:.3f}ms>, E:<{:.3f}ms>, CS:<{:.3f}ms>">(
 					printer,
-					indent,
+					line_prefix,
 					resolve_name(parent.event_id),
 					parent.duration.count() * 1000.0,
 					parent.exclude_time.count() * 1000.0,
 					parent.context_switch_time.count() * 1000.0
 				);
-				indent += L'-';
+
+				if (!first_parent)
+				{
+					parent_prefix += L"   ";
+				}
+				first_parent = false;
+			}
+
+			std::wstring occurrence_prefix;
+			if (!occurrence.parent_events.empty())
+			{
+				occurrence_prefix = parent_prefix + L"\u2514\u2500 ";
 			}
 
 			OutputLog<L"                    {}***[{}]***, D:<{:.3f}ms>, E:<{:.3f}ms>, CS:<{:.3f}ms>">(
 				printer,
-				indent,
+				occurrence_prefix,
 				event_name,
 				occurrence.time_range.Size().count() * 1000.0,
 				occurrence.exclude_time.count() * 1000.0,
@@ -652,7 +671,7 @@ namespace UEBabyPram::InsightFilter
 			OutputLog<L"                Children:">(printer);
 
 			// The first level of the children is the current event itself, it is the root of the
-			// children tree and it is printed without the '-' indentation.
+			// children tree and it is printed without any connector.
 			OutputLog<L"                    ***[{}]***, D:<{:.3f}ms>, E:<{:.3f}ms>, CS:<{:.3f}ms>">(
 				printer,
 				event_name,
@@ -661,18 +680,52 @@ namespace UEBabyPram::InsightFilter
 				occurrence.context_switch_time.count() * 1000.0
 			);
 
-			for (auto const& child : occurrence.child_events)
+			// The children are stored in the call order, so the last child of every level is found by
+			// looking for the next sibling before the next level which is above it. The levels which
+			// have a next sibling are followed by a vertical bar, the others by spaces.
+			std::vector<bool> sibling_is_last;
+			for (std::size_t child_index = 0; child_index < occurrence.child_events.size(); ++child_index)
 			{
-				std::wstring child_indent(child.depth - occurrence.depth, L'-');
+				auto const& child = occurrence.child_events[child_index];
+				std::size_t depth = child.depth - occurrence.depth;
+
+				bool is_last = true;
+				for (std::size_t next_index = child_index + 1; next_index < occurrence.child_events.size(); ++next_index)
+				{
+					std::size_t next_depth = occurrence.child_events[next_index].depth - occurrence.depth;
+					if (next_depth < depth)
+					{
+						break;
+					}
+					if (next_depth == depth)
+					{
+						is_last = false;
+						break;
+					}
+				}
+
+				if (sibling_is_last.size() <= depth)
+				{
+					sibling_is_last.resize(depth + 1, false);
+				}
+				sibling_is_last[depth] = is_last;
+
+				std::wstring line_prefix;
+				for (std::size_t level = 1; level < depth; ++level)
+				{
+					line_prefix += sibling_is_last[level] ? L"   " : L"\u2502  ";
+				}
+				line_prefix += is_last ? L"\u2514\u2500 " : L"\u251C\u2500 ";
+
 				if (child.is_ellipsis)
 				{
-					OutputLog<L"                    {}...">(printer, child_indent);
+					OutputLog<L"                    {}...">(printer, line_prefix);
 					continue;
 				}
 
 				OutputLog<L"                    {}<{}>, D:<{:.3f}ms>, E:<{:.3f}ms>, CS:<{:.3f}ms>">(
 					printer,
-					child_indent,
+					line_prefix,
 					resolve_name(child.event_id),
 					child.duration.count() * 1000.0,
 					child.exclude_time.count() * 1000.0,
@@ -694,7 +747,7 @@ namespace UEBabyPram::InsightFilter
 			printer
 		);
 
-		OutputLog<L"    (The call context of every top occurrence is reported after the top list, every one of them is introduced with its index and time range: the parents are the levels above the occurrence and the last one of them is the occurrence itself, the children section starts with the occurrence itself and the levels below it follow, the occurrence which is being reported is wrapped with '***[...]***' and the other events are wrapped with '<...>', every level adds one '-' to the indentation, a '...' stands for the levels which the depth limit omits, and D, E and CS are the ones of every event in that occurrence)">(
+		OutputLog<L"    (The call context of every top occurrence is reported after the top list, every one of them is introduced with its index and time range: the parents are the levels above the occurrence and the last one of them is the occurrence itself, the children section starts with the occurrence itself and the levels below it follow, the occurrence which is being reported is wrapped with '***[...]***' and the other events are wrapped with '<...>', the levels are connected with box drawing characters, a '...' stands for the levels which the depth limit omits, and D, E and CS are the ones of every event in that occurrence)">(
 			printer
 		);
 
@@ -714,7 +767,14 @@ namespace UEBabyPram::InsightFilter
 
 				bool is_statistic = node.kind == EventQuery::ChainElement::Kind::QueryAndStatistic;
 				header += is_statistic ? L"[" : L"(";
-				header += EncodePattern(*node.matcher);
+				if (node.matcher)
+				{
+					header += EncodePattern(*node.matcher);
+				}
+				else {
+					// The element matches any event, it carries no regular expression.
+					header += L"%";
+				}
 				header += is_statistic ? L"]" : L")";
 			}
 

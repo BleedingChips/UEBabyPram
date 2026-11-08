@@ -156,9 +156,10 @@ namespace UEBabyPram::InsightFilter
 					auto context_switch_provider = [this, frame_index](Potato::Misc::IndexSpan<DurationSec> range) {
 						if (auto& listener = event_records[frame_index].context_switch_listener; listener)
 						{
-							return listener->GetContextSwitchStatis(range);
+							auto statis = listener->GetContextSwitchStatis(range);
+							return ThreadCPUEventView::ContextSwitchStatis{ statis.removed_context_switch_time, statis.switch_count };
 						}
-						return ContextSwitchStreamer::Listener::Statis{ range.Size(), 0 };
+						return ThreadCPUEventView::ContextSwitchStatis{ range.Size(), 0 };
 					};
 
 					std::size_t index_offset = 0;

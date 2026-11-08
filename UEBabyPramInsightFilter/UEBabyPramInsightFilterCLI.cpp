@@ -11,6 +11,7 @@ import UEBabyPramInsightFilterEventFilter;
 import UEBabyPramInsightFilterEventSearch;
 import UEBabyPramInsightFilterEventStatistic;
 import UEBabyPramInsightFilterEventDetail;
+import UEBabyPramInsightFilterFlameGraph;
 import UEBabyPramInsightFilterThreadSearch;
 import UEBabyPramInsightParser;
 import Potato;
@@ -35,6 +36,7 @@ Usage:
   UEBabyPramInsightFilter -f <path of the .utrace file> -r <regex> [options]
   UEBabyPramInsightFilter -f <path of the .utrace file> -es <query> [options]
   UEBabyPramInsightFilter -f <path of the .utrace file> -ed <query> [options]
+  UEBabyPramInsightFilter -f <path of the .utrace file> -ef <query> [options]
   UEBabyPramInsightFilter -f <path of the .utrace file> -ts <regex> [options]
 
 Options:
@@ -47,12 +49,15 @@ Options:
       ex: -r "FEngineLoop::.*" or -r ".*Tick.*".
       When it is set, every event whose name is matched is reported with the file path and
       the line where it is defined, otherwise the GameThread timing analysis is reported.
+      The file path is the source file path at the time the package which produced the trace
+      was built, it points to the build machine, so convert it to the local working directory
+      path by yourself.
       The same regex may match several event names, the matched events are grouped by the
       event name, every name is counted separately.
       The same event name may be defined in several places, so every location is reported.
       The event of the CPU scope logger carries no location, it is reported with
       an unknown file and line 0.
-      -r, -es, -ed and -ts can not be used at the same time.
+      -r, -es, -ed, -ef and -ts can not be used at the same time.
 
   -es, --event_stat <query>
       Query of the events whose timing should be collected, the grammar is:
@@ -60,9 +65,11 @@ Options:
         chain     := elem ( '->' elem )*
         elem      := (^Regex^)    the event is only matched as a part of the call chain
                   |  [^Regex^]    the event is matched and its timing is collected
+                  |  (%)          any event, only matched as a part of the call chain
         TimePoint := Integer 'm' Decimal 's' | Decimal 's' | Integer 's' | Integer 'm' Integer 's'
       Ex: -es "(^FEngineLoop::Tick^)->[^.*TickActor.*^]"
           -es "[^UWorld::Tick^]&Time=[0s,10s]&Thread=(.*GameThread.*)"
+          -es "(%)->[^UWorld::Tick^]"
       Every regex is the re2 syntax and it has to match the whole event name. The chain is matched
       on the call stack: every element has to be a descendant of the previous one and the elements
       are matched in the order of the call, but the events which are not a part of the chain may be
@@ -74,13 +81,19 @@ Options:
       collected event, and the thread name has to match the whole thread name.
       -es can be given more than once, every query keeps its own statistics, so the same event name
       may be reported several times, once per query which collects it.
-      -r, -es, -ed and -ts can not be used at the same time.
+      -r, -es, -ed, -ef and -ts can not be used at the same time.
 
   -ed, --event_detail <query>
       Query of the stack trees which should be saved and reported, the grammar is the same as -es.
       Every stack tree whose thread, time and call chain are matched by the query is copied, at most
       -mvc stack trees are kept, and the copies are reported when the whole trace is analyzed.
-      -r, -es, -ed and -ts can not be used at the same time.
+      -r, -es, -ed, -ef and -ts can not be used at the same time.
+
+  -ef, --event_flame_graph <query>
+      Query of the stack trees which should be aggregated into a flame graph, the grammar is the same
+      as -es. The call paths of every matched stack tree are merged, and the time of every call path
+      is reported with its percentage of the whole matched time.
+      -r, -es, -ed, -ef and -ts can not be used at the same time.
 
   -ts, --thread_search <regex>
       Regular expression of the thread name, in the re2 (RE2) syntax, the same syntax as -r.
@@ -88,7 +101,7 @@ Options:
       When it is set, every thread whose name is matched is reported with the thread id and
       the system thread id.
       An empty regex (ex: -ts "") matches every thread of the trace.
-      -r, -es, -ed and -ts can not be used at the same time.
+      -r, -es, -ed, -ef and -ts can not be used at the same time.
 
   -mlc, --max_location_count <count>
       How many matched event locations should be reported with -r, 0 for no limit, default is 256.
@@ -102,7 +115,7 @@ Options:
       default is 6.
 
   -mvc, --max_view_count <count>
-      How many stack trees should be saved and reported with -ed, default is 20.
+      How many stack trees should be saved and reported with -ed, default is 10.
 
   -mrf, --max_record_frame <count>
       How many of the longest game frames should be recorded and reported, default is 10.
@@ -125,10 +138,12 @@ Options:
 		EventSearchParser::Config search_config;
 		EventStatisticParser::Config statistic_config;
 		EventDetailParser::Config detail_config;
+		EventFlameGraphParser::Config flame_config;
 		ThreadSearchParser::Config thread_config;
 		bool search_event = false;
 		bool statistic_event = false;
 		bool detail_event = false;
+		bool flame_event = false;
 		bool search_thread = false;
 		std::u8string path_buffer;
 
@@ -271,6 +286,37 @@ Options:
 				}
 				else {
 					Log::Log<CommandLineLogCategory, Log::LogLevel::Error, L"Unsupport command -ed --event_detail, use -h for detailed help">();
+					return -1;
+				}
+			}
+			else if (argv_string == "-ef" || argv_string == "--event_flame_graph")
+			{
+				if (i + 1 < argc)
+				{
+					// The query is built from the argument, and the error of an unacceptable query is
+					// reported here, so the parser only receives a query which is ready to be analyzed.
+					std::u8string query_text;
+					Encode::STDInputEncoder<char8_t>::EncodeTo(argv[i + 1], std::back_insert_iterator{ query_text });
+					auto query_result = ParseEventQuery(query_text);
+					if (auto error = std::get_if<std::u8string>(&query_result); error != nullptr)
+					{
+						std::wstring message;
+						Encode::UnicodeEncoder<char8_t, wchar_t>::EncodeTo(*error, std::back_inserter(message));
+						Log::Log<CommandLineLogCategory, Log::LogLevel::Error, L"-ef --event_flame_graph <query> : <{}>, use -h for detailed help">(
+							message
+						);
+						return -1;
+					}
+
+					// The flame graph parser aggregates the stack trees which the query matches, only
+					// one query is accepted by it, and the text is reported with the graph.
+					flame_config.query = std::move(std::get<EventQuery>(query_result));
+					flame_config.query_text = std::move(query_text);
+					flame_event = true;
+					++i;
+				}
+				else {
+					Log::Log<CommandLineLogCategory, Log::LogLevel::Error, L"Unsupport command -ef --event_flame_graph, use -h for detailed help">();
 					return -1;
 				}
 			}
@@ -448,15 +494,25 @@ Options:
 			return -1;
 		}
 
-		if (search_thread && (search_event || statistic_event || detail_event))
+		if (flame_event && (search_event || statistic_event || detail_event))
 		{
-			Log::Log<CommandLineLogCategory, Log::LogLevel::Error, L"-ts --thread_search can not be used with -r --regex, -es --event_stat or -ed --event_detail, use -h for detailed help">();
+			Log::Log<CommandLineLogCategory, Log::LogLevel::Error, L"-ef --event_flame_graph can not be used with -r --regex, -es --event_stat or -ed --event_detail, use -h for detailed help">();
+			return -1;
+		}
+
+		if (search_thread && (search_event || statistic_event || detail_event || flame_event))
+		{
+			Log::Log<CommandLineLogCategory, Log::LogLevel::Error, L"-ts --thread_search can not be used with -r --regex, -es --event_stat, -ed --event_detail or -ef --event_flame_graph, use -h for detailed help">();
 			return -1;
 		}
 
 		if (search_thread)
 		{
 			setting.parser = std::make_unique<ThreadSearchParser>(std::move(thread_config));
+		}
+		else if (flame_event)
+		{
+			setting.parser = std::make_unique<EventFlameGraphParser>(std::move(flame_config));
 		}
 		else if (detail_event)
 		{

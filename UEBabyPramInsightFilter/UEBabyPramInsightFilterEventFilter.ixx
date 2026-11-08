@@ -22,7 +22,7 @@ export namespace UEBabyPram::InsightFilter
 	// GetFilterEbnf():
 	//   chain [ '&' Time '=' [TimePoint, TimePoint]+ ] [ '&' Thread '=' (^Regex^) ]
 	// Every chain element is (^Regex^) if the event is only matched as a part of the call
-	// chain, or [^Regex^] if its timing is also accumulated.
+	// chain, [^Regex^] if its timing is also accumulated, or (%) if any event is matched.
 	struct EventQuery
 	{
 		// One element of the event call chain.
@@ -32,13 +32,17 @@ export namespace UEBabyPram::InsightFilter
 			{
 				// (^Regex^): the event is only matched as a part of the call chain.
 				QueryOnly,
+				// (%): any event is matched as a part of the call chain, it carries no regular
+				// expression and it is never reported.
+				Any,
 				// [^Regex^]: the event is matched and its timing is accumulated.
 				QueryAndStatistic,
 			};
 
 			Kind kind = Kind::QueryOnly;
 			// The regular expression of the event name, it is compiled from the text between
-			// the '^' delimiters and matches the whole event name.
+			// the '^' delimiters and matches the whole event name. It is empty when the kind is
+			// Any, because such an element matches every event.
 			std::shared_ptr<re2::RE2> matcher;
 		};
 

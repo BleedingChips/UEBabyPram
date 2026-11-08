@@ -32,7 +32,7 @@ namespace UEBabyPram::InsightFilter
 				auto& node = target.nodes.emplace_back(&resource);
 				node.kind = element.kind;
 				node.matcher = std::move(element.matcher);
-				assert(node.matcher);
+				assert(node.matcher || node.kind == EventQuery::ChainElement::Kind::Any);
 			}
 		}
 	}
@@ -148,11 +148,12 @@ namespace UEBabyPram::InsightFilter
 			}
 
 			// An element whose regular expression matched no event never completes the chain, so the chain
-			// of the query can not be matched in this tree at all.
+			// of the query can not be matched in this tree at all. The element which matches any event
+			// never carries an id, it is always resolvable.
 			bool chain_resolvable = true;
 			for (auto const& node : query.nodes)
 			{
-				if (node.event_ids.empty())
+				if (node.kind != EventQuery::ChainElement::Kind::Any && node.event_ids.empty())
 				{
 					chain_resolvable = false;
 					break;
@@ -168,7 +169,7 @@ namespace UEBabyPram::InsightFilter
 
 			// The first candidate of the first element of the chain, its next candidate is searched after
 			// the whole subtree of this one, which is done by the backtrack below.
-			auto first_candidate = event_scope.FindChildEvent(query.nodes[0].event_ids);
+			auto first_candidate = event_scope.FindChildEvent(query.nodes[0].GetEventIDs());
 			if (first_candidate)
 			{
 				finded_stack.emplace_back(FindedNodeStack{ first_candidate, 0, query.nodes[0].kind, false });
@@ -184,7 +185,7 @@ namespace UEBabyPram::InsightFilter
 					// The candidate of the next element is searched inside the subtree of the element before
 					// it, so the events which are not a part of the chain may be between them.
 					auto const& next_node = query.nodes[top.node_index + 1];
-					auto child_candidate = event_scope.FindChildEvent(next_node.event_ids, top.event_view);
+					auto child_candidate = event_scope.FindChildEvent(next_node.GetEventIDs(), top.event_view);
 					if (child_candidate)
 					{
 						finded_stack.emplace_back(FindedNodeStack{
@@ -242,7 +243,7 @@ namespace UEBabyPram::InsightFilter
 						: finded_stack.back().event_view.index_range.End();
 
 					auto next_candidate = event_scope.FindNextEvent(
-						query.nodes[left_element.node_index].event_ids,
+						query.nodes[left_element.node_index].GetEventIDs(),
 						{ left_element.event_view.index_range.End(), search_end }
 					);
 

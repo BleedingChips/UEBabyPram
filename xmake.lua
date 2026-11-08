@@ -85,14 +85,20 @@ if os.scriptdir() == os.projectdir() then
             os.tryrm(skilldir)
             os.cp(path.join(template, "*"), skilldir)
 
+            -- The target is installed instead of copying the executable by hand, so the runtime
+            -- libraries which the executable depends on (ex: the package DLLs) are deployed as well.
+            local installdir = path.join(skilldir, ".install")
+
             print("[2/3] Configuring and building UEBabyPramLogFilter (release)...")
             os.exec("xmake f -m release -c")
             os.exec("xmake build UEBabyPramLogFilter")
+            os.tryrm(installdir)
+            os.exec("xmake install -o \"%s\" UEBabyPramLogFilter", installdir)
 
-            print("[3/3] Copying executable to %s", scriptsdir)
+            print("[3/3] Copying the installed files to %s", scriptsdir)
             os.mkdir(scriptsdir)
-            local exe = path.join(os.projectdir(), "build", "windows", "x64", "release", "UEBabyPramLogFilter.exe")
-            os.cp(exe, scriptsdir)
+            os.cp(path.join(installdir, "bin", "*"), scriptsdir)
+            os.tryrm(installdir)
 
             cprint("${bright green}Skill built successfully at %s", skilldir)
         end)
@@ -105,6 +111,45 @@ if os.scriptdir() == os.projectdir() then
         add_deps("UEBabyPramInsightParser")
         add_packages("re2")
     target_end()
+
+    task("build-insight-filter-skill")
+        set_menu {
+            usage       = "xmake build-insight-filter-skill [options]",
+            description = "Build UEBabyPramInsightFilter in release mode and package as a skill directory.",
+            options     = {
+                {nil, "output", "kv", nil, "Output directory for the skill (default: projectdir/Skills)"}
+            }
+        }
+        on_run(function ()
+            import("core.base.option")
+
+            local outdir   = option.get("output") or path.join(os.projectdir(), "Skills")
+            local skilldir = path.join(outdir, "uebabypram-insight-filter")
+            local scriptsdir = path.join(skilldir, "scripts")
+            local template = path.join(os.projectdir(), "UEBabyPramInsightFilter", "skill-template", "uebabypram-insight-filter")
+
+            print("[1/3] Copying skill-template to %s", skilldir)
+            os.tryrm(skilldir)
+            os.mkdir(skilldir)
+            os.cp(path.join(template, "*"), skilldir)
+
+            -- The target is installed instead of copying the executable by hand, so the runtime
+            -- libraries which the executable depends on (ex: the package DLLs) are deployed as well.
+            local installdir = path.join(skilldir, ".install")
+
+            print("[2/3] Configuring and building UEBabyPramInsightFilter (release)...")
+            os.exec("xmake f -m release -c")
+            os.exec("xmake build UEBabyPramInsightFilter")
+            os.tryrm(installdir)
+            os.exec("xmake install -o \"%s\" UEBabyPramInsightFilter", installdir)
+
+            print("[3/3] Copying the installed files to %s", scriptsdir)
+            os.mkdir(scriptsdir)
+            os.cp(path.join(installdir, "bin", "*"), scriptsdir)
+            os.tryrm(installdir)
+
+            cprint("${bright green}Skill built successfully at %s", skilldir)
+        end)
 end
 
 

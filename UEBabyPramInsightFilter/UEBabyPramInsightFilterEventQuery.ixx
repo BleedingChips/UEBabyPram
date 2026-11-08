@@ -63,13 +63,24 @@ export namespace UEBabyPram::InsightFilter
 				: event_ids(resource) {}
 
 			EventQuery::ChainElement::Kind kind = EventQuery::ChainElement::Kind::QueryOnly;
-			// The regular expression of the element, it is the one which the query is built with.
+			// The regular expression of the element, it is the one which the query is built with. It
+			// is empty when the element matches any event.
 			std::shared_ptr<re2::RE2> matcher;
 			// The ids of the events whose name is fully matched by the regular expression, they are
 			// appended when the events are discovered, so the order is the discovery order. The
 			// element which is only a part of the call chain keeps them as well, they are what the
 			// chain is matched by, and an element whose list stays empty never completes a chain.
 			std::pmr::vector<EventID> event_ids;
+
+			// The ids which the element is matched by, empty when the element matches any event.
+			std::span<EventID const> GetEventIDs() const
+			{
+				if (kind == EventQuery::ChainElement::Kind::Any)
+				{
+					return {};
+				}
+				return std::span<EventID const>{ event_ids };
+			}
 		};
 
 		// The query system of one EventQuery.
