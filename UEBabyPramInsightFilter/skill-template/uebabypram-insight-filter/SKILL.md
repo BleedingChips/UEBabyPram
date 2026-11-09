@@ -48,14 +48,15 @@ UEBabyPramInsightFilter 是一个用于分析 Unreal Engine（UE4/UE5）`.utrace
 | 选项 | 说明 |
 |------|------|
 | `-f, --file <path>` | 必填，`.utrace` 文件路径 |
+| `-o, --output <path>` | 报告写入的文件（存在则清空重建），不给则写标准输出 |
 | `-h, --help` | 打印帮助 |
 | `-mlc, --max_location_count <count>` | `-r` 最多报告多少个事件位置，0 表示不限，默认 256 |
 | `-tx, --top_count <count>` | `-es` 每个事件名保留的 Top N 最长 occurrence，默认 5 |
 | `-mc, --max_context_depth <depth>` | `-es` 调用上下文相对 occurrence 的最大深度差，默认 6 |
-| `-mvc, --max_view_count <count>` | `-ed` 最多保存多少个 stack tree，默认 10 |
+| `-mvc, --max_view_count <count>` | `-ed` 保留最长的多少个 stack tree，默认 10 |
 | `-mrf, --max_record_frame <count>` | 默认模式记录的最长帧数量，默认 10 |
 | `-metc, --max_exclude_time_count <count>` | 每个 Top 列表保留的最长 Exclude Time 事件数量，默认 30 |
-| `-sr, --sampling_ratio <ratio>` | 默认模式采样的时间比例，`[0.0, 1.0]`，默认 0.8 |
+| `-sr, --sampling_ratio <ratio>` | 默认模式采样的时间比例，`[0.0, 1.0]`，默认 1.0（分析完整时间范围） |
 
 ---
 
@@ -76,14 +77,14 @@ TimePoint := Integer 'm' Decimal 's' | Decimal 's' | Integer 's' | Integer 'm' I
 - 调用链按调用顺序匹配，后一个元素必须是前一个元素的后代（中间可以隔着其他事件）；
 - 只有 `[...]` 包裹的元素会被统计/保存，`(...)` 与 `(%)` 只用于补全调用链；
 - `Time` 条件只过滤被统计的 occurrence，时间范围写成 `[begin, end]`，如 `&Time=[0s,10s]`；
-- `Thread` 条件匹配完整线程名，如 `&Thread=(.*GameThread.*)`；
+- `Thread` 条件匹配完整线程名，如 `&Thread=(^.*GameThread.*^)`；
 - `-es` 可以重复给多个 query，每个 query 独立统计。
 
 示例：
 
 ```text
 (^FEngineLoop::Tick^)->[^.*TickActor.*^]
-[^UWorld::Tick^]&Time=[0s,10s]&Thread=(.*GameThread.*)
+[^UWorld::Tick^]&Time=[0s,10s]&Thread=(^.*GameThread.*^)
 (%)->[^UWorld::Tick^]
 ```
 
@@ -171,7 +172,7 @@ EventFlameGraphParser Output:
 ### 4. 统计指定时间与线程内的 UWorld::Tick
 
 ```powershell
-& ".\scripts\UEBabyPramInsightFilter.exe" -f "Capture.utrace" -es "[^UWorld::Tick^]&Time=[0s,10s]&Thread=(.*GameThread.*)"
+& ".\scripts\UEBabyPramInsightFilter.exe" -f "Capture.utrace" -es "[^UWorld::Tick^]&Time=[0s,10s]&Thread=(^.*GameThread.*^)"
 ```
 
 ### 5. 保存并打印 UWorld::Tick 的详细堆栈（最多 5 个）
@@ -199,7 +200,10 @@ EventFlameGraphParser Output:
 1. `-r`、`-es`、`-ed`、`-ef`、`-ts` 互斥，只能选一个。
 2. 事件名与线程名正则必须匹配完整名称。
 3. `-es` 中只有 `[...]` 元素会被统计，`(...)` 与 `(%)` 仅补全调用链。
-4. `-es` 的 `Time` 条件按 occurrence 的开始时间过滤，不影响补全调用链的事件。
-5. `-ed` 的 stack tree 数量由 `-mvc` 限制，默认 10。
+4. `-es` 的 `Time` 条件按被统计事件**占用的时间范围**与查询时间范围是否相交过滤（只贴边不算相交），不影响补全调用链的事件。
+5. `-ed` 保存的是**最长的 N 个** stack tree，由 `-mvc` 限制（默认 10）；满了以后更长的会顶掉最短的那个。
 6. `-ef` 会聚合所有匹配的 stack tree，没有数量限制。
 7. 路径含空格时使用双引号包裹。
+8. `.utrace` 的开头与结尾是触发保存 trace 的时刻，保存本身会进入这些帧的耗时，所以这两端的数据不准；`-sr` 取小于 1.0 时只分析中间部分以避开两端（默认 1.0 分析完整范围）。
+9. `-r`、`-es`、`-ed`、`-ef` 的筛选范围要尽量缩小：范围太大时会输出大量信息，既慢又难以阅读。
+10. 报告默认写到标准输出；用 `-o <path>` 可写入文件（文件会被清空重建），文件内容是 UTF-8 纯文本。

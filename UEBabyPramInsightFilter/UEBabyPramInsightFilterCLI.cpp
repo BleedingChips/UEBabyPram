@@ -25,6 +25,9 @@ namespace UEBabyPram::InsightFilter
 	{
 		void PrintGeneralHelp()
 		{
+			// The help text is longer than the limit of the compile time string template argument (8192 characters),
+			// so it is printed in parts: the first part carries the log header and the parts which follow only
+			// continue the text, the newline which a part ends with is the one which the log appends by itself.
 			Log::Log<CommandLineLogCategory, Log::LogLevel::Display, LR"HELP(
 UEBabyPramInsightFilter, report the GameThread timing of an unreal insight .utrace file,
 search the events of the trace by a regular expression of the event name, report the
@@ -43,6 +46,10 @@ Options:
   -f, --file <path>
       Path of the unreal insight .utrace file which should be analyzed. Required.
 
+  -o, --output <path>
+      Path of the file which the report is written into, the file is created and its previous content is
+      emptied. When it is not given, the report is written into the standard output.
+
   -r, --regex <regex>
       Regular expression of the event name, in the re2 (RE2) syntax.
       The expression has to match the whole event name,
@@ -57,9 +64,12 @@ Options:
       The same event name may be defined in several places, so every location is reported.
       The event of the CPU scope logger carries no location, it is reported with
       an unknown file and line 0.
+      Narrow the filter as much as possible: a filter which is too wide reports a very large
+      amount of information, which is slow to print and hard to read.
       -r, -es, -ed, -ef and -ts can not be used at the same time.
+)HELP">();
 
-  -es, --event_stat <query>
+			Log::LogTo<Log::DefaultLogFormatter, LR"HELP(  -es, --event_stat <query>
       Query of the events whose timing should be collected, the grammar is:
         chain [ '&' 'Time' '=' [TimePoint, TimePoint]+ ] [ '&' 'Thread' '=' (^Regex^) ]
         chain     := elem ( '->' elem )*
@@ -68,31 +78,46 @@ Options:
                   |  (%)          any event, only matched as a part of the call chain
         TimePoint := Integer 'm' Decimal 's' | Decimal 's' | Integer 's' | Integer 'm' Integer 's'
       Ex: -es "(^FEngineLoop::Tick^)->[^.*TickActor.*^]"
-          -es "[^UWorld::Tick^]&Time=[0s,10s]&Thread=(.*GameThread.*)"
+          -es "[^UWorld::Tick^]&Time=[0s,10s]&Thread=(^.*GameThread.*^)"
           -es "(%)->[^UWorld::Tick^]"
-      Every regex is the re2 syntax and it has to match the whole event name. The chain is matched
-      on the call stack: every element has to be a descendant of the previous one and the elements
-      are matched in the order of the call, but the events which are not a part of the chain may be
-      between them. Only the elements which are surrounded by '[' and ']' are collected, one
-      statistic per event name, and the same name is only collected by the topmost of them, so one
-      occurrence is never counted twice by one query.
+      Every regex is the re2 syntax and it has to match the whole event name. The element which
+      matches any event, (%), is much more efficient than a regular expression which matches every
+      name, ex: (^.*^): the element carries no expression at all, so no name is ever matched against
+      one, while the expression has to be tested against the name of every event.
+      The chain is matched on the call stack: every element has to be a descendant of the previous
+      one and the elements are matched in the order of the call, but the events which are not a part
+      of the chain may be between them. Only the elements which are surrounded by '[' and ']' are
+      collected, one statistic per event name, and the same name is only collected by the topmost of
+      them, so one occurrence is never counted twice by one query.
       The Time and the Thread conditions only filter the collected events, the events which complete
-      the call chain are not filtered by them. The time is matched against the beginning of the
-      collected event, and the thread name has to match the whole thread name.
+      the call chain are not filtered by them. A collected event is selected by the Time condition
+      when the time range which the event occupies overlaps one of the ranges of the query: an event
+      which is entirely before a range, or entirely after it, or which only touches its end, is not
+      selected. The thread name has to match the whole thread name.
       -es can be given more than once, every query keeps its own statistics, so the same event name
       may be reported several times, once per query which collects it.
+      Narrow the filter as much as possible: a filter which is too wide reports a very large
+      amount of information, which is slow to print and hard to read.
       -r, -es, -ed, -ef and -ts can not be used at the same time.
+)HELP">(*Log::GetSTDOutPrinter());
 
-  -ed, --event_detail <query>
+			Log::LogTo<Log::DefaultLogFormatter, LR"HELP(  -ed, --event_detail <query>
       Query of the stack trees which should be saved and reported, the grammar is the same as -es.
-      Every stack tree whose thread, time and call chain are matched by the query is copied, at most
-      -mvc stack trees are kept, and the copies are reported when the whole trace is analyzed.
+      Every stack tree whose thread, time and call chain are matched by the query is copied, the
+      -mvc longest ones are kept, and the copies are reported when the whole trace is analyzed. A
+      stack tree is only kept while the kept ones are fewer than -mvc, or when it is longer than the
+      shortest of them, which is dropped for it, so the count is the count of the longest calls, not
+      the count of the calls which are matched first.
+      Narrow the filter as much as possible: a filter which is too wide reports a very large
+      amount of information, which is slow to print and hard to read.
       -r, -es, -ed, -ef and -ts can not be used at the same time.
 
   -ef, --event_flame_graph <query>
       Query of the stack trees which should be aggregated into a flame graph, the grammar is the same
       as -es. The call paths of every matched stack tree are merged, and the time of every call path
       is reported with its percentage of the whole matched time.
+      Narrow the filter as much as possible: a filter which is too wide reports a very large
+      amount of information, which is slow to print and hard to read.
       -r, -es, -ed, -ef and -ts can not be used at the same time.
 
   -ts, --thread_search <regex>
@@ -102,8 +127,9 @@ Options:
       the system thread id.
       An empty regex (ex: -ts "") matches every thread of the trace.
       -r, -es, -ed, -ef and -ts can not be used at the same time.
+)HELP">(*Log::GetSTDOutPrinter());
 
-  -mlc, --max_location_count <count>
+			Log::LogTo<Log::DefaultLogFormatter, LR"HELP(  -mlc, --max_location_count <count>
       How many matched event locations should be reported with -r, 0 for no limit, default is 256.
 
   -tx, --top_count <count>
@@ -115,7 +141,9 @@ Options:
       default is 6.
 
   -mvc, --max_view_count <count>
-      How many stack trees should be saved and reported with -ed, default is 10.
+      How many of the longest stack trees should be saved and reported with -ed, default is 10. The
+      stack tree which is kept is dropped for a longer one when the count is reached, so the saved
+      ones are the longest calls which the query matches.
 
   -mrf, --max_record_frame <count>
       How many of the longest game frames should be recorded and reported, default is 10.
@@ -124,11 +152,16 @@ Options:
       How many of the longest exclude time events should be kept in every top list, default is 30.
 
   -sr, --sampling_ratio <ratio>
-      Sampling ratio of the analyzed time range, a value in [0.0, 1.0], default is 0.8.
+      Sampling ratio of the analyzed time range, a value in [0.0, 1.0], default is 1.0, which
+      analyzes the whole time range. The beginning and the end of the .utrace are the time when the
+      trace is saved, which is triggered at the start and at the end of the capture, so the frames
+      there take the saving into the timing and their data is not accurate; a ratio below 1.0 only
+      analyzes the middle of the time range and leaves both ends out, ex: 0.8 analyzes the middle
+      80% of the range.
 
   -h, --help
       Print this help.
-)HELP">();
+)HELP">(*Log::GetSTDOutPrinter());
 		}
 	}
 
@@ -176,6 +209,20 @@ Options:
 				}
 				else {
 					Log::Log<CommandLineLogCategory, Log::LogLevel::Error, L"Unsupport command -f --file, use -h for detailed help">();
+					return -1;
+				}
+			}
+			else if (argv_string == "-o" || argv_string == "--output")
+			{
+				if (i + 1 < argc)
+				{
+					path_buffer.clear();
+					Encode::STDInputEncoder<char8_t>::EncodeTo(argv[i + 1], std::back_insert_iterator{ path_buffer });
+					setting.output_path = std::filesystem::path{ path_buffer };
+					++i;
+				}
+				else {
+					Log::Log<CommandLineLogCategory, Log::LogLevel::Error, L"Unsupport command -o --output, use -h for detailed help">();
 					return -1;
 				}
 			}

@@ -1,6 +1,7 @@
 module;
 
 #include <cassert>
+#include <compare>
 
 module UEBabyPramInsightFilterEventDetail;
 
@@ -14,6 +15,26 @@ import std;
 
 namespace UEBabyPram::InsightFilter
 {
+	namespace
+	{
+		// Whether the two time ranges have a common time, the ranges which only touch each other at their end are not
+		// overlapped.
+		bool IsTimeRangeOverlapped(Potato::Misc::IndexSpan<DurationSec> left, Potato::Misc::IndexSpan<DurationSec> right)
+		{
+			switch (left <=> right)
+			{
+			case Potato::Misc::IndexSpanOrdering::LeftOverlapBegin:
+			case Potato::Misc::IndexSpanOrdering::RightOverlapEnd:
+			case Potato::Misc::IndexSpanOrdering::Contained:
+			case Potato::Misc::IndexSpanOrdering::Contains:
+			case Potato::Misc::IndexSpanOrdering::Equal:
+				return true;
+			default:
+				return false;
+			}
+		}
+	}
+
 	EventDetailParser::EventDetailParser(Config config)
 		: resource(config.resource)
 		, context_switch_streamer(ContextSwitchStreamer::Config{ 3, DurationSec{ 1 }, &resource })
@@ -99,7 +120,7 @@ namespace UEBabyPram::InsightFilter
 
 	void EventDetailParser::OnCPUStackTree(ThreadCPUEventView event_scope)
 	{
-		if (max_view_count == 0 || stored_views.size() >= max_view_count)
+		if (max_view_count == 0)
 		{
 			return;
 		}
@@ -116,9 +137,38 @@ namespace UEBabyPram::InsightFilter
 			return;
 		}
 
+		auto time_range = event_scope.GetTimeRange();
+		if (!time_range)
+		{
+			return;
+		}
+
+		DurationSec duration = time_range->Size();
+
+		// Config::max_view_count is the count of the longest calls which are kept: while the stored views are fewer
+		// than it the view is stored, and after that the view is only stored when it is longer than the shortest of
+		// the stored ones, which is dropped for it.
+		if (stored_views.size() >= max_view_count)
+		{
+			auto shortest = std::min_element(
+				stored_views.begin(),
+				stored_views.end(),
+				[](StoredView const& left, StoredView const& right) {
+					return left.duration < right.duration;
+				});
+
+			if (shortest == stored_views.end() || shortest->duration >= duration)
+			{
+				return;
+			}
+
+			stored_views.erase(shortest);
+		}
+
 		// The view of the stack tree points into the storage of the analysis, which is reused after the
 		// stack tree is analyzed, so the events are copied into the storage of the parser.
 		auto& stored_view = stored_views.emplace_back(&resource);
+		stored_view.duration = duration;
 		stored_view.thread_id = event_scope.thread_id;
 		stored_view.system_thread_id = event_scope.system_thread_id;
 		stored_view.frame_count = event_scope.frame_count;
@@ -127,10 +177,7 @@ namespace UEBabyPram::InsightFilter
 		// blocks which are already completed are given to it as well, so the time which the thread
 		// spent off the CPU is available even when the context switch events of the range precede the
 		// stack tree.
-		if (auto time_range = event_scope.GetTimeRange(); time_range)
-		{
-			stored_view.context_switch_listener = context_switch_streamer.AddListener(event_scope.system_thread_id, *time_range);
-		}
+		stored_view.context_switch_listener = context_switch_streamer.AddListener(event_scope.system_thread_id, *time_range);
 
 		stored_view.events.assign(event_scope.view.begin(), event_scope.view.end());
 	}
@@ -163,6 +210,32 @@ namespace UEBabyPram::InsightFilter
 
 		// A time which is smaller than one nanosecond is treated as zero.
 		constexpr double context_switch_epsilon = 1.0e-9;
+
+		// The time ranges of the query are the target of the report: only the events which intersect one of them are
+		// printed, and an event which intersects none of them is omitted. A query which carries no time range reports
+		// every event of the saved stack trees.
+		std::span<Potato::Misc::IndexSpan<DurationSec> const> target_time_ranges;
+		if (auto queries = query_mapping.GetQueries(); !queries.empty())
+		{
+			target_time_ranges = queries.front().time_ranges;
+		}
+
+		auto is_in_target_time_range = [target_time_ranges](Potato::Misc::IndexSpan<DurationSec> time_range) {
+			if (target_time_ranges.empty())
+			{
+				return true;
+			}
+
+			for (auto& target_time_range : target_time_ranges)
+			{
+				if (IsTimeRangeOverlapped(target_time_range, time_range))
+				{
+					return true;
+				}
+			}
+
+			return false;
+		};
 
 		for (std::size_t view_index = 0; view_index < stored_views.size(); ++view_index)
 		{
@@ -266,6 +339,14 @@ namespace UEBabyPram::InsightFilter
 				if (!is_root)
 				{
 					line_prefix = prefix + (is_last ? L"\u2514\u2500 " : L"\u251C\u2500 ");
+				}
+
+				// The event does not intersect the target time range of the report, so neither it nor any of its
+				// children is in the target, and only the mark of the omitted children is printed.
+				if (!is_in_target_time_range(node.view.time_range))
+				{
+					OutputLog<L"        {}...">(printer, line_prefix);
+					return;
 				}
 
 				std::u8string_view event_name = events_manager.GetEventSpec(node.view.event_id).name_view;

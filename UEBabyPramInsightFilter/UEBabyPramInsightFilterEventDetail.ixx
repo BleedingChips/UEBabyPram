@@ -27,8 +27,9 @@ export namespace UEBabyPram::InsightFilter
 	// condition and the time ranges of the query are matched as well, so a stack tree which the query
 	// does not count is not kept.
 	//
-	// One kept stack tree is one copy (Config::max_view_count of them are kept at most, the rest of the
-	// stack trees which the query matches are ignored). The events of the stack tree are copied into
+	// One kept stack tree is one copy (the Config::max_view_count longest ones are kept at most, a
+	// shorter stack tree is only kept while there is room for it, or when it is longer than the
+	// shortest of the kept ones, which is dropped for it). The events of the stack tree are copied into
 	// the storage of the parser, because the view of the stack tree only points into the storage of
 	// the analysis, which is reused after the stack tree is analyzed.
 	struct EventDetailParser : public Parser
@@ -42,7 +43,8 @@ export namespace UEBabyPram::InsightFilter
 			EventQuery query;
 			// The text which the query is built from, it is only reported with the saved views.
 			std::u8string query_text;
-			// How many stack trees are kept at most, every stack tree is one copy, 0 for none.
+			// How many of the longest stack trees are kept at most, every stack tree is one copy, and the shortest
+			// one is dropped for a longer one when the count is reached, 0 for none.
 			std::size_t max_view_count = 10;
 			std::pmr::memory_resource* resource = std::pmr::get_default_resource();
 		};
@@ -57,6 +59,8 @@ export namespace UEBabyPram::InsightFilter
 			StoredView(std::pmr::memory_resource* resource = std::pmr::get_default_resource())
 				: events(resource) {}
 
+			// The duration of the whole stack tree, it is what the longest ones are picked by.
+			DurationSec duration = DurationSec::zero();
 			ThreadID thread_id;
 			ThreadSystemID system_thread_id;
 			std::optional<std::size_t> frame_count;

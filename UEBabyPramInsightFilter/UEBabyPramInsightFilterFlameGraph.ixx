@@ -72,6 +72,11 @@ export namespace UEBabyPram::InsightFilter
 			EventID event_id;
 			// The sum of the duration of every occurrence of this call path.
 			DurationSec total_duration = DurationSec::zero();
+			// The time span which the occurrences of the call path cover, it is the union of their ranges, and it is
+			// what the required time range of the report is checked against. The span is only valid when at least one
+			// occurrence of the path is aggregated.
+			Potato::Misc::IndexSpan<DurationSec> time_range;
+			bool has_time_range = false;
 			std::pmr::vector<std::size_t> children;
 		};
 

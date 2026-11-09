@@ -105,13 +105,13 @@ TimePoint := Integer 'm' Decimal 's' | Decimal 's' | Integer 's' | Integer 'm' I
 - 正则使用 RE2 语法，必须匹配完整事件名；
 - 调用链按调用顺序匹配，后一个元素必须是前一个元素的后代；
 - `Time` 条件只过滤被统计的 occurrence，例如 `&Time=[0s,10s]`；
-- `Thread` 条件匹配完整线程名，例如 `&Thread=(.*GameThread.*)`。
+- `Thread` 条件匹配完整线程名，例如 `&Thread=(^.*GameThread.*^)`。
 
 示例：
 
 ```text
 (^FEngineLoop::Tick^)->[^.*TickActor.*^]
-[^UWorld::Tick^]&Time=[0s,10s]&Thread=(.*GameThread.*)
+[^UWorld::Tick^]&Time=[0s,10s]&Thread=(^.*GameThread.*^)
 (%)->[^UWorld::Tick^]
 ```
 

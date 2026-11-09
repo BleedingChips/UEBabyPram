@@ -769,7 +769,11 @@ namespace UEBabyPram::InsightFilter
 				header += is_statistic ? L"[" : L"(";
 				if (node.matcher)
 				{
+					// The regular expression is written back with the '^' which the grammar of the query surrounds it
+					// with, so the printed query can be used as an input query again.
+					header += L"^";
 					header += EncodePattern(*node.matcher);
+					header += L"^";
 				}
 				else {
 					// The element matches any event, it carries no regular expression.
@@ -780,9 +784,9 @@ namespace UEBabyPram::InsightFilter
 
 			if (query.thread_matcher)
 			{
-				header += L" & Thread=(";
+				header += L" & Thread=(^";
 				header += EncodePattern(*query.thread_matcher);
-				header += L")";
+				header += L"^)";
 			}
 
 			if (!query.time_ranges.empty())

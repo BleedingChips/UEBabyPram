@@ -20,6 +20,8 @@ export namespace UEBabyPram::InsightFilter
 	struct CommandLineSetting
 	{
 		std::filesystem::path insight_path;
+		// The file which the report is written into, it is empty when the report is written into the standard output.
+		std::filesystem::path output_path;
 		std::unique_ptr<Parser> parser;
 	};
 

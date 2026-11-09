@@ -1,6 +1,7 @@
 module;
 
 #include <cassert>
+#include <compare>
 
 module UEBabyPramInsightFilterFlameGraph;
 
@@ -13,6 +14,26 @@ import std;
 
 namespace UEBabyPram::InsightFilter
 {
+	namespace
+	{
+		// Whether the two time ranges have a common time, the ranges which only touch each other at their end are not
+		// overlapped.
+		bool IsTimeRangeOverlapped(Potato::Misc::IndexSpan<DurationSec> left, Potato::Misc::IndexSpan<DurationSec> right)
+		{
+			switch (left <=> right)
+			{
+			case Potato::Misc::IndexSpanOrdering::LeftOverlapBegin:
+			case Potato::Misc::IndexSpanOrdering::RightOverlapEnd:
+			case Potato::Misc::IndexSpanOrdering::Contained:
+			case Potato::Misc::IndexSpanOrdering::Contains:
+			case Potato::Misc::IndexSpanOrdering::Equal:
+				return true;
+			default:
+				return false;
+			}
+		}
+	}
+
 	EventFlameGraphParser::EventFlameGraphParser(Config config)
 		: resource(config.resource)
 		, events_manager(EventSpecManager::Config{ false, &resource })
@@ -144,8 +165,21 @@ namespace UEBabyPram::InsightFilter
 			}
 
 			// The inclusive time of the call path is the duration of the event, which is the time from
-			// its beginning to the end of its subtree.
-			nodes[child_index].total_duration += current.time_range.Size();
+			// its beginning to the end of its subtree, and the time span which the path covers is the union of the
+			// ranges of its occurrences, which is what the required time range of the report is checked against.
+			auto& flame_node = nodes[child_index];
+			flame_node.total_duration += current.time_range.Size();
+			if (flame_node.has_time_range)
+			{
+				flame_node.time_range = Potato::Misc::IndexSpan<DurationSec>{
+					std::min(flame_node.time_range.Begin(), current.time_range.Begin()),
+					std::max(flame_node.time_range.End(), current.time_range.End())
+				};
+			}
+			else {
+				flame_node.time_range = current.time_range;
+				flame_node.has_time_range = true;
+			}
 
 			path.emplace_back(current.depth, child_index);
 			offset = current.index_range.Begin() + 1;
@@ -177,6 +211,33 @@ namespace UEBabyPram::InsightFilter
 
 		double total_count = total_duration.count();
 
+		// The time ranges of the query are the required range of the report: only the call paths which cover one of
+		// them are printed, and the path which covers none of them is omitted with its children.
+		std::span<Potato::Misc::IndexSpan<DurationSec> const> required_time_ranges;
+		if (auto queries = query_mapping.GetQueries(); !queries.empty())
+		{
+			required_time_ranges = queries.front().time_ranges;
+		}
+
+		auto is_in_required_time_range = [required_time_ranges](FlameNode const& node) {
+			// The path which carries no occurrence has no time to be checked, and the query which carries no time
+			// range requires every path.
+			if (required_time_ranges.empty() || !node.has_time_range)
+			{
+				return true;
+			}
+
+			for (auto& required_time_range : required_time_ranges)
+			{
+				if (IsTimeRangeOverlapped(required_time_range, node.time_range))
+				{
+					return true;
+				}
+			}
+
+			return false;
+		};
+
 		// The flame graph is printed with box drawing characters, the children of a node are sorted by
 		// the time which they take, so the widest call is the first one, the same as a flame graph.
 		std::function<void(std::size_t, std::wstring const&, bool, bool)> print_node =
@@ -188,6 +249,14 @@ namespace UEBabyPram::InsightFilter
 			if (!is_root)
 			{
 				line_prefix = prefix + (is_last ? L"\u2514\u2500 " : L"\u251C\u2500 ");
+			}
+
+			// The call path is not in the required time range of the report, so neither it nor any of its children is
+			// reported, and only the mark of the omitted children is printed.
+			if (!is_in_required_time_range(node))
+			{
+				OutputLog<L"        {}...">(printer, line_prefix);
+				return;
 			}
 
 			std::u8string_view event_name = events_manager.GetEventSpec(node.event_id).name_view;
