@@ -40,6 +40,10 @@ export namespace UEBabyPram::InsightFilter
 			EventQuery query;
 			// The text which the query is built from, it is only reported with the flame graph.
 			std::u8string query_text;
+			// How many of the longest stack trees are aggregated at most, the stack tree which is kept is dropped for a
+			// longer one when the count is reached, 0 for none. It is the same option with the same meaning as
+			// EventDetailParser::Config::max_view_count.
+			std::size_t max_view_count = 10;
 			std::pmr::memory_resource* resource = std::pmr::get_default_resource();
 		};
 
@@ -57,6 +61,9 @@ export namespace UEBabyPram::InsightFilter
 		// thread id and by its system thread id, so both of them are answered.
 		virtual bool IsThreadRequired(ThreadID thread_id) const override;
 		virtual bool IsThreadRequired(ThreadSystemID thread_system_id) const override;
+		// The stack trees which are kept are aggregated here, the aggregation of a stack tree needs its events, which
+		// are only complete after the whole trace is analyzed together with the longest ones which are kept.
+		virtual void AllAnalyzeDone() override;
 		// Report the flame graph, the analysis has to be done before this is called.
 		bool PrintToLog(Potato::Log::LogPrinter& printer) override;
 
@@ -80,6 +87,24 @@ export namespace UEBabyPram::InsightFilter
 			std::pmr::vector<std::size_t> children;
 		};
 
+		// One kept stack tree: the duration which picks the longest ones and a copy of the events, which are the source
+		// of the aggregation. The events of the view which the parser receives only point into the storage of the
+		// analysis, which is reused after the stack tree is analyzed, so they are copied here.
+		struct StoredView
+		{
+			StoredView(std::pmr::memory_resource* resource = std::pmr::get_default_resource())
+				: events(resource) {}
+
+			DurationSec duration = DurationSec::zero();
+			ThreadID thread_id;
+			ThreadSystemID system_thread_id;
+			std::optional<std::size_t> frame_count;
+			std::pmr::vector<ThreadCPUEvent> events;
+		};
+
+		// Aggregate one kept stack tree into the flame graph.
+		void AggregateStackTree(ThreadCPUEventView event_scope);
+
 		std::pmr::unsynchronized_pool_resource resource;
 		EventSpecManager events_manager;
 		// The query system which is built from Config::query, the ids of the events are resolved into
@@ -88,5 +113,8 @@ export namespace UEBabyPram::InsightFilter
 		// The storage of the nodes, the node 0 is the synthetic root of the graph.
 		std::pmr::vector<FlameNode> nodes;
 		std::u8string query_text;
+		// The stack trees which are kept, they are the Config::max_view_count longest ones which the query matches.
+		std::pmr::vector<StoredView> stored_views;
+		std::size_t max_view_count = 10;
 	};
 }

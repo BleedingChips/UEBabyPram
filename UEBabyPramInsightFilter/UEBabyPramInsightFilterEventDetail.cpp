@@ -1,7 +1,6 @@
 module;
 
 #include <cassert>
-#include <compare>
 
 module UEBabyPramInsightFilterEventDetail;
 
@@ -15,26 +14,6 @@ import std;
 
 namespace UEBabyPram::InsightFilter
 {
-	namespace
-	{
-		// Whether the two time ranges have a common time, the ranges which only touch each other at their end are not
-		// overlapped.
-		bool IsTimeRangeOverlapped(Potato::Misc::IndexSpan<DurationSec> left, Potato::Misc::IndexSpan<DurationSec> right)
-		{
-			switch (left <=> right)
-			{
-			case Potato::Misc::IndexSpanOrdering::LeftOverlapBegin:
-			case Potato::Misc::IndexSpanOrdering::RightOverlapEnd:
-			case Potato::Misc::IndexSpanOrdering::Contained:
-			case Potato::Misc::IndexSpanOrdering::Contains:
-			case Potato::Misc::IndexSpanOrdering::Equal:
-				return true;
-			default:
-				return false;
-			}
-		}
-	}
-
 	EventDetailParser::EventDetailParser(Config config)
 		: resource(config.resource)
 		, context_switch_streamer(ContextSwitchStreamer::Config{ 3, DurationSec{ 1 }, &resource })
@@ -228,7 +207,7 @@ namespace UEBabyPram::InsightFilter
 
 			for (auto& target_time_range : target_time_ranges)
 			{
-				if (IsTimeRangeOverlapped(target_time_range, time_range))
+				if (target_time_range.IsOverlap(time_range))
 				{
 					return true;
 				}

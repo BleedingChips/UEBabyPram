@@ -53,7 +53,7 @@ UEBabyPramInsightFilter 是一个用于分析 Unreal Engine（UE4/UE5）`.utrace
 | `-mlc, --max_location_count <count>` | `-r` 最多报告多少个事件位置，0 表示不限，默认 256 |
 | `-tx, --top_count <count>` | `-es` 每个事件名保留的 Top N 最长 occurrence，默认 5 |
 | `-mc, --max_context_depth <depth>` | `-es` 调用上下文相对 occurrence 的最大深度差，默认 6 |
-| `-mvc, --max_view_count <count>` | `-ed` 保留最长的多少个 stack tree，默认 10 |
+| `-mvc, --max_view_count <count>` | `-ed` 保存、`-ef` 聚合的最长 stack tree 个数，默认 10 |
 | `-mrf, --max_record_frame <count>` | 默认模式记录的最长帧数量，默认 10 |
 | `-metc, --max_exclude_time_count <count>` | 每个 Top 列表保留的最长 Exclude Time 事件数量，默认 30 |
 | `-sr, --sampling_ratio <ratio>` | 默认模式采样的时间比例，`[0.0, 1.0]`，默认 1.0（分析完整时间范围） |
@@ -78,6 +78,7 @@ TimePoint := Integer 'm' Decimal 's' | Decimal 's' | Integer 's' | Integer 'm' I
 - 只有 `[...]` 包裹的元素会被统计/保存，`(...)` 与 `(%)` 只用于补全调用链；
 - `Time` 条件只过滤被统计的 occurrence，时间范围写成 `[begin, end]`，如 `&Time=[0s,10s]`；
 - `Thread` 条件匹配完整线程名，如 `&Thread=(^.*GameThread.*^)`；
+- `(%)` 表示任意事件，比用"匹配所有名字"的正则（如 `(^.*^)`）高效得多；
 - `-es` 可以重复给多个 query，每个 query 独立统计。
 
 示例：
@@ -123,11 +124,12 @@ TimePoint := Integer 'm' Decimal 's' | Decimal 's' | Integer 's' | Integer 'm' I
 
 - `View` 行的 `E` 是整棵 stack tree 的总耗时；
 - 节点行：`TR` 时间范围、`D` 耗时、`E` Exclude Time；
-- `CS` 为该事件 Exclude Time 中线程不在 CPU 上的时间，仅在不为 0 时打印。
+- `CS` 为该事件 Exclude Time 中线程不在 CPU 上的时间，仅在不为 0 时打印；
+- 与查询 `Time` 条件无交集的事件只输出 `...`，其所有子事件一并省略。
 
 ### -ef 火焰图
 
-聚合所有匹配的 stack tree 的调用路径：
+聚合 `-mvc` 个最长的匹配 stack tree 的调用路径：
 
 ```text
 EventFlameGraphParser Output:
@@ -141,7 +143,8 @@ EventFlameGraphParser Output:
 
 - `D` 是调用路径的 inclusive 耗时（该路径所有 occurrence 的耗时之和）；
 - `Percent` 是占全部匹配时间的百分比；
-- 子节点按耗时从大到小排列。
+- 子节点按耗时从大到小排列；
+- 与查询 `Time` 条件无交集（按该路径所有 occurrence 覆盖的时间并集判断）的调用路径只输出 `...`，其子节点一并省略。
 
 ### -ts 线程搜索
 
@@ -201,8 +204,8 @@ EventFlameGraphParser Output:
 2. 事件名与线程名正则必须匹配完整名称。
 3. `-es` 中只有 `[...]` 元素会被统计，`(...)` 与 `(%)` 仅补全调用链。
 4. `-es` 的 `Time` 条件按被统计事件**占用的时间范围**与查询时间范围是否相交过滤（只贴边不算相交），不影响补全调用链的事件。
-5. `-ed` 保存的是**最长的 N 个** stack tree，由 `-mvc` 限制（默认 10）；满了以后更长的会顶掉最短的那个。
-6. `-ef` 会聚合所有匹配的 stack tree，没有数量限制。
+5. `-ed` 保存、`-ef` 聚合的都是**最长的 N 个** stack tree，由 `-mvc` 限制（默认 10，两种模式同一选项同一含义）；满了以后更长的会顶掉最短的那个。
+6. `-ef` 只聚合 `-mvc` 个最长的匹配 stack tree（不再是"全部聚合"）。
 7. 路径含空格时使用双引号包裹。
 8. `.utrace` 的开头与结尾是触发保存 trace 的时刻，保存本身会进入这些帧的耗时，所以这两端的数据不准；`-sr` 取小于 1.0 时只分析中间部分以避开两端（默认 1.0 分析完整范围）。
 9. `-r`、`-es`、`-ed`、`-ef` 的筛选范围要尽量缩小：范围太大时会输出大量信息，既慢又难以阅读。

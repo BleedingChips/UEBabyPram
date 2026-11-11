@@ -1,7 +1,6 @@
 module;
 
 #include <cassert>
-#include <compare>
 
 module UEBabyPramInsightParserContextSwitchStreamer;
 
@@ -12,25 +11,6 @@ import std;
 
 namespace UEBabyPram::InsightParser
 {
-	namespace
-	{
-		// Whether the two time ranges overlap, the ranges which only touch each other are not overlapped.
-		bool IsTimeRangeOverlapped(Potato::Misc::IndexSpan<DurationSec> left, Potato::Misc::IndexSpan<DurationSec> right)
-		{
-			switch (left <=> right)
-			{
-			case Potato::Misc::IndexSpanOrdering::LeftOverlapBegin:
-			case Potato::Misc::IndexSpanOrdering::RightOverlapEnd:
-			case Potato::Misc::IndexSpanOrdering::Contained:
-			case Potato::Misc::IndexSpanOrdering::Contains:
-			case Potato::Misc::IndexSpanOrdering::Equal:
-				return true;
-			default:
-				return false;
-			}
-		}
-	}
-
 	ContextSwitchStreamer::ContextSwitchStreamer(Config config)
 		: thread_streams(config.resource)
 		, resource(config.resource)
@@ -76,7 +56,7 @@ namespace UEBabyPram::InsightParser
 		// created after the events which it is interested in are stored still collects them.
 		for (auto& block : stream.blocks)
 		{
-			if (IsTimeRangeOverlapped(listener->time_range, block->time_range))
+			if (listener->time_range.IsOverlap(block->time_range))
 			{
 				listener->blocks.push_back(block);
 			}
@@ -164,7 +144,7 @@ namespace UEBabyPram::InsightParser
 
 			// The block overlaps the time span of the listener, so the listener collects it, and the block stays valid
 			// while the listener holds it.
-			if (IsTimeRangeOverlapped(listener->time_range, block->time_range))
+			if (listener->time_range.IsOverlap(block->time_range))
 			{
 				listener->blocks.push_back(block);
 			}
@@ -191,7 +171,7 @@ namespace UEBabyPram::InsightParser
 		for (auto& block : blocks)
 		{
 			// A block which is entirely out of the range carries no event of the range, so it is skipped.
-			if (!IsTimeRangeOverlapped(block->time_range, time_range))
+			if (block->time_range.IsDisjoint(time_range))
 			{
 				continue;
 			}

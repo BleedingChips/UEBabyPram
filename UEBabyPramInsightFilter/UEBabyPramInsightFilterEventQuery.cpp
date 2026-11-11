@@ -323,16 +323,9 @@ namespace UEBabyPram::InsightFilter
 		// a range which only touches the end of a query range is not counted.
 		for (auto const& range : query.time_ranges)
 		{
-			switch (time_range <=> range)
+			if (range.IsOverlap(time_range))
 			{
-			case Potato::Misc::IndexSpanOrdering::LeftOverlapBegin:
-			case Potato::Misc::IndexSpanOrdering::RightOverlapEnd:
-			case Potato::Misc::IndexSpanOrdering::Contained:
-			case Potato::Misc::IndexSpanOrdering::Contains:
-			case Potato::Misc::IndexSpanOrdering::Equal:
 				return true;
-			default:
-				break;
 			}
 		}
 

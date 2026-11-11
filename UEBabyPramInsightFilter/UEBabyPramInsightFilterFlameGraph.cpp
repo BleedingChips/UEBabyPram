@@ -1,7 +1,6 @@
 module;
 
 #include <cassert>
-#include <compare>
 
 module UEBabyPramInsightFilterFlameGraph;
 
@@ -14,25 +13,6 @@ import std;
 
 namespace UEBabyPram::InsightFilter
 {
-	namespace
-	{
-		// Whether the two time ranges have a common time, the ranges which only touch each other at their end are not
-		// overlapped.
-		bool IsTimeRangeOverlapped(Potato::Misc::IndexSpan<DurationSec> left, Potato::Misc::IndexSpan<DurationSec> right)
-		{
-			switch (left <=> right)
-			{
-			case Potato::Misc::IndexSpanOrdering::LeftOverlapBegin:
-			case Potato::Misc::IndexSpanOrdering::RightOverlapEnd:
-			case Potato::Misc::IndexSpanOrdering::Contained:
-			case Potato::Misc::IndexSpanOrdering::Contains:
-			case Potato::Misc::IndexSpanOrdering::Equal:
-				return true;
-			default:
-				return false;
-			}
-		}
-	}
 
 	EventFlameGraphParser::EventFlameGraphParser(Config config)
 		: resource(config.resource)
@@ -40,6 +20,8 @@ namespace UEBabyPram::InsightFilter
 		, query_mapping(EventQueryMapping::Config{ { std::move(config.query) }, &resource })
 		, nodes(&resource)
 		, query_text(std::move(config.query_text))
+		, stored_views(&resource)
+		, max_view_count(config.max_view_count)
 	{
 		// The query is built and checked by the creator of the config, so the parser only takes the one
 		// which is ready to be analyzed.
@@ -115,17 +97,74 @@ namespace UEBabyPram::InsightFilter
 		}
 
 		// The query system has already filtered the thread and the time of the query, the stack tree is
-		// only aggregated when at least one event of it completes the chain of the query.
+		// only kept when at least one event of it completes the chain of the query.
 		bool matched = false;
 		query_mapping.ForEachMatchedEvent(event_scope, [&](EventQueryMapping::EventMatch const&) {
 			matched = true;
 		});
 
-		if (!matched)
+		if (!matched || max_view_count == 0)
 		{
 			return;
 		}
 
+		auto time_range = event_scope.GetTimeRange();
+		if (!time_range)
+		{
+			return;
+		}
+
+		DurationSec duration = time_range->Size();
+
+		// Config::max_view_count is the count of the longest stack trees which are aggregated: while the kept views
+		// are fewer than it the view is kept, and after that the view is only kept when it is longer than the shortest
+		// of the kept ones, which is dropped for it, the same as EventDetailParser.
+		if (stored_views.size() >= max_view_count)
+		{
+			auto shortest = std::min_element(
+				stored_views.begin(),
+				stored_views.end(),
+				[](StoredView const& left, StoredView const& right) {
+					return left.duration < right.duration;
+				});
+
+			if (shortest == stored_views.end() || shortest->duration >= duration)
+			{
+				return;
+			}
+
+			stored_views.erase(shortest);
+		}
+
+		// The view of the stack tree points into the storage of the analysis, which is reused after the stack tree is
+		// analyzed, so the events are copied and they are aggregated when the whole trace is analyzed.
+		auto& stored_view = stored_views.emplace_back(&resource);
+		stored_view.duration = duration;
+		stored_view.thread_id = event_scope.thread_id;
+		stored_view.system_thread_id = event_scope.system_thread_id;
+		stored_view.frame_count = event_scope.frame_count;
+		stored_view.events.assign(event_scope.view.begin(), event_scope.view.end());
+	}
+
+	void EventFlameGraphParser::AllAnalyzeDone()
+	{
+		Parser::AllAnalyzeDone();
+
+		// The kept stack trees are aggregated into the flame graph, they are the longest ones which the query
+		// matches, which are complete now.
+		for (auto& stored_view : stored_views)
+		{
+			AggregateStackTree(ThreadCPUEventView{
+				stored_view.thread_id,
+				stored_view.system_thread_id,
+				std::span<ThreadCPUEvent const>{ stored_view.events },
+				stored_view.frame_count
+			});
+		}
+	}
+
+	void EventFlameGraphParser::AggregateStackTree(ThreadCPUEventView event_scope)
+	{
 		// The current call path: the depth of every level and the index of its node. The events are
 		// stored in the call order, so an event is a child of the event which is above it.
 		std::vector<std::pair<std::size_t, std::size_t>> path;
@@ -229,7 +268,7 @@ namespace UEBabyPram::InsightFilter
 
 			for (auto& required_time_range : required_time_ranges)
 			{
-				if (IsTimeRangeOverlapped(required_time_range, node.time_range))
+				if (required_time_range.IsOverlap(node.time_range))
 				{
 					return true;
 				}

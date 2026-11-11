@@ -115,7 +115,8 @@ Options:
   -ef, --event_flame_graph <query>
       Query of the stack trees which should be aggregated into a flame graph, the grammar is the same
       as -es. The call paths of every matched stack tree are merged, and the time of every call path
-      is reported with its percentage of the whole matched time.
+      is reported with its percentage of the whole matched time. The -mvc longest stack trees are
+      aggregated, the same as -ed.
       Narrow the filter as much as possible: a filter which is too wide reports a very large
       amount of information, which is slow to print and hard to read.
       -r, -es, -ed, -ef and -ts can not be used at the same time.
@@ -141,9 +142,10 @@ Options:
       default is 6.
 
   -mvc, --max_view_count <count>
-      How many of the longest stack trees should be saved and reported with -ed, default is 10. The
-      stack tree which is kept is dropped for a longer one when the count is reached, so the saved
-      ones are the longest calls which the query matches.
+      How many of the longest stack trees should be saved and reported with -ed, and aggregated
+      into the flame graph with -ef, default is 10. The stack tree which is kept is dropped for a
+      longer one when the count is reached, so the kept ones are the longest calls which the query
+      matches.
 
   -mrf, --max_record_frame <count>
       How many of the longest game frames should be recorded and reported, default is 10.
@@ -447,6 +449,7 @@ Options:
 					if (Format::DirectDeformat(sub_argv, value))
 					{
 						detail_config.max_view_count = value;
+						flame_config.max_view_count = value;
 						++i;
 					}
 					else {

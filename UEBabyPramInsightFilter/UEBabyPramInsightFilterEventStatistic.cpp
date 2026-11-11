@@ -1,7 +1,6 @@
 module;
 #include <cassert>
 #include <cmath>
-#include <cstdio>
 #include <re2/re2.h>
 module UEBabyPramInsightFilterEventStatistic;
 
@@ -28,23 +27,6 @@ namespace UEBabyPram::InsightFilter
 				std::back_inserter(pattern)
 			);
 			return pattern;
-		}
-
-		// Whether the two time ranges have a common time, the ranges which only touch each other at their
-		// end are not overlapped.
-		bool IsTimeRangeOverlapped(Potato::Misc::IndexSpan<DurationSec> left, Potato::Misc::IndexSpan<DurationSec> right)
-		{
-			switch (left <=> right)
-			{
-			case Potato::Misc::IndexSpanOrdering::LeftOverlapBegin:
-			case Potato::Misc::IndexSpanOrdering::RightOverlapEnd:
-			case Potato::Misc::IndexSpanOrdering::Contained:
-			case Potato::Misc::IndexSpanOrdering::Contains:
-			case Potato::Misc::IndexSpanOrdering::Equal:
-				return true;
-			default:
-				return false;
-			}
 		}
 
 		// One match of the query system which survives the collapsing of the identical calls.
@@ -172,7 +154,7 @@ namespace UEBabyPram::InsightFilter
 				if (
 					exist.query_index == match.query_index
 					&& exist.event_name == event_name
-					&& IsTimeRangeOverlapped(exist.event_view.time_range, match.event_view.time_range)
+					&& exist.event_view.time_range.IsOverlap(match.event_view.time_range)
 					)
 				{
 					// The longer range is the one which is counted, the shorter one is the same call and it
