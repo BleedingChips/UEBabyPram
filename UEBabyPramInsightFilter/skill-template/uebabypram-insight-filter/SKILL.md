@@ -9,7 +9,7 @@ UEBabyPramInsightFilter 是一个用于分析 Unreal Engine（UE4/UE5）`.utrace
 
 - 默认模式：报告 GameThread 的帧耗时与统计；
 - 事件位置搜索（`-r`）；
-- 事件耗时统计（`-es`），含 Top N 最长 occurrence 与其调用上下文；
+- 事件耗时统计（`-es`），含 Top N 最长 occurrence；
 - 保存并打印指定调用堆栈（`-ed`），含每个事件的耗时与 Exclude Time；
 - 生成火焰图（`-ef`），聚合所有匹配的调用路径；
 - 线程搜索（`-ts`）。
@@ -52,7 +52,6 @@ UEBabyPramInsightFilter 是一个用于分析 Unreal Engine（UE4/UE5）`.utrace
 | `-h, --help` | 打印帮助 |
 | `-mlc, --max_location_count <count>` | `-r` 最多报告多少个事件位置，0 表示不限，默认 256 |
 | `-tx, --top_count <count>` | `-es` 每个事件名保留的 Top N 最长 occurrence，默认 5 |
-| `-mc, --max_context_depth <depth>` | `-es` 调用上下文相对 occurrence 的最大深度差，默认 6 |
 | `-mvc, --max_view_count <count>` | `-ed` 保存、`-ef` 聚合的最长 stack tree 个数，默认 10 |
 | `-mrf, --max_record_frame <count>` | 默认模式记录的最长帧数量，默认 10 |
 | `-metc, --max_exclude_time_count <count>` | 每个 Top 列表保留的最长 Exclude Time 事件数量，默认 30 |
@@ -101,15 +100,29 @@ TimePoint := Integer 'm' Decimal 's' | Decimal 's' | Integer 's' | Integer 'm' I
 
 ### -es 事件耗时统计
 
-每个查询、每个事件名输出：
+每个查询、每个事件（按事件 id 分开统计）输出：
 
-- `Count`、`Total D`、`Mean D`、`Median D`、`Std D`、`Total E`、`Mean E`；
-- `Top N Longest Occurrence` 列表：`D`（耗时）、`E`（Exclude Time）、`ENCS`（去除离核时间后的 Exclude Time）、`CS`（Context Switch Time）、`TR`（时间范围）、`TName`（线程名）；
-- 每个 Top occurrence 的 `Call Context`，用 box-drawing 打印：
-  - `Parents`：祖先链，最后一行是 occurrence 自身（`***[事件名]***`），其他事件为 `<事件名>`；
-  - `Children`：以 occurrence 为根的子树，第一行是 occurrence 自身；
-  - 每行包含 `TR`、`D`、`E`、`CS`；
-  - 被深度限制截断时用 `...` 占位。
+```text
+EventStatisticParser Output:
+    Query <0>: [^A^] & Thread=(^.*GameThread.*^)
+        <2> Event(s):
+            Name:<A>, Count:<2834>, Total D:<1718.769ms>, Mean D:<0.606ms>, Median D:<0.134ms>, Std D:<1.738ms>, Total E:<26.759ms>, Mean E:<0.009ms>
+                Top <1> Longest Occurrence:
+                    <0   > TName:<RHIThread>, D:<26.401ms>, E:<0.016ms>, ENCS:<0.000ms>, CS:<24.295ms>, TR: [1m39.721219s, 1m39.747619s]
+                GameFrame Statistics:
+                    <11 Time(s) In One Frame>: Frames <2>, Mean Total D:<3.013ms>, Longest TR:<[1m39.336328s, 1m39.349485s]>, Longest D:<3.282ms>
+                Duration Distribution <5> Bucket(s):
+                    <[0.007ms, 2.105ms]>, Count:<141>, Percent:<92.16%>
+```
+
+- `Name` 行：`Count`、`Total D`、`Mean D`、`Median D`、`Std D`、`Total E`、`Mean E`（按单个 occurrence 统计）；
+- `Top N Longest Occurrence`：该事件耗时最长的 N 个 occurrence，含 `D`、`E`、`ENCS`（去除离核时间的 Exclude Time）、`CS`（离核时间）、`TR`（时间范围）、`TName`（线程名）；
+- `GameFrame Statistics`：把 occurrence 归到它起点所在的 GameFrame，再按"每帧出现次数"合并：
+  - `N Time(s) In One Frame`：该事件这一帧里出现 N 次；
+  - `Frames`：出现 N 次的帧数；
+  - `Mean Total D`：这些帧里该事件总耗时的平均值；
+  - `Longest TR` / `Longest D`：出现 N 次的帧中总耗时最长的帧的时间范围与耗时。
+- `Duration Distribution <N> Bucket(s)`：当该事件的出现次数大于 `-tx` 的 N 时，把单个 occurrence 的耗时从最短到最长均分为 N 个区间，每行给出区间范围、落入该区间的个数与占总个数的百分比。
 
 ### -ed 详细调用堆栈
 
@@ -144,7 +157,7 @@ EventFlameGraphParser Output:
 - `D` 是调用路径的 inclusive 耗时（该路径所有 occurrence 的耗时之和）；
 - `Percent` 是占全部匹配时间的百分比；
 - 子节点按耗时从大到小排列；
-- 与查询 `Time` 条件无交集（按该路径所有 occurrence 覆盖的时间并集判断）的调用路径只输出 `...`，其子节点一并省略。
+- 只有落在查询 `Time` 范围内的 occurrence 才会被统计与打印；跨界的 occurrence 按**完整**耗时计入（时间不裁剪），完全在范围外的 occurrence 连同其子事件都不参与聚合。
 
 ### -ts 线程搜索
 
@@ -169,7 +182,7 @@ EventFlameGraphParser Output:
 ### 3. 统计 TickActor 的耗时
 
 ```powershell
-& ".\scripts\UEBabyPramInsightFilter.exe" -f "Capture.utrace" -es "(^FEngineLoop::Tick^)->[^.*TickActor.*^]" -tx 10 -mc 8
+& ".\scripts\UEBabyPramInsightFilter.exe" -f "Capture.utrace" -es "(^FEngineLoop::Tick^)->[^.*TickActor.*^]" -tx 10
 ```
 
 ### 4. 统计指定时间与线程内的 UWorld::Tick

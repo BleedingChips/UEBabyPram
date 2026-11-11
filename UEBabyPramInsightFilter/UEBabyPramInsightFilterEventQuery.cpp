@@ -37,17 +37,21 @@ namespace UEBabyPram::InsightFilter
 		}
 	}
 
-	void EventQueryMapping::AddEvent(EventID id, std::u8string_view event_name)
+	auto EventQueryMapping::AddEvent(EventID id, std::u8string_view event_name, ExportVisitorT visitor) -> AddEventResult
 	{
+		AddEventResult result;
+
 		if (!id || event_name.empty())
 		{
-			return;
+			return result;
 		}
 
-		for (auto& ite : queries)
+		for (std::size_t query_index = 0; query_index < queries.size(); ++query_index)
 		{
-			for (auto& node : ite.nodes)
+			auto& query = queries[query_index];
+			for (std::size_t node_index = 0; node_index < query.nodes.size(); ++node_index)
 			{
+				auto& node = query.nodes[node_index];
 				if (!node.matcher)
 				{
 					continue;
@@ -55,13 +59,36 @@ namespace UEBabyPram::InsightFilter
 				// The whole name has to be matched, the same as the name of a thread.
 				if (IsEventNameMatched(*node.matcher, event_name))
 				{
+					// The element resolves every id only once: an id which the element already carries is not added
+					// again, and it is neither reported as matched nor exported again, so a name which is discovered
+					// more than once (ex: the event of the CPU scope logger) is not exported more than once.
+					if (std::find(node.event_ids.begin(), node.event_ids.end(), id) != node.event_ids.end())
+					{
+						result.is_marked = true;
+						continue;
+					}
+
 					node.event_ids.push_back(id);
+					result.is_matched = true;
+
+					// Only the element whose timing is collected exports the event, the elements which are only a part
+					// of the call chain resolve the chain without exporting anything.
+					if (node.kind == EventQuery::ChainElement::Kind::QueryAndStatistic)
+					{
+						result.is_exported = true;
+						if (visitor)
+						{
+							visitor(id, query_index, node_index);
+						}
+					}
 				}
 			}
 		}
+
+		return result;
 	}
 
-	void EventQueryMapping::AddEvent(EventID id, std::wstring_view event_name)
+	auto EventQueryMapping::AddEvent(EventID id, std::wstring_view event_name, ExportVisitorT visitor) -> AddEventResult
 	{
 		// The matcher needs the name in UTF-8, the event spec carries it in wide characters.
 		encoded_event_name.clear();
@@ -69,7 +96,7 @@ namespace UEBabyPram::InsightFilter
 			event_name,
 			std::back_inserter(encoded_event_name)
 		);
-		AddEvent(id, std::u8string_view{ encoded_event_name });
+		return AddEvent(id, std::u8string_view{ encoded_event_name }, visitor);
 	}
 
 	void EventQueryMapping::AddThread(ThreadID id, ThreadSystemID system_id, std::string_view thread_name)
@@ -99,11 +126,11 @@ namespace UEBabyPram::InsightFilter
 		}
 	}
 
-	void EventQueryMapping::ForEachMatchedEvent(ThreadCPUEventView event_scope, MatchVisitorT visitor) const
+	bool EventQueryMapping::ForEachMatchedEvent(ThreadCPUEventView event_scope, MatchVisitorT visitor) const
 	{
 		if (!visitor || queries.empty())
 		{
-			return;
+			return false;
 		}
 
 		// The whole stack tree is the range which the time conditions are checked against first, a query
@@ -111,8 +138,13 @@ namespace UEBabyPram::InsightFilter
 		auto tree_time_range = event_scope.GetTimeRange();
 		if (!tree_time_range)
 		{
-			return;
+			return false;
 		}
+
+		// Whether the whole call chain of a query is matched inside the tree, the chain of a query which only
+		// carries query elements reports no occurrence, so the visitor alone can not tell whether it is
+		// matched.
+		bool is_chain_matched = false;
 
 		struct FindedNodeStack
 		{
@@ -199,10 +231,11 @@ namespace UEBabyPram::InsightFilter
 					}
 				}
 				else {
-					// The whole chain is matched, so every statistic element of it reports its occurrence:
-					// the occurrence is filtered by the time ranges of the query, an occurrence whose time
-					// range overlaps none of them is not counted, and an element which already reported an
-					// occurrence of this chain is skipped.
+					// The whole chain is matched, so the chain of the query is reported as matched, and every
+					// statistic element of it reports its occurrence: the occurrence is filtered by the time ranges
+					// of the query, an occurrence whose time range overlaps none of them is not counted, and an
+					// element which already reported an occurrence of this chain is skipped.
+					is_chain_matched = true;
 					for (auto& stack_ite : finded_stack)
 					{
 						if (
@@ -261,6 +294,8 @@ namespace UEBabyPram::InsightFilter
 				}
 			}
 		}
+
+		return is_chain_matched;
 	}
 
 	bool EventQueryMapping::IsThreadMatched(ThreadID thread_id) const

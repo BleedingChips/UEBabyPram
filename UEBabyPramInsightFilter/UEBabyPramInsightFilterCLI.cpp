@@ -96,6 +96,15 @@ Options:
       selected. The thread name has to match the whole thread name.
       -es can be given more than once, every query keeps its own statistics, so the same event name
       may be reported several times, once per query which collects it.
+      Every occurrence is grouped into the game frame which carries its beginning (the stack trees of
+      the game thread which begin with FEngineLoop::Tick or Frame are the frames), and the frames are
+      merged by the count of the occurrences which one frame carries: every count reports how many frames
+      carry it, the mean of the total time which the event took inside those frames, and the frame of that
+      count in which the event took the most time.
+      When the count of the occurrences of an event is greater than the top count (-tx), the range from
+      the shortest duration of the single occurrence to the longest one is split into top count buckets,
+      and every bucket is reported with its range, the count of the occurrences which fell into it and
+      the share of them over the whole count.
       Narrow the filter as much as possible: a filter which is too wide reports a very large
       amount of information, which is slow to print and hard to read.
       -r, -es, -ed, -ef and -ts can not be used at the same time.
@@ -116,7 +125,10 @@ Options:
       Query of the stack trees which should be aggregated into a flame graph, the grammar is the same
       as -es. The call paths of every matched stack tree are merged, and the time of every call path
       is reported with its percentage of the whole matched time. The -mvc longest stack trees are
-      aggregated, the same as -ed.
+      aggregated, the same as -ed. Only the occurrences which are inside the time ranges of the query are
+      aggregated and reported: an occurrence which is entirely out of the ranges is not a part of the flame
+      graph, and the occurrence which crosses the boundary of a range counts with its whole time, the time of
+      an occurrence is never cut to the ranges.
       Narrow the filter as much as possible: a filter which is too wide reports a very large
       amount of information, which is slow to print and hard to read.
       -r, -es, -ed, -ef and -ts can not be used at the same time.
@@ -135,11 +147,6 @@ Options:
 
   -tx, --top_count <count>
       How many of the longest occurrences should be reported with -es, default is 5.
-
-  -mc, --max_context_depth <depth>
-      The maximum depth difference between a top occurrence and the parent and child events
-      which are reported with -es, the events beyond it are neither recorded nor reported,
-      default is 6.
 
   -mvc, --max_view_count <count>
       How many of the longest stack trees should be saved and reported with -ed, and aggregated
@@ -416,27 +423,6 @@ Options:
 				}
 				else {
 					Log::Log<CommandLineLogCategory, Log::LogLevel::Error, L"Unsupport command -tx --top_count, use -h for detailed help">();
-					return -1;
-				}
-			}
-			else if (argv_string == "-mc" || argv_string == "--max_context_depth")
-			{
-				if (i + 1 < argc)
-				{
-					std::size_t value = 0;
-					std::string_view sub_argv = argv[i + 1];
-					if (Format::DirectDeformat(sub_argv, value))
-					{
-						statistic_config.max_context_depth = value;
-						++i;
-					}
-					else {
-						Log::Log<CommandLineLogCategory, Log::LogLevel::Error, L"-mc --max_context_depth <depth> : <{}> is not a valid depth, use -h for detailed help">(sub_argv);
-						return -1;
-					}
-				}
-				else {
-					Log::Log<CommandLineLogCategory, Log::LogLevel::Error, L"Unsupport command -mc --max_context_depth, use -h for detailed help">();
 					return -1;
 				}
 			}

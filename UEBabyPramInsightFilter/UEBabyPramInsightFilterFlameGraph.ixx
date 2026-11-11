@@ -79,11 +79,6 @@ export namespace UEBabyPram::InsightFilter
 			EventID event_id;
 			// The sum of the duration of every occurrence of this call path.
 			DurationSec total_duration = DurationSec::zero();
-			// The time span which the occurrences of the call path cover, it is the union of their ranges, and it is
-			// what the required time range of the report is checked against. The span is only valid when at least one
-			// occurrence of the path is aggregated.
-			Potato::Misc::IndexSpan<DurationSec> time_range;
-			bool has_time_range = false;
 			std::pmr::vector<std::size_t> children;
 		};
 
@@ -96,14 +91,17 @@ export namespace UEBabyPram::InsightFilter
 				: events(resource) {}
 
 			DurationSec duration = DurationSec::zero();
+			// The index of the query which keeps the stack tree.
+			std::size_t query_index = 0;
 			ThreadID thread_id;
 			ThreadSystemID system_thread_id;
 			std::optional<std::size_t> frame_count;
 			std::pmr::vector<ThreadCPUEvent> events;
 		};
 
-		// Aggregate one kept stack tree into the flame graph.
-		void AggregateStackTree(ThreadCPUEventView event_scope);
+		// Aggregate one kept stack tree into the flame graph, the query which keeps it is recorded with the call
+		// paths which the tree creates.
+		void AggregateStackTree(ThreadCPUEventView event_scope, std::size_t query_index);
 
 		std::pmr::unsynchronized_pool_resource resource;
 		EventSpecManager events_manager;

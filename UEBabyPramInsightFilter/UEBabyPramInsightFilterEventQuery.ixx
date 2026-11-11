@@ -107,12 +107,34 @@ export namespace UEBabyPram::InsightFilter
 
 		EventQueryMapping(Config config = {});
 
+		// What one discovered event is by the queries: whether the name of the event is matched by the regular expression
+		// of any chain element of any query, and whether the event is exported, which needs an element of the
+		// QueryAndStatistic kind to match it.
+		struct AddEventResult
+		{
+			// Whether the name is matched by the regular expression of any chain element of any query.
+			bool is_matched = false;
+			// Whether the event is exported by an element of the chain whose timing is collected.
+			bool is_exported = false;
+			// Whether the id was already marked by a matched element before this call, which is why it is neither added
+			// to that element again nor reported by the two flags above.
+			bool is_marked = false;
+		};
+
+		// The visitor of the exported matches of one event: the event, the query and the chain element which exports it.
+		// It is called once per exporting element which the name of the event is matched by.
+		using ExportVisitorT = Potato::TMP::FunctionRef<void(EventID id, std::size_t query_index, std::size_t node_index)>;
+
 		// Resolve one discovered event against the chain of every query. It has to be called once per
 		// event before the stack tree which carries it is analyzed, an event which carries no name is
 		// never resolved. The name of an event spec is wide and the name of the event of the CPU scope
 		// logger is UTF-8, the wide name is converted into the scratch storage of the query system.
-		void AddEvent(EventID id, std::wstring_view event_name);
-		void AddEvent(EventID id, std::u8string_view event_name);
+		// The visitor, which may be empty, is called for every exported match of the event.
+		// An element only resolves an id once: an id which the element already carries is not added to it again, and
+		// neither the result nor the visitor reports it again, so an element exports a name which is discovered more
+		// than once (ex: the event of the CPU scope logger) only once.
+		AddEventResult AddEvent(EventID id, std::wstring_view event_name, ExportVisitorT visitor = {});
+		AddEventResult AddEvent(EventID id, std::u8string_view event_name, ExportVisitorT visitor = {});
 		// Resolve one discovered thread against the thread condition of every query, the query which
 		// carries no thread condition ignores it, it counts every thread. The thread is kept with both of its ids,
 		// because the stack tree carries the thread id and the events which are not carried by the stack tree
@@ -160,7 +182,12 @@ export namespace UEBabyPram::InsightFilter
 		// is never tried, so an occurrence which is only reachable through such a candidate (ex: an event
 		// which is nested inside another event of the same element) is not reported, the occurrences of
 		// an element are counted by its outermost candidates.
-		void ForEachMatchedEvent(ThreadCPUEventView event_scope, MatchVisitorT visitor) const;
+		//
+		// True is returned when the whole call chain of a query is matched in the stack tree, false when no
+		// chain of any query is completed. The return value is the only way to tell whether a chain is
+		// matched when every element of the chain is only a part of the call chain ([^Regex^] carries no
+		// element), because such a chain never reports a match to the visitor.
+		bool ForEachMatchedEvent(ThreadCPUEventView event_scope, MatchVisitorT visitor) const;
 
 	protected:
 

@@ -61,6 +61,9 @@ export namespace UEBabyPram::InsightFilter
 
 			// The duration of the whole stack tree, it is what the longest ones are picked by.
 			DurationSec duration = DurationSec::zero();
+			// The index of the query which keeps the stack tree (see EventQueryMapping::GetQueries()), the report of
+			// the tree is limited by the time ranges of that query.
+			std::size_t query_index = 0;
 			ThreadID thread_id;
 			ThreadSystemID system_thread_id;
 			std::optional<std::size_t> frame_count;

@@ -104,14 +104,22 @@ namespace UEBabyPram::InsightFilter
 			return;
 		}
 
-		// The query system has already filtered the thread and the time of the query, the stack tree is
-		// only kept when at least one event of it completes the chain of the query.
-		bool matched = false;
-		query_mapping.ForEachMatchedEvent(event_scope, [&](EventQueryMapping::EventMatch const&) {
-			matched = true;
+		// The query system has already filtered the thread and the time of the query, and it tells whether the
+		// whole call chain of the query is matched inside the tree, which is what the tree is kept by. The
+		// chain may carry no statistic element, so the answer does not depend on the matches. The query which
+		// keeps the tree is recorded with it, so the report of the tree is limited by the time ranges of that
+		// query and not by the time ranges of every query.
+		std::size_t query_index = 0;
+		bool has_query_index = false;
+		bool is_chain_matched = query_mapping.ForEachMatchedEvent(event_scope, [&](EventQueryMapping::EventMatch const& match) {
+			if (!has_query_index)
+			{
+				query_index = match.query_index;
+				has_query_index = true;
+			}
 		});
 
-		if (!matched)
+		if (!is_chain_matched)
 		{
 			return;
 		}
@@ -148,6 +156,7 @@ namespace UEBabyPram::InsightFilter
 		// stack tree is analyzed, so the events are copied into the storage of the parser.
 		auto& stored_view = stored_views.emplace_back(&resource);
 		stored_view.duration = duration;
+		stored_view.query_index = query_index;
 		stored_view.thread_id = event_scope.thread_id;
 		stored_view.system_thread_id = event_scope.system_thread_id;
 		stored_view.frame_count = event_scope.frame_count;
@@ -190,35 +199,38 @@ namespace UEBabyPram::InsightFilter
 		// A time which is smaller than one nanosecond is treated as zero.
 		constexpr double context_switch_epsilon = 1.0e-9;
 
-		// The time ranges of the query are the target of the report: only the events which intersect one of them are
-		// printed, and an event which intersects none of them is omitted. A query which carries no time range reports
-		// every event of the saved stack trees.
-		std::span<Potato::Misc::IndexSpan<DurationSec> const> target_time_ranges;
-		if (auto queries = query_mapping.GetQueries(); !queries.empty())
-		{
-			target_time_ranges = queries.front().time_ranges;
-		}
-
-		auto is_in_target_time_range = [target_time_ranges](Potato::Misc::IndexSpan<DurationSec> time_range) {
-			if (target_time_ranges.empty())
-			{
-				return true;
-			}
-
-			for (auto& target_time_range : target_time_ranges)
-			{
-				if (target_time_range.IsOverlap(time_range))
-				{
-					return true;
-				}
-			}
-
-			return false;
-		};
+		auto const queries = query_mapping.GetQueries();
 
 		for (std::size_t view_index = 0; view_index < stored_views.size(); ++view_index)
 		{
 			auto const& stored_view = stored_views[view_index];
+
+			// The time ranges of the query which keeps the stack tree are the target of the report of the tree: only
+			// the events which intersect one of them are printed, and an event which intersects none of them is
+			// omitted. The time ranges of the other queries do not matter here, and a query which carries no time
+			// range reports every event of the tree.
+			std::span<Potato::Misc::IndexSpan<DurationSec> const> target_time_ranges;
+			if (stored_view.query_index < queries.size())
+			{
+				target_time_ranges = queries[stored_view.query_index].time_ranges;
+			}
+
+			auto is_in_target_time_range = [target_time_ranges](Potato::Misc::IndexSpan<DurationSec> time_range) {
+				if (target_time_ranges.empty())
+				{
+					return true;
+				}
+
+				for (auto& target_time_range : target_time_ranges)
+				{
+					if (target_time_range.IsOverlap(time_range))
+					{
+						return true;
+					}
+				}
+
+				return false;
+			};
 
 			std::string_view thread_name{ "<Unknow>" };
 			if (auto thread_info = GetThreadInfo(stored_view.thread_id); thread_info && !thread_info->thread_name.empty())
@@ -309,6 +321,10 @@ namespace UEBabyPram::InsightFilter
 			// which it consumed outside of its children, and the context switch time of the exclude time
 			// is the part of it which the thread spent off the CPU, it is only printed when it is not
 			// zero.
+			// Whether the last line which is printed at a depth is the mark of the omitted events: the mark
+			// which would follow another mark at the same depth is omitted, so the runs of the events which
+			// are out of the target time range are printed as one ellipsis.
+			std::vector<bool> is_ellipsis_printed;
 			std::function<void(std::size_t, std::wstring const&, bool, bool)> print_node =
 				[&](std::size_t node_index, std::wstring const& prefix, bool is_last, bool is_root)
 			{
@@ -320,13 +336,27 @@ namespace UEBabyPram::InsightFilter
 					line_prefix = prefix + (is_last ? L"\u2514\u2500 " : L"\u251C\u2500 ");
 				}
 
+				std::size_t depth = node.view.depth;
+				if (is_ellipsis_printed.size() <= depth)
+				{
+					is_ellipsis_printed.resize(depth + 1, false);
+				}
+
 				// The event does not intersect the target time range of the report, so neither it nor any of its
-				// children is in the target, and only the mark of the omitted children is printed.
+				// children is in the target, and only the mark of the omitted children is printed. The mark of the
+				// event which follows another mark at the same depth is omitted.
 				if (!is_in_target_time_range(node.view.time_range))
 				{
-					OutputLog<L"        {}...">(printer, line_prefix);
+					if (!is_ellipsis_printed[depth])
+					{
+						is_ellipsis_printed[depth] = true;
+						OutputLog<L"        {}...">(printer, line_prefix);
+					}
 					return;
 				}
+
+				// The event is printed, so the next mark of this depth is printed again.
+				is_ellipsis_printed[depth] = false;
 
 				std::u8string_view event_name = events_manager.GetEventSpec(node.view.event_id).name_view;
 				auto exclude_time = event_scope.GetExcludeTime(node.view, context_switch_provider);

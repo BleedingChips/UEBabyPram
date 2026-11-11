@@ -33,9 +33,6 @@ namespace UEBabyPram::InsightFilter
 		struct MatchedOccurrence
 		{
 			ThreadCPUEventView::EventView event_view;
-			// The name of the matched event, it points into the string blocks of the events manager, which are
-			// never moved while the analysis is running, so the view is valid for the whole call.
-			std::u8string_view event_name;
 			std::size_t query_index = 0;
 		};
 	}
@@ -43,11 +40,11 @@ namespace UEBabyPram::InsightFilter
 	EventStatisticParser::EventStatisticParser(Config in_config)
 		: resource(in_config.resource)
 		, context_switch_streamer(ContextSwitchStreamer::Config{ 3, DurationSec{ 1 }, &resource })
-		, events_manager(EventSpecManager::Config{ false, &resource })
+		, game_frame_recoder(GameFrameRecoder::Config{ &resource })
 		, query_mapping(EventQueryMapping::Config{ std::move(in_config.queries), &resource })
 		, event_statistics(&resource)
+		, scope_event_ids(&resource)
 		, top_count(in_config.top_count)
-		, max_context_depth(in_config.max_context_depth)
 	{
 		// The queries are built and checked by the creator of the config, so the parser only takes the
 		// ones which are ready to be analyzed.
@@ -61,31 +58,42 @@ namespace UEBabyPram::InsightFilter
 		// of the stack tree only looks the thread of the tree up in the query which it belongs to, and
 		// IsThreadRequired() is answered from the same ids.
 		query_mapping.AddThread(thread_id, thread_system_id, thread_name);
+		game_frame_recoder.RecordThread(thread_id, thread_system_id, thread_name);
 	}
 
 	void EventStatisticParser::OnCPUEventDiscovered(EventID id, std::wstring_view event_name, std::wstring_view file_name, std::size_t file_line)
 	{
-		// Every event spec is stored, the name of an event is resolved from the manager when its
-		// statistic is reported, and the events which only complete a call chain are resolved by the
-		// query system, which needs the name of every event as well.
-		// The return value of AddEvent tells whether this is the first time the event is stored, so the
-		// name of an event spec is only resolved once.
-		if (events_manager.AddEvent(id, event_name, file_name, file_line))
-		{
-			query_mapping.AddEvent(id, event_name);
-		}
+		// The name of the event is resolved by the query system, which keeps the ids of every chain element, and the
+		// statistic of the event is created for every element which exports it, with a copy of the name of the event,
+		// so the report does not need the events manager. The file and the line of the spec are not used here.
+		query_mapping.AddEvent(id, event_name, [this, &event_name](EventID exported_id, std::size_t query_index, std::size_t node_index) {
+			AddEventStatistic(query_index, exported_id, event_name);
+		});
+
+		game_frame_recoder.RecordEvent(id, event_name);
 	}
 
 	void EventStatisticParser::OnCPUScopeEventDiscovered(EventID id, std::u8string_view event_name)
 	{
-		// The event of the CPU scope logger carries no file and no line, its name is the only
-		// information of the spec, but it is carried by the stack tree as well, so it is resolved the
-		// same way as the event of the event spec. The name is already UTF-8, which is what the matcher
-		// needs, so it is resolved in place without any conversion.
-		if (events_manager.AddEvent(id, event_name, {}, 0))
+		// The event of the CPU scope logger is reported many times with the same id, so the ids which are already
+		// handled are kept and only a new id is resolved, the same as the event of the event spec. The name is
+		// already UTF-8, which is what the matcher needs, so it is resolved in place without any conversion.
+		if (!id)
 		{
-			query_mapping.AddEvent(id, event_name);
+			return;
 		}
+
+		if (std::find(scope_event_ids.begin(), scope_event_ids.end(), id) != scope_event_ids.end())
+		{
+			return;
+		}
+		scope_event_ids.push_back(id);
+
+		query_mapping.AddEvent(id, event_name, [this, &event_name](EventID exported_id, std::size_t query_index, std::size_t node_index) {
+			AddEventStatistic(query_index, exported_id, event_name);
+		});
+
+		game_frame_recoder.RecordEvent(id, event_name);
 	}
 
 	bool EventStatisticParser::IsParserRequired(ParserRequireFlag flag) const
@@ -105,7 +113,9 @@ namespace UEBabyPram::InsightFilter
 		// A query which carries no thread condition counts every thread, so this is only false when every
 		// query carries a thread condition which the thread is not matched by, and such a thread carries
 		// no event which has to be counted.
-		return query_mapping.IsThreadMatched(thread_id);
+		// The game thread is analyzed even when no query counts it, because the game frames which the occurrences are
+		// grouped by are the stack trees of the game thread.
+		return query_mapping.IsThreadMatched(thread_id) || game_frame_recoder.IsGameThread(thread_id);
 	}
 
 	bool EventStatisticParser::IsThreadRequired(ThreadSystemID thread_system_id) const
@@ -133,27 +143,31 @@ namespace UEBabyPram::InsightFilter
 
 	void EventStatisticParser::OnCPUStackTree(ThreadCPUEventView event_scope)
 	{
+		// The stack tree is offered to the recorder of the game frames as well: the tree of the game thread which begins
+		// with the event which begins a frame is the time range of that frame.
+		game_frame_recoder.OnCPUStackTree(event_scope);
+
 		// The query system has already filtered the thread, the time and the whole call chain of every
 		// query, so every match which it visits is an occurrence which the query counts, and the
 		// statistics of the match only have to be accumulated.
 		//
-		// Two matches of one query may be the same call, though: an event name may appear in more than one
+		// Two matches of one query may be the same call, though: an event may appear in more than one
 		// chain element, and the elements of a chain do not have to be the nearest descendants, so the
-		// same name can be reported by several elements with overlapping time ranges. The matches of one
+		// same event can be reported by several elements with overlapping time ranges. The matches of one
 		// query are collected first, and the ones whose time ranges overlap are collapsed into the longest
 		// one, the shorter ones are the same call seen from another element. The matches of two queries
-		// are never compared, so the same name is still counted independently by both of them.
+		// are never compared, so the same event is still counted independently by both of them.
 		std::pmr::vector<MatchedOccurrence> occurrences(&resource);
 
 		query_mapping.ForEachMatchedEvent(event_scope, [&](EventQueryMapping::EventMatch const& match) {
-			std::u8string_view event_name = events_manager.GetEventSpec(match.event_view.event_id).name_view;
+			EventID event_id = match.event_view.event_id;
 
 			for (std::size_t index = 0; index < occurrences.size();)
 			{
 				auto const& exist = occurrences[index];
 				if (
 					exist.query_index == match.query_index
-					&& exist.event_name == event_name
+					&& exist.event_view.event_id == event_id
 					&& exist.event_view.time_range.IsOverlap(match.event_view.time_range)
 					)
 				{
@@ -172,35 +186,35 @@ namespace UEBabyPram::InsightFilter
 				++index;
 			}
 
-			occurrences.push_back(MatchedOccurrence{ match.event_view, event_name, match.query_index });
+			occurrences.push_back(MatchedOccurrence{ match.event_view, match.query_index });
 		});
 
 		// The occurrences which are left are the calls which have to be counted, the exclude time of an
-		// occurrence is the duration of its subtree without the time of its child events.
+		// occurrence is the duration of its subtree without the time of its child events. The statistic of the
+		// occurrence is found by the query and by the id of the event, which is what the statistic is keyed by,
+		// and the occurrence is dropped when no statistic carries it.
 		for (auto const& occurrence : occurrences)
 		{
+			auto statistic = FindEventStatistic(occurrence.query_index, occurrence.event_view.event_id);
+			if (statistic == nullptr)
+			{
+				continue;
+			}
+
 			DurationSec exclude_time = DurationSec::zero();
 			if (auto exclude_statistic = event_scope.GetExcludeTime(occurrence.event_view); exclude_statistic)
 			{
 				exclude_time = exclude_statistic->active_time;
 			}
 
-			RecordEventOccurrence(
-				event_scope,
-				occurrence.event_view,
-				exclude_time,
-				GetNameStatistic(occurrence.query_index, occurrence.event_view.event_id)
-			);
+			RecordEventOccurrence(event_scope, occurrence.event_view, exclude_time, *statistic);
 		}
 	}
 
-	EventStatisticParser::EventStatistic& EventStatisticParser::GetNameStatistic(std::size_t query_index, EventID id)
+	EventStatisticParser::EventStatistic* EventStatisticParser::FindEventStatistic(std::size_t query_index, EventID id)
 	{
-		assert(query_index < query_mapping.GetQueries().size());
-		std::u8string_view event_name = events_manager.GetEventSpec(id).name_view;
-
-		// The statistic is keyed by the query and by the name of the event: one name keeps one statistic
-		// inside one query, and two queries never share a statistic.
+		// The statistic is keyed by the query and by the name of the event, and it carries the ids of the events which
+		// the name belongs to, so the stack tree finds the statistic of its event by the id.
 		for (auto& statistic : event_statistics)
 		{
 			if (statistic.query_index != query_index)
@@ -208,27 +222,48 @@ namespace UEBabyPram::InsightFilter
 				continue;
 			}
 
-			assert(!statistic.event_ids.empty());
-			auto current_name = events_manager.GetEventSpec(statistic.event_ids.front()).name_view;
-			if (event_name == current_name)
+			if (std::find(statistic.event_ids.begin(), statistic.event_ids.end(), id) != statistic.event_ids.end())
 			{
-				// The same id is counted by every one of its occurrences, so it is only kept once.
-				if (std::find(statistic.event_ids.begin(), statistic.event_ids.end(), id) == statistic.event_ids.end())
-				{
-					statistic.event_ids.push_back(id);
-				}
-				return statistic;
+				return &statistic;
 			}
 		}
 
-		// A new statistic is only created for a name which the query does not count yet, so every name
-		// which the query matches keeps its own timing.
+		return nullptr;
+	}
+
+	EventStatisticParser::EventStatistic& EventStatisticParser::AddEventStatistic(std::size_t query_index, EventID id, std::u8string_view event_name)
+	{
+		// The statistic is found by the name first: the events which carry the same name share one statistic inside one
+		// query, and only the id is pushed into it, so the name is only copied when it is not counted yet.
+		for (auto& statistic : event_statistics)
+		{
+			if (statistic.query_index != query_index || statistic.event_name != event_name)
+			{
+				continue;
+			}
+
+			if (std::find(statistic.event_ids.begin(), statistic.event_ids.end(), id) == statistic.event_ids.end())
+			{
+				statistic.event_ids.push_back(id);
+			}
+			return statistic;
+		}
+
 		auto& statistic = event_statistics.emplace_back(&resource);
 		statistic.query_index = query_index;
 		statistic.event_ids.push_back(id);
+		statistic.event_name.assign(event_name.begin(), event_name.end());
 		return statistic;
 	}
 
+	EventStatisticParser::EventStatistic& EventStatisticParser::AddEventStatistic(std::size_t query_index, EventID id, std::wstring_view event_name)
+	{
+		// The name of an event spec is wide, it is encoded into the temporary storage first, so the name is compared and
+		// copied in the same form as the name which is UTF-8 already.
+		std::pmr::u8string encoded_event_name{ &resource };
+		Potato::Encode::UnicodeEncoder<wchar_t, char8_t>::EncodeTo(event_name, std::back_inserter(encoded_event_name));
+		return AddEventStatistic(query_index, id, std::u8string_view{ encoded_event_name });
+	}
 	void EventStatisticParser::RecordEventOccurrence(ThreadCPUEventView event_scope, ThreadCPUEventView::EventView event_view, DurationSec exclude_time, EventStatistic& statistic)
 	{
 		// The duration of the occurrence is the whole time which it takes.
@@ -240,6 +275,7 @@ namespace UEBabyPram::InsightFilter
 		statistic.total_duration += duration;
 		statistic.total_exclude_time += exclude_time;
 		statistic.durations.push_back(duration);
+		statistic.occurrence_time_ranges.push_back(event_view.time_range);
 
 		if (top_count == 0)
 		{
@@ -252,7 +288,7 @@ namespace UEBabyPram::InsightFilter
 		// occurrence, its name is resolved when the occurrence is reported, and the exclude time
 		// without the context switch time is initialized to the exclude time, the context switch time
 		// is only removed in AllAnalyzeDone(), when the context switch events are complete.
-		auto& occurrence = statistic.top_occurrences.emplace_back(&resource);
+		auto& occurrence = statistic.top_occurrences.emplace_back();
 		occurrence.time_range = event_view.time_range;
 		occurrence.depth = event_view.depth;
 		occurrence.exclude_time = exclude_time;
@@ -274,9 +310,8 @@ namespace UEBabyPram::InsightFilter
 			}
 		}
 
-		// The occurrence is kicked out right away when it is the shortest one of a full list, and the
-		// time of its own children and parents is only collected after it is confirmed to be kept, so an
-		// occurrence which does not rank in the top N never walks its call context.
+		// The occurrence is kicked out right away when it is the shortest one of a full list, so the
+		// occurrences which do not rank in the top N of the statistic are never kept.
 		if (statistic.top_occurrences.size() > top_count)
 		{
 			auto shortest = std::min_element(
@@ -292,105 +327,6 @@ namespace UEBabyPram::InsightFilter
 				if (is_new_occurrence)
 				{
 					return;
-				}
-			}
-		}
-
-		// The occurrence is kept in the top N of the statistic, so the time of the events of its call
-		// context is collected as well. The container may have been shifted by the erase above, so the
-		// occurrence is taken from the back of the list again.
-		auto& recorded_occurrence = statistic.top_occurrences.back();
-
-		// The ancestors of the occurrence are collected from the direct parent outwards, but only the
-		// ones which are not deeper than the depth limit, so the list is reversed after the walk to keep
-		// the call order, the outermost kept ancestor is the first one.
-		std::size_t parent_depth = 1;
-		auto parent_view = event_scope.FindParentEvent({}, event_view);
-		while (parent_view && parent_depth <= max_context_depth)
-		{
-			DurationSec parent_exclude_time = DurationSec::zero();
-			if (auto parent_statis = event_scope.GetExcludeTime(parent_view); parent_statis)
-			{
-				parent_exclude_time = parent_statis->active_time;
-			}
-			recorded_occurrence.parent_events.push_back(ContextEvent{
-				.event_id = parent_view.event_id,
-				.duration = parent_view.time_range.Size(),
-				.exclude_time = parent_exclude_time,
-				.time_range = parent_view.time_range,
-				.depth = parent_view.depth
-			});
-			parent_view = event_scope.FindParentEvent({}, parent_view);
-			++parent_depth;
-		}
-		std::reverse(recorded_occurrence.parent_events.begin(), recorded_occurrence.parent_events.end());
-
-		// The descendants of the occurrence are collected in the call order: the subtree of every recorded
-		// node is entered as well, so every child of a node which has several children is recorded. Only
-		// the descendants which are not deeper than the depth limit are kept; a node which is already at
-		// the limit keeps a placeholder for its children instead of them, and its subtree is not entered,
-		// so the events beyond the limit are neither recorded nor reported.
-		if (max_context_depth == 0)
-		{
-			auto child_view = event_scope.FindNextEvent({}, { event_view.index_range.Begin() + 1, event_view.index_range.End() });
-			if (child_view)
-			{
-				recorded_occurrence.child_events.push_back(ContextEvent{
-					.depth = event_view.depth + 1,
-					.is_ellipsis = true
-				});
-			}
-		}
-		else
-		{
-			std::size_t descendant_offset = event_view.index_range.Begin() + 1;
-			while (descendant_offset < event_view.index_range.End())
-			{
-				auto descendant_view = event_scope.FindNextEvent({}, { descendant_offset, event_view.index_range.End() });
-				if (!descendant_view)
-				{
-					break;
-				}
-
-				assert(descendant_view.depth > event_view.depth);
-				std::size_t depth_offset = descendant_view.depth - event_view.depth;
-				if (depth_offset > max_context_depth)
-				{
-					// The whole subtree of the event is deeper than the limit, so it is skipped.
-					descendant_offset = descendant_view.index_range.End();
-					continue;
-				}
-
-				DurationSec descendant_exclude_time = DurationSec::zero();
-				if (auto descendant_statis = event_scope.GetExcludeTime(descendant_view); descendant_statis)
-				{
-					descendant_exclude_time = descendant_statis->active_time;
-				}
-				recorded_occurrence.child_events.push_back(ContextEvent{
-					.event_id = descendant_view.event_id,
-					.duration = descendant_view.time_range.Size(),
-					.exclude_time = descendant_exclude_time,
-					.time_range = descendant_view.time_range,
-					.depth = descendant_view.depth
-				});
-
-				if (depth_offset == max_context_depth)
-				{
-					// The children of the event are beyond the limit, the placeholder takes their place
-					// and the subtree is not entered.
-					auto child_view = event_scope.FindNextEvent({}, { descendant_view.index_range.Begin() + 1, descendant_view.index_range.End() });
-					if (child_view)
-					{
-						recorded_occurrence.child_events.push_back(ContextEvent{
-							.depth = descendant_view.depth + 1,
-							.is_ellipsis = true
-						});
-					}
-					descendant_offset = descendant_view.index_range.End();
-				}
-				else
-				{
-					descendant_offset = descendant_view.index_range.Begin() + 1;
 				}
 			}
 		}
@@ -438,6 +374,13 @@ namespace UEBabyPram::InsightFilter
 			}
 			statistic.duration_standard_deviation = DurationSec{ std::sqrt(square_distance / static_cast<double>(statistic.count)) };
 
+			// The statistics which are merged by the count of the occurrences inside one game frame are built now, when
+			// the frames are complete, and the game frame in which the event took the most time is found as well.
+			BuildFrameStatistic(statistic);
+
+			// The histogram of the duration of the single occurrence is built from the sorted durations as well.
+			BuildDurationDistribution(statistic);
+
 			// The context switch events are complete now, so the time which the thread spent out of
 			// the CPU in the whole time range of the occurrence is kept as the context switch time of
 			// the occurrence and removed from its exclude time, which the occurrence is initialized
@@ -467,26 +410,6 @@ namespace UEBabyPram::InsightFilter
 					DurationSec::zero(),
 					occurrence.exclude_time_without_context_switch - switched_out_time
 				);
-
-				// The context switch time of every event of the call context is resolved the same way,
-				// the placeholders carry no time range and they are skipped.
-				auto resolve_context_switch = [&](ContextEvent& context_event)
-				{
-					if (context_event.is_ellipsis)
-					{
-						return;
-					}
-					auto context_event_statis = get_context_switch_statis(context_event.time_range);
-					context_event.context_switch_time = context_event.time_range.Size() - context_event_statis.removed_context_switch_time;
-				};
-				for (auto& parent_event : occurrence.parent_events)
-				{
-					resolve_context_switch(parent_event);
-				}
-				for (auto& child_event : occurrence.child_events)
-				{
-					resolve_context_switch(child_event);
-				}
 			}
 
 			// Report the longest occurrence of the top list first, the shortest one is the last, the
@@ -496,6 +419,150 @@ namespace UEBabyPram::InsightFilter
 				});
 		}
 	}
+
+	void EventStatisticParser::BuildFrameStatistic(EventStatistic& statistic)
+	{
+		std::size_t frame_count = game_frame_recoder.GetFrameCount();
+		if (frame_count == 0 || statistic.occurrence_time_ranges.empty())
+		{
+			return;
+		}
+
+		// The count of the occurrences of the event and the time which they took inside every game frame.
+		struct FrameRecord
+		{
+			std::size_t count = 0;
+			DurationSec total_duration = DurationSec::zero();
+		};
+
+		std::pmr::vector<FrameRecord> frame_records(&resource);
+		frame_records.resize(frame_count);
+
+		for (auto& occurrence_time_range : statistic.occurrence_time_ranges)
+		{
+			// The frame of an occurrence is the one which carries its beginning; the recorder locates the first frame
+			// whose end is greater than the point, and a point which is before the begin of that frame belongs to no frame.
+			std::size_t frame_index = game_frame_recoder.LocateFirstFrameIndex(occurrence_time_range.Begin());
+			if (frame_index >= frame_count)
+			{
+				continue;
+			}
+
+			if (occurrence_time_range.Begin() < game_frame_recoder.GetFrameTimeRange(frame_index).Begin())
+			{
+				continue;
+			}
+
+			frame_records[frame_index].count += 1;
+			frame_records[frame_index].total_duration += occurrence_time_range.Size();
+		}
+
+		// The frames are merged by the count of the occurrences which they carry: every count keeps how many frames carry
+		// it and the sum of the time which the event took inside those frames, which is averaged below.
+		for (std::size_t frame_index = 0; frame_index < frame_records.size(); ++frame_index)
+		{
+			auto const& frame_record = frame_records[frame_index];
+			if (frame_record.count == 0)
+			{
+				continue;
+			}
+
+			auto find = std::find_if(
+				statistic.frame_count_statistics.begin(),
+				statistic.frame_count_statistics.end(),
+				[&](EventStatistic::FrameCountStatistic const& ite) { return ite.count == frame_record.count; }
+			);
+
+			if (find == statistic.frame_count_statistics.end())
+			{
+				auto& frame_count_statistic = statistic.frame_count_statistics.emplace_back();
+				frame_count_statistic.count = frame_record.count;
+				frame_count_statistic.frame_count = 1;
+				frame_count_statistic.mean_duration = frame_record.total_duration;
+				frame_count_statistic.longest_frame_time_range = game_frame_recoder.GetFrameTimeRange(frame_index);
+				frame_count_statistic.longest_frame_duration = frame_record.total_duration;
+			}
+			else {
+				find->frame_count += 1;
+				find->mean_duration += frame_record.total_duration;
+
+				// The longest frame is only kept inside the count which it carries, so every count tells the frame in which
+				// the event took the most time when it occurred that count of times in one frame.
+				if (frame_record.total_duration > find->longest_frame_duration)
+				{
+					find->longest_frame_duration = frame_record.total_duration;
+					find->longest_frame_time_range = game_frame_recoder.GetFrameTimeRange(frame_index);
+				}
+			}
+		}
+
+		// The sum of the time of a count is averaged by the count of the frames which carry it, and the counts are
+		// reported in the ascending order.
+		for (auto& frame_count_statistic : statistic.frame_count_statistics)
+		{
+			if (frame_count_statistic.frame_count > 0)
+			{
+				frame_count_statistic.mean_duration = frame_count_statistic.mean_duration / static_cast<double>(frame_count_statistic.frame_count);
+			}
+		}
+
+		std::sort(
+			statistic.frame_count_statistics.begin(),
+			statistic.frame_count_statistics.end(),
+			[](EventStatistic::FrameCountStatistic const& left, EventStatistic::FrameCountStatistic const& right) {
+				return left.count < right.count;
+			}
+		);
+	}
+
+
+	void EventStatisticParser::BuildDurationDistribution(EventStatistic& statistic)
+	{
+		// The histogram is only built for the events which occur more than top_count times, a histogram of a few
+		// occurrences tells nothing.
+		if (top_count == 0 || statistic.count <= top_count || statistic.durations.empty())
+		{
+			return;
+		}
+
+		// The durations are sorted before this is called, so the first one is the shortest and the last one is the
+		// longest, and the range between them is split into top_count buckets of the same width.
+		double min_duration = statistic.durations.front().count();
+		double max_duration = statistic.durations.back().count();
+		double bucket_width = (max_duration - min_duration) / static_cast<double>(top_count);
+
+		statistic.duration_distribution.resize(top_count);
+		for (std::size_t bucket_index = 0; bucket_index < top_count; ++bucket_index)
+		{
+			auto& bucket = statistic.duration_distribution[bucket_index];
+			bucket.duration_range = Potato::Misc::IndexSpan<DurationSec>{
+				DurationSec{ min_duration + bucket_width * static_cast<double>(bucket_index) },
+				DurationSec{ min_duration + bucket_width * static_cast<double>(bucket_index + 1) }
+			};
+			bucket.count = 0;
+			bucket.percent = 0.0;
+		}
+
+		for (auto const& duration : statistic.durations)
+		{
+			// The bucket of a duration is found by its distance from the shortest one, and the longest duration, which
+			// is on the end of the last bucket, is counted by the last bucket.
+			std::size_t bucket_index = top_count - 1;
+			if (bucket_width > 0.0)
+			{
+				std::size_t index = static_cast<std::size_t>((duration.count() - min_duration) / bucket_width);
+				if (index < top_count)
+				{
+					bucket_index = index;
+				}
+			}
+
+			auto& bucket = statistic.duration_distribution[bucket_index];
+			bucket.count += 1;
+			bucket.percent = static_cast<double>(bucket.count) / static_cast<double>(statistic.count) * 100.0;
+		}
+	}
+
 
 	void EventStatisticParser::PrintEventStatistic(Potato::Log::LogPrinter& printer, EventStatistic const& statistic) const
 	{
@@ -507,17 +574,11 @@ namespace UEBabyPram::InsightFilter
 			return;
 		}
 
-		// The name of the event is not stored by the statistic, it is taken from the events manager with
-		// the first id of the statistic.
-		std::u8string_view event_name = u8"<Unknow>";
-		if (!statistic.event_ids.empty())
-		{
-			auto event_spec = events_manager.GetEventSpec(statistic.event_ids.front());
-			if (!event_spec.name_view.empty())
-			{
-				event_name = event_spec.name_view;
-			}
-		}
+		// The name of the event is the copy which the statistic carries, so the report is built from the statistic
+		// alone.
+		std::u8string_view event_name = statistic.event_name.empty()
+			? std::u8string_view{ u8"<Unknow>" }
+			: std::u8string_view{ statistic.event_name };
 
 		// The statistic is only reported when it has at least one occurrence, so the count is never zero
 		// here.
@@ -573,149 +634,45 @@ namespace UEBabyPram::InsightFilter
 			++index;
 		}
 
-		// The call context of every one of the top occurrences is reported after the top list as a call
-		// tree which is drawn with box drawing characters. The parents are the levels above the
-		// occurrence and the children are the levels below it, the occurrence itself is the last level
-		// of the parents and the first level of the children, and it is marked with '***[...]***', the
-		// other events are marked with '[...]' inside '<>'. The levels are connected with the box
-		// drawing characters (U+251C, U+2514, U+2500 and U+2502), and a '...' line stands for the
-		// levels which are omitted by the depth limit.
-		std::size_t occurrence_index = 0;
-		for (auto const& occurrence : statistic.top_occurrences)
+		// The statistics which are merged by the count of the occurrences inside one game frame: every count keeps how
+		// many game frames carry it, the mean of the time which the event took inside those frames, and the frame of that
+		// count in which the event took the most time.
+		if (!statistic.frame_count_statistics.empty())
 		{
-			auto resolve_name = [&](EventID id) -> std::u8string_view {
-				if (!id)
-				{
-					return u8"<Unknow>";
-				}
-				auto event_spec = events_manager.GetEventSpec(id);
-				return event_spec.name_view.empty() ? std::u8string_view{ u8"<Unknow>" } : event_spec.name_view;
-			};
+			OutputLog<L"                GameFrame Statistics:">(printer);
 
-			DisplayTimePoint begin_time{ occurrence.time_range.Begin() };
-			DisplayTimePoint end_time{ occurrence.time_range.End() };
-			OutputLog<L"                Event <{}> Call Context: TR: [{}, {}]">(printer, occurrence_index, begin_time, end_time);
-			OutputLog<L"                Parents:">(printer);
-
-			// The ancestors which are above the first kept parent are omitted when the depth limit cuts
-			// the chain, the ellipsis takes their place.
-			bool has_omitted_parent = occurrence.parent_events.empty()
-				? occurrence.depth != 0
-				: occurrence.parent_events.front().depth != 0;
-			if (has_omitted_parent)
+			// Every count of the occurrences inside one game frame keeps how many frames carry it, the mean of the time which
+			// the event took inside those frames, and the frame of that count in which it took the most time.
+			for (auto const& frame_count_statistic : statistic.frame_count_statistics)
 			{
-				OutputLog<L"                    ...">(printer);
-			}
-
-			// The parents are stored from the outermost kept ancestor to the direct parent, so every
-			// level is the only child of the level above it, the current event is the last level.
-			std::wstring parent_prefix;
-			bool first_parent = true;
-			for (auto const& parent : occurrence.parent_events)
-			{
-				std::wstring line_prefix;
-				if (!first_parent)
-				{
-					line_prefix = parent_prefix + L"\u2514\u2500 ";
-				}
-
-				OutputLog<L"                    {}<{}>, D:<{:.3f}ms>, E:<{:.3f}ms>, CS:<{:.3f}ms>">(
+				OutputLog<L"                    <{} Time(s) In One Frame>: Frames <{}>, Mean Total D:<{:.3f}ms>, Longest TR:<[{}, {}]>, Longest D:<{:.3f}ms>">(
 					printer,
-					line_prefix,
-					resolve_name(parent.event_id),
-					parent.duration.count() * 1000.0,
-					parent.exclude_time.count() * 1000.0,
-					parent.context_switch_time.count() * 1000.0
-				);
-
-				if (!first_parent)
-				{
-					parent_prefix += L"   ";
-				}
-				first_parent = false;
-			}
-
-			std::wstring occurrence_prefix;
-			if (!occurrence.parent_events.empty())
-			{
-				occurrence_prefix = parent_prefix + L"\u2514\u2500 ";
-			}
-
-			OutputLog<L"                    {}***[{}]***, D:<{:.3f}ms>, E:<{:.3f}ms>, CS:<{:.3f}ms>">(
-				printer,
-				occurrence_prefix,
-				event_name,
-				occurrence.time_range.Size().count() * 1000.0,
-				occurrence.exclude_time.count() * 1000.0,
-				occurrence.context_switch_time.count() * 1000.0
-			);
-
-			OutputLog<L"                Children:">(printer);
-
-			// The first level of the children is the current event itself, it is the root of the
-			// children tree and it is printed without any connector.
-			OutputLog<L"                    ***[{}]***, D:<{:.3f}ms>, E:<{:.3f}ms>, CS:<{:.3f}ms>">(
-				printer,
-				event_name,
-				occurrence.time_range.Size().count() * 1000.0,
-				occurrence.exclude_time.count() * 1000.0,
-				occurrence.context_switch_time.count() * 1000.0
-			);
-
-			// The children are stored in the call order, so the last child of every level is found by
-			// looking for the next sibling before the next level which is above it. The levels which
-			// have a next sibling are followed by a vertical bar, the others by spaces.
-			std::vector<bool> sibling_is_last;
-			for (std::size_t child_index = 0; child_index < occurrence.child_events.size(); ++child_index)
-			{
-				auto const& child = occurrence.child_events[child_index];
-				std::size_t depth = child.depth - occurrence.depth;
-
-				bool is_last = true;
-				for (std::size_t next_index = child_index + 1; next_index < occurrence.child_events.size(); ++next_index)
-				{
-					std::size_t next_depth = occurrence.child_events[next_index].depth - occurrence.depth;
-					if (next_depth < depth)
-					{
-						break;
-					}
-					if (next_depth == depth)
-					{
-						is_last = false;
-						break;
-					}
-				}
-
-				if (sibling_is_last.size() <= depth)
-				{
-					sibling_is_last.resize(depth + 1, false);
-				}
-				sibling_is_last[depth] = is_last;
-
-				std::wstring line_prefix;
-				for (std::size_t level = 1; level < depth; ++level)
-				{
-					line_prefix += sibling_is_last[level] ? L"   " : L"\u2502  ";
-				}
-				line_prefix += is_last ? L"\u2514\u2500 " : L"\u251C\u2500 ";
-
-				if (child.is_ellipsis)
-				{
-					OutputLog<L"                    {}...">(printer, line_prefix);
-					continue;
-				}
-
-				OutputLog<L"                    {}<{}>, D:<{:.3f}ms>, E:<{:.3f}ms>, CS:<{:.3f}ms>">(
-					printer,
-					line_prefix,
-					resolve_name(child.event_id),
-					child.duration.count() * 1000.0,
-					child.exclude_time.count() * 1000.0,
-					child.context_switch_time.count() * 1000.0
+					frame_count_statistic.count,
+					frame_count_statistic.frame_count,
+					frame_count_statistic.mean_duration.count() * 1000.0,
+					DisplayTimePoint{ frame_count_statistic.longest_frame_time_range.Begin() },
+					DisplayTimePoint{ frame_count_statistic.longest_frame_time_range.End() },
+					frame_count_statistic.longest_frame_duration.count() * 1000.0
 				);
 			}
+		}
 
-			++occurrence_index;
+		// The histogram of the duration of the single occurrence: the range of every bucket and the share of the
+		// occurrences which fell into it.
+		if (!statistic.duration_distribution.empty())
+		{
+			OutputLog<L"                Duration Distribution <{}> Bucket(s):">(printer, statistic.duration_distribution.size());
+
+			for (auto const& bucket : statistic.duration_distribution)
+			{
+				OutputLog<L"                    <[{:.3f}ms, {:.3f}ms]>, Count:<{}>, Percent:<{:.2f}%>">(
+					printer,
+					bucket.duration_range.Begin().count() * 1000.0,
+					bucket.duration_range.End().count() * 1000.0,
+					bucket.count,
+					bucket.percent
+				);
+			}
 		}
 	}
 
@@ -726,10 +683,6 @@ namespace UEBabyPram::InsightFilter
 		OutputLog<L"EventStatisticParser Output:">(printer);
 
 		OutputLog<L"    (D: Duration of the single occurrence; E: Exclude Time, the duration without the time of the child events; ENCS: Exclude Time WithOut Context Switch Time; CS: Context Switch Time, the time which the thread spent out of the CPU in the time range of the occurrence; Mean D / Median D / Std D: the mean, the median and the standard deviation of the single duration; TName: the name of the thread which the occurrence happened on; TR: Time Range of the occurrence)">(
-			printer
-		);
-
-		OutputLog<L"    (The call context of every top occurrence is reported after the top list, every one of them is introduced with its index and time range: the parents are the levels above the occurrence and the last one of them is the occurrence itself, the children section starts with the occurrence itself and the levels below it follow, the occurrence which is being reported is wrapped with '***[...]***' and the other events are wrapped with '<...>', the levels are connected with box drawing characters, a '...' stands for the levels which the depth limit omits, and D, E and CS are the ones of every event in that occurrence)">(
 			printer
 		);
 
@@ -793,21 +746,21 @@ namespace UEBabyPram::InsightFilter
 
 			// The statistics which belong to this query, every one of them is keyed by the query and by the
 			// name of the event, so the statistics of two queries are never mixed.
-			std::size_t counted_name_count = 0;
+			std::size_t counted_event_count = 0;
 			for (auto const& statistic : event_statistics)
 			{
 				if (statistic.query_index == query_index && statistic.count != 0)
 				{
-					++counted_name_count;
+					++counted_event_count;
 				}
 			}
 
-			if (counted_name_count == 0)
+			if (counted_event_count == 0)
 			{
 				continue;
 			}
 
-			OutputLog<L"        <{}> Event Name(s):">(printer, counted_name_count);
+			OutputLog<L"        <{}> Event(s):">(printer, counted_event_count);
 
 			for (auto const& statistic : event_statistics)
 			{

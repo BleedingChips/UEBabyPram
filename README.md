@@ -86,7 +86,7 @@ UEBabyPramLogFilter -f "D:\Logs\MyGame.log" -c "Level >= Error" -ostd -or 0 50
 |------|------|------|
 | 默认 | 无 | GameThread 帧耗时分析 |
 | 事件位置 | `-r, --regex <regex>` | 按事件名正则搜索事件定义位置 |
-| 事件统计 | `-es, --event_stat <query>` | 统计匹配事件的耗时、Top N 最长 occurrence 及其调用上下文 |
+| 事件统计 | `-es, --event_stat <query>` | 统计匹配事件的耗时与 Top N 最长 occurrence |
 | 详细堆栈 | `-ed, --event_detail <query>` | 保存匹配的 stack tree，按 box-drawing 打印详细调用堆栈 |
 | 火焰图 | `-ef, --event_flame_graph <query>` | 聚合匹配的调用路径生成火焰图 |
 | 线程搜索 | `-ts, --thread_search <regex>` | 按线程名正则搜索线程 |
@@ -121,7 +121,6 @@ TimePoint := Integer 'm' Decimal 's' | Decimal 's' | Integer 's' | Integer 'm' I
 |------|------|
 | `-f, --file <path>` | 必填，`.utrace` 文件路径 |
 | `-tx, --top_count <count>` | `-es` 每个事件名保留的 Top N 最长 occurrence，默认 5 |
-| `-mc, --max_context_depth <depth>` | `-es` 调用上下文相对 occurrence 的最大深度差，默认 6 |
 | `-mvc, --max_view_count <count>` | `-ed` 最多保存多少个 stack tree，默认 10 |
 | `-mlc, --max_location_count <count>` | `-r` 最多报告多少个事件位置，默认 256 |
 | `-mrf, --max_record_frame <count>` | 默认模式记录的最长帧数量，默认 10 |
@@ -145,7 +144,7 @@ UEBabyPramInsightFilter -f .\Capture.utrace
 UEBabyPramInsightFilter -f .\Capture.utrace -r "FEngineLoop::.*"
 
 # 统计 TickActor 的耗时
-UEBabyPramInsightFilter -f .\Capture.utrace -es "(^FEngineLoop::Tick^)->[^.*TickActor.*^]" -tx 10 -mc 8
+UEBabyPramInsightFilter -f .\Capture.utrace -es "(^FEngineLoop::Tick^)->[^.*TickActor.*^]" -tx 10
 
 # 保存并打印 UWorld::Tick 的详细堆栈
 UEBabyPramInsightFilter -f .\Capture.utrace -ed "[^UWorld::Tick^]" -mvc 5

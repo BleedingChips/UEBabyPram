@@ -96,14 +96,26 @@ namespace UEBabyPram::InsightFilter
 			return;
 		}
 
-		// The query system has already filtered the thread and the time of the query, the stack tree is
-		// only kept when at least one event of it completes the chain of the query.
-		bool matched = false;
-		query_mapping.ForEachMatchedEvent(event_scope, [&](EventQueryMapping::EventMatch const&) {
-			matched = true;
+		if (max_view_count == 0)
+		{
+			return;
+		}
+
+		// The query system has already filtered the thread and the time of the query, and it tells whether the
+		// whole call chain of the query is matched inside the tree, which is what the tree is aggregated by. The
+		// chain may carry no statistic element, so the answer does not depend on the matches. The query which keeps
+		// the tree is recorded with it, so the report of its call paths is limited by the time ranges of that query.
+		std::size_t query_index = 0;
+		bool has_query_index = false;
+		bool is_chain_matched = query_mapping.ForEachMatchedEvent(event_scope, [&](EventQueryMapping::EventMatch const& match) {
+			if (!has_query_index)
+			{
+				query_index = match.query_index;
+				has_query_index = true;
+			}
 		});
 
-		if (!matched || max_view_count == 0)
+		if (!is_chain_matched)
 		{
 			return;
 		}
@@ -140,6 +152,7 @@ namespace UEBabyPram::InsightFilter
 		// analyzed, so the events are copied and they are aggregated when the whole trace is analyzed.
 		auto& stored_view = stored_views.emplace_back(&resource);
 		stored_view.duration = duration;
+		stored_view.query_index = query_index;
 		stored_view.thread_id = event_scope.thread_id;
 		stored_view.system_thread_id = event_scope.system_thread_id;
 		stored_view.frame_count = event_scope.frame_count;
@@ -159,12 +172,40 @@ namespace UEBabyPram::InsightFilter
 				stored_view.system_thread_id,
 				std::span<ThreadCPUEvent const>{ stored_view.events },
 				stored_view.frame_count
-			});
+			},
+			stored_view.query_index
+		);
 		}
 	}
 
-	void EventFlameGraphParser::AggregateStackTree(ThreadCPUEventView event_scope)
+	void EventFlameGraphParser::AggregateStackTree(ThreadCPUEventView event_scope, std::size_t query_index)
 	{
+		// Only the occurrences which are inside the time ranges of the query are aggregated and reported: an
+		// occurrence which is entirely out of the ranges is not a part of the flame graph at all, and the occurrence
+		// which crosses the boundary of a range counts with its whole time, the time of an occurrence is never cut.
+		std::span<Potato::Misc::IndexSpan<DurationSec> const> query_time_ranges;
+		if (auto queries = query_mapping.GetQueries(); query_index < queries.size())
+		{
+			query_time_ranges = queries[query_index].time_ranges;
+		}
+
+		auto is_in_query_time_range = [query_time_ranges](Potato::Misc::IndexSpan<DurationSec> time_range) {
+			if (query_time_ranges.empty())
+			{
+				return true;
+			}
+
+			for (auto& query_time_range : query_time_ranges)
+			{
+				if (query_time_range.IsOverlap(time_range))
+				{
+					return true;
+				}
+			}
+
+			return false;
+		};
+
 		// The current call path: the depth of every level and the index of its node. The events are
 		// stored in the call order, so an event is a child of the event which is above it.
 		std::vector<std::pair<std::size_t, std::size_t>> path;
@@ -176,6 +217,15 @@ namespace UEBabyPram::InsightFilter
 			if (!current)
 			{
 				break;
+			}
+
+			offset = current.index_range.Begin() + 1;
+
+			if (!is_in_query_time_range(current.time_range))
+			{
+				// The occurrence is out of the time ranges of the query, and so is every descendant of it, so neither
+				// it nor the events below it is a part of the graph.
+				continue;
 			}
 
 			while (!path.empty() && path.back().first >= current.depth)
@@ -204,24 +254,10 @@ namespace UEBabyPram::InsightFilter
 			}
 
 			// The inclusive time of the call path is the duration of the event, which is the time from
-			// its beginning to the end of its subtree, and the time span which the path covers is the union of the
-			// ranges of its occurrences, which is what the required time range of the report is checked against.
-			auto& flame_node = nodes[child_index];
-			flame_node.total_duration += current.time_range.Size();
-			if (flame_node.has_time_range)
-			{
-				flame_node.time_range = Potato::Misc::IndexSpan<DurationSec>{
-					std::min(flame_node.time_range.Begin(), current.time_range.Begin()),
-					std::max(flame_node.time_range.End(), current.time_range.End())
-				};
-			}
-			else {
-				flame_node.time_range = current.time_range;
-				flame_node.has_time_range = true;
-			}
+			// its beginning to the end of its subtree.
+			nodes[child_index].total_duration += current.time_range.Size();
 
 			path.emplace_back(current.depth, child_index);
-			offset = current.index_range.Begin() + 1;
 		}
 	}
 
@@ -250,33 +286,6 @@ namespace UEBabyPram::InsightFilter
 
 		double total_count = total_duration.count();
 
-		// The time ranges of the query are the required range of the report: only the call paths which cover one of
-		// them are printed, and the path which covers none of them is omitted with its children.
-		std::span<Potato::Misc::IndexSpan<DurationSec> const> required_time_ranges;
-		if (auto queries = query_mapping.GetQueries(); !queries.empty())
-		{
-			required_time_ranges = queries.front().time_ranges;
-		}
-
-		auto is_in_required_time_range = [required_time_ranges](FlameNode const& node) {
-			// The path which carries no occurrence has no time to be checked, and the query which carries no time
-			// range requires every path.
-			if (required_time_ranges.empty() || !node.has_time_range)
-			{
-				return true;
-			}
-
-			for (auto& required_time_range : required_time_ranges)
-			{
-				if (required_time_range.IsOverlap(node.time_range))
-				{
-					return true;
-				}
-			}
-
-			return false;
-		};
-
 		// The flame graph is printed with box drawing characters, the children of a node are sorted by
 		// the time which they take, so the widest call is the first one, the same as a flame graph.
 		std::function<void(std::size_t, std::wstring const&, bool, bool)> print_node =
@@ -288,14 +297,6 @@ namespace UEBabyPram::InsightFilter
 			if (!is_root)
 			{
 				line_prefix = prefix + (is_last ? L"\u2514\u2500 " : L"\u251C\u2500 ");
-			}
-
-			// The call path is not in the required time range of the report, so neither it nor any of its children is
-			// reported, and only the mark of the omitted children is printed.
-			if (!is_in_required_time_range(node))
-			{
-				OutputLog<L"        {}...">(printer, line_prefix);
-				return;
 			}
 
 			std::u8string_view event_name = events_manager.GetEventSpec(node.event_id).name_view;

@@ -27,26 +27,24 @@ export namespace UEBabyPram::InsightFilter
 	// elements of the chain are its ancestors and the following ones are its descendants, in the order
 	// of the call (see EventQueryMapping).
 	//
-	// The statistics are keyed by the query which counts the event and by the name of the event: every
-	// query keeps its own statistics, so the same name is counted independently by two queries, and one
-	// name keeps one statistic inside one query.
+	// The statistics are keyed by the query which counts the event and by the id of the event: every query keeps its
+	// own statistics, so the same event is counted independently by two queries, and one event keeps one statistic
+	// inside one query. The name of the event is copied into the statistic when the event is discovered, so every
+	// event keeps its own timing even when two events carry the same name, and the report does not need a manager of
+	// the event specs.
 	//
-	// The matches of one query inside one stack tree are collapsed before they are counted: two matches
-	// whose time ranges overlap are the same call seen from two chain elements, so only the longest of
-	// them is counted and the shorter ones are ignored. The matches of two queries are never compared.
+	// The matches of one query inside one stack tree are collapsed before they are counted: two matches of the same
+	// event whose time ranges overlap are the same call seen from two chain elements, so only the longest of them is
+	// counted and the shorter ones are ignored. The matches of two queries are never compared.
 	//
-	// Every counted occurrence is accumulated into the statistic of its event name:
+	// Every counted occurrence is accumulated into the statistic of its event:
 	//   - the occurrence count, the total duration and the total exclude time (the duration without
 	//     the time spent in the child events),
 	//   - the median and the standard deviation of the duration of the single occurrence, which are
 	//     built from the stored occurrences in AllAnalyzeDone(),
 	//   - the time ranges of the top N (Config::top_count) longest occurrences, with the exclude time
 	//     of every one of them and its exclude time without the context switch time, which is built
-	//     in AllAnalyzeDone() when the context switch events are complete,
-	//   - the ancestors and the direct children of every top occurrence, with the exclude time of
-	//     every one of them in that occurrence.
-	// One event name may be carried by several event ids, the ids which carry a name are merged into
-	// the statistic of that name, so every name is counted separately.
+	//     in AllAnalyzeDone() when the context switch events are complete.
 	struct EventStatisticParser : public Parser
 	{
 		struct Config
@@ -62,46 +60,15 @@ export namespace UEBabyPram::InsightFilter
 			// How many of the longest occurrences of every event name are kept as a time range,
 			// 0 for none.
 			std::size_t top_count = 5;
-			// The maximum depth difference between the top occurrence and the parent and child events
-			// which are kept with it, 0 for none. The ancestors above the occurrence and the descendants
-			// below it are only kept when their depth difference is not greater than this value, the
-			// events beyond it are neither recorded nor reported.
-			std::size_t max_context_depth = 6;
 			std::pmr::memory_resource* resource = std::pmr::get_default_resource();
 		};
 
-		// One event of the call context of an occurrence: the event itself, the time which it consumed in
-		// the occurrence, its exclude time and its context switch time. The event is kept by id, the name
-		// is resolved with the events manager when the occurrence is reported.
-		struct ContextEvent
-		{
-			EventID event_id;
-			// The whole time which the event consumed in the occurrence, i.e. the size of its time range.
-			DurationSec duration = DurationSec::zero();
-			// The duration of the event without the time spent in its child events.
-			DurationSec exclude_time = DurationSec::zero();
-			// The time which the thread spent out of the CPU in the whole time range of the event, it is
-			// built in AllAnalyzeDone(), when the context switch events are complete.
-			DurationSec context_switch_time = DurationSec::zero();
-			// The whole time range of the event in the stack tree, it is kept to resolve the context
-			// switch time of the event in AllAnalyzeDone().
-			Potato::Misc::IndexSpan<DurationSec> time_range;
-			// The depth of the event in the stack tree.
-			std::size_t depth = 0;
-			// The placeholder of the descendants which are beyond the depth limit, it carries no
-			// information and it is printed as an ellipsis.
-			bool is_ellipsis = false;
-		};
-
 		// One of the longest occurrences of an event name, the time range of the occurrence, its
-		// exclude time, the context switch time, the exclude time without the context switch time,
-		// the thread which the occurrence happened on and the call context of the occurrence are
-		// kept, so that the occurrence can be reported.
+		// exclude time, the context switch time, the exclude time without the context switch time
+		// and the thread which the occurrence happened on are kept, so that the occurrence can be
+		// reported.
 		struct TopEventOccurrence
 		{
-			TopEventOccurrence(std::pmr::memory_resource* resource = std::pmr::get_default_resource())
-				: parent_events(resource), child_events(resource) {}
-
 			Potato::Misc::IndexSpan<DurationSec> time_range;
 			// The depth of the occurrence in the stack tree.
 			std::size_t depth = 0;
@@ -124,41 +91,69 @@ export namespace UEBabyPram::InsightFilter
 			// with the time range of the stack tree which the occurrence is in, and it is the source of the context
 			// switch time of the occurrence.
 			std::shared_ptr<ContextSwitchStreamer::Listener> context_switch_listener;
-			// The ancestors of the occurrence, from the outermost one to the direct parent, the call
-			// order is kept so that the chain can be reported.
-			std::pmr::vector<ContextEvent> parent_events;
-			// The descendants of the occurrence which are not deeper than the depth limit, in the
-			// order of the call, a placeholder stands for the omitted deeper descendants.
-			std::pmr::vector<ContextEvent> child_events;
 		};
 
-		// The statistics of one event name of one query, which is the key of the statistic.
-		// The same event name may be carried by several event ids (it may be declared in several
-		// places, and the event of the CPU scope logger is a separate id as well), so the ids which
-		// carry the name are kept with the statistic. The name itself is not stored, it is taken
-		// from the events manager with the first id of the statistic.
-		// Every occurrence of one of the ids is accumulated here, and the time ranges of the longest
-		// occurrences are kept, so that the occurrences which cost the most time can be reported.
+		// The statistics of one event of one query, which is the key of the statistic: the index of the query and the id
+		// of the event. The name of the event is copied into the statistic, so the report does not need the events
+		// manager, and every event keeps its own timing even when two events carry the same name.
+		// Every occurrence of the event is accumulated here, and the time ranges of the longest occurrences are kept,
+		// so that the occurrences which cost the most time can be reported.
 		struct EventStatistic
 		{
-			EventStatistic(std::pmr::memory_resource* resource = std::pmr::get_default_resource())
-				: event_ids(resource), durations(resource), top_occurrences(resource) {}
+			// One bucket of the histogram of the duration of the single occurrence: the range of the durations which it
+			// carries, how many occurrences fell into it, and the share of them over the whole count.
+			struct DurationDistributionBucket
+			{
+				// The range of the durations of the bucket.
+				Potato::Misc::IndexSpan<DurationSec> duration_range;
+				// How many occurrences fell into the bucket.
+				std::size_t count = 0;
+				// The share of the bucket over the whole count of the occurrences, in percent.
+				double percent = 0.0;
+			};
 
-			// The index of the query which counts the events of this statistic, see
-			// EventQueryMapping::GetQueries(). Together with the name of the event it is the key of the
-			// statistic: one name keeps one statistic inside one query, and two queries never share a
-			// statistic.
+			// The statistics of one count with which the event occurred inside one game frame: the frames which carry that
+			// count, and the mean of the total time which the event took inside those frames.
+			struct FrameCountStatistic
+			{
+				// The count of the occurrences of the event inside one game frame.
+				std::size_t count = 0;
+				// How many game frames carry that count.
+				std::size_t frame_count = 0;
+				// The mean of the total time which the event took inside such a frame.
+				DurationSec mean_duration = DurationSec::zero();
+				// The game frame which carries that count and in which the event took the most time, and that time.
+				Potato::Misc::IndexSpan<DurationSec> longest_frame_time_range;
+				DurationSec longest_frame_duration = DurationSec::zero();
+			};
+
+			EventStatistic(std::pmr::memory_resource* resource = std::pmr::get_default_resource())
+				: event_name(resource), event_ids(resource), durations(resource), occurrence_time_ranges(resource), frame_count_statistics(resource), duration_distribution(resource), top_occurrences(resource) {}
+
+			// The index of the query which counts the event, see EventQueryMapping::GetQueries(). Together with the name
+			// of the event it is the key of the statistic: one name keeps one statistic inside one query, and two queries
+			// never share a statistic.
 			std::size_t query_index = 0;
-			// The ids of the events which carry this name, the occurrences of all of them are merged
-			// into this statistic. The ids are the ones which the parser receives and the ones
-			// which are carried by the stack tree of the CPU event, the id of the event of the CPU
-			// scope logger is inverted, the events manager resolves it.
+			// The ids of the events which carry the name of the statistic, an occurrence of any one of them is counted
+			// here, and the stack tree finds the statistic by the id of its event.
 			std::pmr::vector<EventID> event_ids;
-			// The count of the occurrences of this name.
+			// The copy of the name of the event, it is the name which the event was discovered with.
+			std::pmr::u8string event_name;
+			// The count of the occurrences of the event.
 			std::size_t count = 0;
 			// One duration per occurrence, the durations are kept to build the median and the
 			// standard deviation of the duration of the single occurrence in AllAnalyzeDone().
 			std::pmr::vector<DurationSec> durations;
+			// The time ranges of the occurrences, they are what the occurrences are grouped into the game frames by, the
+			// game frame of an occurrence is the one which carries its beginning.
+			std::pmr::vector<Potato::Misc::IndexSpan<DurationSec>> occurrence_time_ranges;
+			// The statistics which are merged by the count of the occurrences inside one game frame, the order is the
+			// ascending order of the count.
+			std::pmr::vector<FrameCountStatistic> frame_count_statistics;
+			// The histogram of the duration of the single occurrence, it is built in AllAnalyzeDone() when the count of the
+			// occurrences is greater than Config::top_count: the range from the shortest duration to the longest one is split
+			// into Config::top_count buckets.
+			std::pmr::vector<DurationDistributionBucket> duration_distribution;
 			// The total duration of the occurrences, which is the sum of the duration of every
 			// single occurrence.
 			DurationSec total_duration = DurationSec::zero();
@@ -175,7 +170,6 @@ export namespace UEBabyPram::InsightFilter
 			// unspecified.
 			std::pmr::vector<TopEventOccurrence> top_occurrences;
 		};
-
 		EventStatisticParser(Config config = {});
 
 		virtual void OnThreadDiscovered(ThreadID thread_id, ThreadSystemID thread_system_id, std::string_view thread_name) override;
@@ -193,8 +187,8 @@ export namespace UEBabyPram::InsightFilter
 		virtual void AllAnalyzeDone() override;
 		bool PrintToLog(Potato::Log::LogPrinter& printer) override;
 
-		// The statistics of every event name of every query, keyed by EventStatistic::query_index and by
-		// the name of the event, the order is unspecified.
+		// The statistics of every event of every query, keyed by EventStatistic::query_index and by the id of the
+		// event, the order is unspecified.
 		std::span<EventStatistic const> GetEventStatistics() const { return event_statistics; }
 
 		// The query system which is built from Config::queries, it resolves the regular expression of
@@ -203,17 +197,28 @@ export namespace UEBabyPram::InsightFilter
 
 	protected:
 
-		// Find the statistic of the event name which the id carries inside the query, and create it when
-		// the name is not counted by the query yet. The event has to be stored in the events manager
-		// before this is called, the name is resolved from the id, and the id is only appended to the
-		// statistic once.
-		EventStatistic& GetNameStatistic(std::size_t query_index, EventID id);
+		// Find the statistic of the query which counts the id, nullptr when no statistic carries the id. The stack tree
+		// is only counted when its statistic is found, the occurrence is dropped otherwise.
+		EventStatistic* FindEventStatistic(std::size_t query_index, EventID id);
+		// Mark the id in the statistic of the name inside the query: the statistic is found by the name, the id is pushed
+		// into it, and the statistic of the name is only created when the query does not count the name yet. The name is
+		// copied into the statistic, so the report does not need a manager of the event specs.
+		EventStatistic& AddEventStatistic(std::size_t query_index, EventID id, std::u8string_view event_name);
+		EventStatistic& AddEventStatistic(std::size_t query_index, EventID id, std::wstring_view event_name);
 		// Record one occurrence of the event of the statistic: the occurrence count, the total
 		// duration and the total exclude time are accumulated, the sample of the occurrence is
 		// stored for the median and the standard deviation, and the time range of the occurrence is
 		// kept with its thread and its exclude time when it ranks in the top N of the statistic.
 		void RecordEventOccurrence(ThreadCPUEventView event_scope, ThreadCPUEventView::EventView event_view, DurationSec exclude_time, EventStatistic& statistic);
-		// Print the timing of one event name, the name is resolved from the events manager.
+		// Build the statistics which are merged by the count of the occurrences inside one game frame, and find the game
+		// frame in which the event took the most time, they are built in AllAnalyzeDone() from the frames which the
+		// recorder of the game frames collected.
+		void BuildFrameStatistic(EventStatistic& statistic);
+		// Build the histogram of the duration of the single occurrence when the count of the occurrences is greater than
+		// top_count: the range from the shortest duration to the longest one is split into top_count buckets, and every
+		// bucket keeps how many occurrences fell into it and the share of them over the whole count.
+		void BuildDurationDistribution(EventStatistic& statistic);
+		// Print the timing of one event, the name is the copy which the statistic carries.
 		void PrintEventStatistic(Potato::Log::LogPrinter& printer, EventStatistic const& statistic) const;
 
 		std::pmr::unsynchronized_pool_resource resource;
@@ -221,16 +226,19 @@ export namespace UEBabyPram::InsightFilter
 		// every top occurrence creates for the time range of its stack tree, and the occurrence reads the time which
 		// its thread spent out of the CPU from the blocks which its listener collected.
 		ContextSwitchStreamer context_switch_streamer;
-		EventSpecManager events_manager;
+		// The recorder of the game frames: the events which begin a frame and the game thread itself are recorded by it,
+		// and the time range of every frame which the analysis meets is kept, so an occurrence is grouped into the frame
+		// which carries its beginning.
+		GameFrameRecoder game_frame_recoder;
 		// The query system which is built from Config::queries, the ids of the events are resolved
 		// into it when they are discovered, so the stack tree is never matched by a name.
 		EventQueryMapping query_mapping;
-		// The statistics of every event name of every query, keyed by the query and by the name.
+		// The statistics of every event of every query, keyed by the query and by the id of the event.
 		std::pmr::vector<EventStatistic> event_statistics;
+		// The ids of the events of the CPU scope logger which are already resolved: the same id is reported many times,
+		// so it is only resolved by the query system once.
+		std::pmr::vector<EventID> scope_event_ids;
 
 		std::size_t top_count = 5;
-		// The maximum depth difference between the top occurrence and the parent and child events which
-		// are kept with it, 0 for none.
-		std::size_t max_context_depth = 6;
 	};
 }
