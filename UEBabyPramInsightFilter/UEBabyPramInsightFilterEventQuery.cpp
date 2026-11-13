@@ -15,6 +15,17 @@ namespace UEBabyPram::InsightFilter
 {
 	using namespace InsightParser;
 
+	namespace
+	{
+		// Whether the element of the chain collects the timing of the events which it matches, both of the statistic
+		// kinds do it, and the merged one shares one statistic between all the events which it matches.
+		bool IsStatisticKind(EventQuery::ChainElement::Kind kind)
+		{
+			return kind == EventQuery::ChainElement::Kind::QueryAndStatistic
+				|| kind == EventQuery::ChainElement::Kind::QueryAndStatisticMerged;
+		}
+	}
+
 	EventQueryMapping::EventQueryMapping(Config in_config)
 		: resource(in_config.resource)
 		, queries(&resource)
@@ -73,7 +84,7 @@ namespace UEBabyPram::InsightFilter
 
 					// Only the element whose timing is collected exports the event, the elements which are only a part
 					// of the call chain resolve the chain without exporting anything.
-					if (node.kind == EventQuery::ChainElement::Kind::QueryAndStatistic)
+					if (IsStatisticKind(node.kind))
 					{
 						result.is_exported = true;
 						if (visitor)
@@ -239,7 +250,7 @@ namespace UEBabyPram::InsightFilter
 					for (auto& stack_ite : finded_stack)
 					{
 						if (
-							stack_ite.kind == EventQuery::ChainElement::Kind::QueryAndStatistic
+							IsStatisticKind(stack_ite.kind)
 							&& !stack_ite.has_export
 							)
 						{

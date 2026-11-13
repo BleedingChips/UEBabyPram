@@ -46,6 +46,14 @@ export namespace UEBabyPram::InsightFilter
 			// How many of the longest stack trees are kept at most, every stack tree is one copy, and the shortest
 			// one is dropped for a longer one when the count is reached, 0 for none.
 			std::size_t max_view_count = 10;
+			// How many nodes of one saved stack tree are printed at most, the nodes over the count are not printed and
+			// their place is marked with '...', 0 for no limit.
+			std::size_t max_node_count = 100;
+			// How many levels of one saved stack tree are printed at most, the nodes which are deeper than the count are
+			// not printed and their place is marked with '...', 0 for no limit. The root of a stack tree is level 1,
+			// so the first count levels are printed, and the mark of a cut off subtree is printed once per node of the
+			// deepest printed level.
+			std::size_t max_depth = 8;
 			std::pmr::memory_resource* resource = std::pmr::get_default_resource();
 		};
 
@@ -109,5 +117,10 @@ export namespace UEBabyPram::InsightFilter
 		std::pmr::vector<StoredView> stored_views;
 		std::u8string query_text;
 		std::size_t max_view_count = 10;
+		// The limits of the report of one saved stack tree, they are described by Config::max_node_count and
+		// Config::max_depth. Every limit is applied to every saved stack tree separately, and the nodes which are
+		// left out are marked with '...'.
+		std::size_t max_node_count = 100;
+		std::size_t max_depth = 8;
 	};
 }

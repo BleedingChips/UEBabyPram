@@ -96,32 +96,36 @@ UEBabyPramLogFilter -f "D:\Logs\MyGame.log" -c "Level >= Error" -ostd -or 0 50
 ```text
 chain [ '&' 'Time' '=' [TimePoint, TimePoint]+ ] [ '&' 'Thread' '=' (^Regex^) ]
 chain     := elem ( '->' elem )*
-elem      := (^Regex^)   只作为调用链的一部分，不统计
-          |  [^Regex^]   匹配该事件并统计其耗时
-          |  (%)         匹配任意事件，只作为调用链的一部分
+elem      := (^Regex^)     只作为调用链的一部分，不统计
+          |  [^Regex^]     匹配该事件并统计其耗时
+          |  %[^Regex^]    匹配该事件并统计其耗时，且该元素匹配到的所有事件合并成同一个统计口径
+          |  %            匹配任意事件，只作为调用链的一部分
 TimePoint := Integer 'm' Decimal 's' | Decimal 's' | Integer 's' | Integer 'm' Integer 's'
 ```
-
-- 正则使用 RE2 语法，必须匹配完整事件名；
 - 调用链按调用顺序匹配，后一个元素必须是前一个元素的后代；
+- 只有 `[^...^]`/`%[^...^]` 元素会被统计（`%[^...^]` 合并该元素命中的所有事件为一个统计口径），`(^...^)` 与 `%` 仅补全调用链；
+- 正则由一对 `^` 界定：`[`、`]`、`(`、`)`、`%`、`->` 等语法字符可直接出现在正则里，正则内表示 `^` 需写成 `\^`；
 - `Time` 条件只过滤被统计的 occurrence，例如 `&Time=[0s,10s]`；
 - `Thread` 条件匹配完整线程名，例如 `&Thread=(^.*GameThread.*^)`。
 
 示例：
-
 ```text
 (^FEngineLoop::Tick^)->[^.*TickActor.*^]
 [^UWorld::Tick^]&Time=[0s,10s]&Thread=(^.*GameThread.*^)
-(%)->[^UWorld::Tick^]
+%[^UWorld::Tick^]
 ```
 
+> **性能提示**：`-r`、`-es`、`-ed`、`-ef` 里的每个正则都要对 trace 中的每一个事件名（真实 trace 常有数千个）做完整匹配，`.*`、`(^.*^)`、`[^.*Tick.*^]` 这类宽正则会让整次分析变慢、报告变大；请写名字里确定的部分，query 里若"任意事件"即可，用不带正则的 `%` 元素。
 #### 常用参数
 
 | 选项 | 说明 |
 |------|------|
 | `-f, --file <path>` | 必填，`.utrace` 文件路径 |
 | `-tx, --top_count <count>` | `-es` 每个事件名保留的 Top N 最长 occurrence，默认 5 |
+| `-dbc, --duration_bucket_count <count>` | `-es` 耗时分布直方图的分组数，默认 5 |
 | `-mvc, --max_view_count <count>` | `-ed` 最多保存多少个 stack tree，默认 10 |
+| `-mnc, --max_node_count <count>` | `-ed` 单棵 stack tree 最多打印多少个节点，超出不打印并以 `...` 标记，0 表示不限，默认 100 |
+| `-md, --max_depth <depth>` | `-ed` 单棵 stack tree 最多打印多少层，超出不打印并以 `...` 标记，0 表示不限，默认 8（根节点为第 1 层） |
 | `-mlc, --max_location_count <count>` | `-r` 最多报告多少个事件位置，默认 256 |
 | `-mrf, --max_record_frame <count>` | 默认模式记录的最长帧数量，默认 10 |
 | `-metc, --max_exclude_time_count <count>` | 每个 Top 列表保留的最长 Exclude Time 事件数量，默认 30 |
@@ -130,7 +134,7 @@ TimePoint := Integer 'm' Decimal 's' | Decimal 's' | Integer 's' | Integer 'm' I
 #### 构建与运行
 
 ```powershell
-xmake build UEBabyPramInsightFilter
+xmake run UEBabyPramInsightFilter -f .\Capture.utrace -es "[^UWorld::Tick^]"
 xmake run UEBabyPramInsightFilter -f .\Capture.utrace -es "[^UWorld::Tick^]"
 ```
 
@@ -143,13 +147,13 @@ UEBabyPramInsightFilter -f .\Capture.utrace
 # 搜索事件定义位置
 UEBabyPramInsightFilter -f .\Capture.utrace -r "FEngineLoop::.*"
 
-# 统计 TickActor 的耗时
 UEBabyPramInsightFilter -f .\Capture.utrace -es "(^FEngineLoop::Tick^)->[^.*TickActor.*^]" -tx 10
 
-# 保存并打印 UWorld::Tick 的详细堆栈
 UEBabyPramInsightFilter -f .\Capture.utrace -ed "[^UWorld::Tick^]" -mvc 5
 
-# 生成火焰图
+# 每棵树最多打印 200 个节点、20 层，超出部分以 ... 标记
+UEBabyPramInsightFilter -f .\Capture.utrace -ed "[^UWorld::Tick^]" -mvc 5 -mnc 200 -md 20
+
 UEBabyPramInsightFilter -f .\Capture.utrace -ef "[^UWorld::Tick^]"
 
 # 搜索 GameThread
@@ -160,7 +164,7 @@ UEBabyPramInsightFilter -f .\Capture.utrace -ts ".*GameThread.*"
 
 - `-r`：文件路径是产生 utrace 的包体打包时的源文件路径，指向打包机器；需要用户自行转换为本地工作目录/源码树路径。
 - `-es`：`Count`、`Total D/Mean D/Median D/Std D`、`Total E/Mean E`；Top occurrence 行的 `D`（耗时）、`E`（Exclude Time）、`ENCS`（去除离核时间后的 Exclude Time）、`CS`（Context Switch Time）、`TR`（时间范围）、`TName`（线程名）；Call Context 以 box-drawing 打印父链与子树。
-- `-ed`：`View` 行的 `E` 为整棵 stack tree 总耗时；节点行的 `TR` 为时间范围、`D` 为耗时、`E` 为 Exclude Time、`CS` 为 Exclude Time 中线程不在 CPU 上的时间（为 0 时不打印）。
+- `-ed`：`View` 行的 `E` 为整棵 stack tree 总耗时；节点行的 `TR` 为时间范围、`D` 为耗时、`E` 为 Exclude Time、`CS` 为 Exclude Time 中线程不在 CPU 上的时间（为 0 时不打印）。打印的是**完整**调用树：查询的 `Time` 条件只决定保留哪些树，时间片外的事件照样打印；单棵树规模由 `-mnc`（节点数，默认 100）与 `-md`（层数，默认 8）限制，超出的节点不打印并以 `...` 标记，两个限制对每棵树分别生效（`0` 表示不限）。
 - `-ef`：`D` 为调用路径的 inclusive 耗时，`Percent` 为占全部匹配时间的百分比。
 
 #### 构建 SKILL

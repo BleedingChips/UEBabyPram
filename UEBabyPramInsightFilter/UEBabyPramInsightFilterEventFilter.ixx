@@ -21,8 +21,9 @@ export namespace UEBabyPram::InsightFilter
 	// The event query which is built from the query text, the grammar is described by
 	// GetFilterEbnf():
 	//   chain [ '&' Time '=' [TimePoint, TimePoint]+ ] [ '&' Thread '=' (^Regex^) ]
-	// Every chain element is (^Regex^) if the event is only matched as a part of the call
-	// chain, [^Regex^] if its timing is also accumulated, or (%) if any event is matched.
+	// Every chain element is (^Regex^) if the event is only matched as a part of the call chain, [^Regex^] if
+	// its timing is also accumulated, %[^Regex^] if every event which it matches is accumulated into one
+	// statistic, or % if any event is matched.
 	struct EventQuery
 	{
 		// One element of the event call chain.
@@ -32,14 +33,17 @@ export namespace UEBabyPram::InsightFilter
 			{
 				// (^Regex^): the event is only matched as a part of the call chain.
 				QueryOnly,
-				// (%): any event is matched as a part of the call chain, it carries no regular
+				// %: any event is matched as a part of the call chain, it carries no regular
 				// expression and it is never reported.
 				Any,
 				// [^Regex^]: the event is matched and its timing is accumulated.
 				QueryAndStatistic,
+				// %[^Regex^]: the event is matched and its timing is accumulated, and every event which the element
+				// matches is accumulated into one statistic, so the matched names share one timing.
+				QueryAndStatisticMerged,
 			};
-
 			Kind kind = Kind::QueryOnly;
+
 			// The regular expression of the event name, it is compiled from the text between
 			// the '^' delimiters and matches the whole event name. It is empty when the kind is
 			// Any, because such an element matches every event.

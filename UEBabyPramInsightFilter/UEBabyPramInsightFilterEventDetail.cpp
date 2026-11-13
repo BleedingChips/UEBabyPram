@@ -22,6 +22,8 @@ namespace UEBabyPram::InsightFilter
 		, stored_views(&resource)
 		, query_text(std::move(config.query_text))
 		, max_view_count(config.max_view_count)
+		, max_node_count(config.max_node_count)
+		, max_depth(config.max_depth)
 	{
 		// The query is built and checked by the creator of the config, so the parser only takes the one
 		// which is ready to be analyzed.
@@ -205,33 +207,8 @@ namespace UEBabyPram::InsightFilter
 		{
 			auto const& stored_view = stored_views[view_index];
 
-			// The time ranges of the query which keeps the stack tree are the target of the report of the tree: only
-			// the events which intersect one of them are printed, and an event which intersects none of them is
-			// omitted. The time ranges of the other queries do not matter here, and a query which carries no time
-			// range reports every event of the tree.
-			std::span<Potato::Misc::IndexSpan<DurationSec> const> target_time_ranges;
-			if (stored_view.query_index < queries.size())
-			{
-				target_time_ranges = queries[stored_view.query_index].time_ranges;
-			}
-
-			auto is_in_target_time_range = [target_time_ranges](Potato::Misc::IndexSpan<DurationSec> time_range) {
-				if (target_time_ranges.empty())
-				{
-					return true;
-				}
-
-				for (auto& target_time_range : target_time_ranges)
-				{
-					if (target_time_range.IsOverlap(time_range))
-					{
-						return true;
-					}
-				}
-
-				return false;
-			};
-
+			// The whole tree is printed, the events which are out of the time ranges of the query are printed as well:
+			// the time ranges only decide which stack trees are kept, not which events of a kept tree are reported.
 			std::string_view thread_name{ "<Unknow>" };
 			if (auto thread_info = GetThreadInfo(stored_view.thread_id); thread_info && !thread_info->thread_name.empty())
 			{
@@ -321,12 +298,15 @@ namespace UEBabyPram::InsightFilter
 			// which it consumed outside of its children, and the context switch time of the exclude time
 			// is the part of it which the thread spent off the CPU, it is only printed when it is not
 			// zero.
-			// Whether the last line which is printed at a depth is the mark of the omitted events: the mark
-			// which would follow another mark at the same depth is omitted, so the runs of the events which
-			// are out of the target time range are printed as one ellipsis.
+			// The tree is printed up to the limits of the report: the nodes over the count of the nodes and the
+			// nodes which are deeper than the depth limit are not printed, their place is marked with '...'. The
+			// mark of the nodes which are left by the count is printed once, because the rest of the tree is left as
+			// well, while the mark of the nodes which are left by the depth is printed once per level.
 			std::vector<bool> is_ellipsis_printed;
-			std::function<void(std::size_t, std::wstring const&, bool, bool)> print_node =
-				[&](std::size_t node_index, std::wstring const& prefix, bool is_last, bool is_root)
+			std::size_t printed_node_count = 0;
+			bool is_node_count_marked = false;
+			std::function<void(std::size_t, std::wstring const&, bool, bool, std::size_t)> print_node =
+				[&](std::size_t node_index, std::wstring const& prefix, bool is_last, bool is_root, std::size_t level)
 			{
 				auto const& node = nodes[node_index];
 
@@ -336,29 +316,39 @@ namespace UEBabyPram::InsightFilter
 					line_prefix = prefix + (is_last ? L"\u2514\u2500 " : L"\u251C\u2500 ");
 				}
 
-				std::size_t depth = node.view.depth;
-				if (is_ellipsis_printed.size() <= depth)
+				// The nodes over the count are not printed, and the rest of the tree is left with them, so the mark of
+				// the count is printed once.
+				if (max_node_count != 0 && printed_node_count >= max_node_count)
 				{
-					is_ellipsis_printed.resize(depth + 1, false);
-				}
-
-				// The event does not intersect the target time range of the report, so neither it nor any of its
-				// children is in the target, and only the mark of the omitted children is printed. The mark of the
-				// event which follows another mark at the same depth is omitted.
-				if (!is_in_target_time_range(node.view.time_range))
-				{
-					if (!is_ellipsis_printed[depth])
+					if (!is_node_count_marked)
 					{
-						is_ellipsis_printed[depth] = true;
+						is_node_count_marked = true;
 						OutputLog<L"        {}...">(printer, line_prefix);
 					}
 					return;
 				}
 
-				// The event is printed, so the next mark of this depth is printed again.
-				is_ellipsis_printed[depth] = false;
+				if (is_ellipsis_printed.size() <= level)
+				{
+					is_ellipsis_printed.resize(level + 1, false);
+				}
 
+				// The nodes which are deeper than the depth limit are not printed, the mark of such a level is printed
+				// once, and it is printed again only when a printed node of the same level comes before it.
+				if (max_depth != 0 && level > max_depth)
+				{
+					if (!is_ellipsis_printed[level])
+					{
+						is_ellipsis_printed[level] = true;
+						OutputLog<L"        {}...">(printer, line_prefix);
+					}
+					return;
+				}
+
+				is_ellipsis_printed[level] = false;
+				++printed_node_count;
 				std::u8string_view event_name = events_manager.GetEventSpec(node.view.event_id).name_view;
+
 				auto exclude_time = event_scope.GetExcludeTime(node.view, context_switch_provider);
 				DurationSec exclude = exclude_time ? exclude_time->active_time : DurationSec::zero();
 				DurationSec exclude_without_context_switch = exclude_time ? exclude_time->active_time_without_context_switch : exclude;
@@ -398,13 +388,13 @@ namespace UEBabyPram::InsightFilter
 				for (std::size_t child_index = 0; child_index < node.children.size(); ++child_index)
 				{
 					bool child_is_last = child_index + 1 == node.children.size();
-					print_node(node.children[child_index], child_prefix, child_is_last, false);
+					print_node(node.children[child_index], child_prefix, child_is_last, false, level + 1);
 				}
 			};
 
 			for (auto root_index : roots)
 			{
-				print_node(root_index, L"", true, true);
+				print_node(root_index, L"", true, true, 1);
 			}
 		}
 

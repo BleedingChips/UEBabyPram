@@ -66,6 +66,11 @@ Options:
       an unknown file and line 0.
       Narrow the filter as much as possible: a filter which is too wide reports a very large
       amount of information, which is slow to print and hard to read.
+      Performance: every regular expression is tested against the name of every event which the trace
+      carries, and a real trace carries thousands of names, so a wide or a complex expression, ex: .*,
+      .*Tick.* or (^.*^), makes the whole analysis slow and its report large. Keep the expressions as
+      specific as possible and prefer the fixed parts of the names; in a query the '%' element carries
+      no expression at all, so it costs nothing when any event is acceptable.
       -r, -es, -ed, -ef and -ts can not be used at the same time.
 )HELP">();
 
@@ -73,22 +78,29 @@ Options:
       Query of the events whose timing should be collected, the grammar is:
         chain [ '&' 'Time' '=' [TimePoint, TimePoint]+ ] [ '&' 'Thread' '=' (^Regex^) ]
         chain     := elem ( '->' elem )*
-        elem      := (^Regex^)    the event is only matched as a part of the call chain
-                  |  [^Regex^]    the event is matched and its timing is collected
-                  |  (%)          any event, only matched as a part of the call chain
+        elem      := (^Regex^)      the event is only matched as a part of the call chain
+                  |  [^Regex^]      the event is matched and its timing is collected
+                  |  %[^Regex^]     the event is matched, its timing is collected, and every event which
+                                   the element matches is merged into one statistic
+                  |  %             any event, only matched as a part of the call chain
         TimePoint := Integer 'm' Decimal 's' | Decimal 's' | Integer 's' | Integer 'm' Integer 's'
       Ex: -es "(^FEngineLoop::Tick^)->[^.*TickActor.*^]"
           -es "[^UWorld::Tick^]&Time=[0s,10s]&Thread=(^.*GameThread.*^)"
-          -es "(%)->[^UWorld::Tick^]"
-      Every regex is the re2 syntax and it has to match the whole event name. The element which
-      matches any event, (%), is much more efficient than a regular expression which matches every
-      name, ex: (^.*^): the element carries no expression at all, so no name is ever matched against
-      one, while the expression has to be tested against the name of every event.
+          -es "%[^UWorld::Tick^]"
+      Every regex is the re2 syntax and it has to match the whole event name. The text of a regex is
+      delimited by its own two '^', so the characters which the grammar of the query uses as well,
+      ex: '[', ']', '(', ')', '%' and '->', are a part of the pattern without any escape, while a
+      '^' inside the pattern has to be written as '\^'.
+      The element which matches any event, %, is much more efficient than a regular expression which
+      matches every name, ex: (^.*^): the element carries no expression at all, so no name is ever
+      matched against one, while the expression has to be tested against the name of every event.
       The chain is matched on the call stack: every element has to be a descendant of the previous
       one and the elements are matched in the order of the call, but the events which are not a part
-      of the chain may be between them. Only the elements which are surrounded by '[' and ']' are
-      collected, one statistic per event name, and the same name is only collected by the topmost of
-      them, so one occurrence is never counted twice by one query.
+      of the chain may be between them. Only the [^Regex^] and the %[^Regex^] elements collect the
+      timing, one statistic per event name for the first kind, and one statistic for every event which
+      a %[^Regex^] element matches.
+      The same name is only collected by the topmost of the collecting elements, so one occurrence is
+      never counted twice by one query.
       The Time and the Thread conditions only filter the collected events, the events which complete
       the call chain are not filtered by them. A collected event is selected by the Time condition
       when the time range which the event occupies overlaps one of the ranges of the query: an event
@@ -107,6 +119,11 @@ Options:
       the share of them over the whole count.
       Narrow the filter as much as possible: a filter which is too wide reports a very large
       amount of information, which is slow to print and hard to read.
+      Performance: every regular expression is tested against the name of every event which the trace
+      carries, and a real trace carries thousands of names, so a wide or a complex expression, ex: .*,
+      .*Tick.* or (^.*^), makes the whole analysis slow and its report large. Keep the expressions as
+      specific as possible and prefer the fixed parts of the names; in a query the '%' element carries
+      no expression at all, so it costs nothing when any event is acceptable.
       -r, -es, -ed, -ef and -ts can not be used at the same time.
 )HELP">(*Log::GetSTDOutPrinter());
 
@@ -117,8 +134,19 @@ Options:
       stack tree is only kept while the kept ones are fewer than -mvc, or when it is longer than the
       shortest of them, which is dropped for it, so the count is the count of the longest calls, not
       the count of the calls which are matched first.
+      The whole tree of a kept stack tree is reported, the events which are out of the time ranges of
+      the query are reported as well: the time ranges only decide which stack trees are kept, not
+      which events of a kept tree are reported.
+      The report of one stack tree is limited by -mnc and -md: the nodes over the count and the nodes
+      which are deeper than the depth are not printed, and the place of the nodes which are left is
+      marked with '...'. The limits are applied to every stack tree separately.
       Narrow the filter as much as possible: a filter which is too wide reports a very large
       amount of information, which is slow to print and hard to read.
+      Performance: every regular expression is tested against the name of every event which the trace
+      carries, and a real trace carries thousands of names, so a wide or a complex expression, ex: .*,
+      .*Tick.* or (^.*^), makes the whole analysis slow and its report large. Keep the expressions as
+      specific as possible and prefer the fixed parts of the names; in a query the '%' element carries
+      no expression at all, so it costs nothing when any event is acceptable.
       -r, -es, -ed, -ef and -ts can not be used at the same time.
 
   -ef, --event_flame_graph <query>
@@ -131,6 +159,11 @@ Options:
       an occurrence is never cut to the ranges.
       Narrow the filter as much as possible: a filter which is too wide reports a very large
       amount of information, which is slow to print and hard to read.
+      Performance: every regular expression is tested against the name of every event which the trace
+      carries, and a real trace carries thousands of names, so a wide or a complex expression, ex: .*,
+      .*Tick.* or (^.*^), makes the whole analysis slow and its report large. Keep the expressions as
+      specific as possible and prefer the fixed parts of the names; in a query the '%' element carries
+      no expression at all, so it costs nothing when any event is acceptable.
       -r, -es, -ed, -ef and -ts can not be used at the same time.
 
   -ts, --thread_search <regex>
@@ -148,11 +181,27 @@ Options:
   -tx, --top_count <count>
       How many of the longest occurrences should be reported with -es, default is 5.
 
+  -dbc, --duration_bucket_count <count>
+      How many buckets the histogram of the duration of the single occurrence should carry with -es,
+      default is 5. The histogram is only built for an event whose occurrence count is greater than the
+      top count (-tx), and the range from the shortest duration of the single occurrence to the longest
+      one is split into this count of buckets.
+
   -mvc, --max_view_count <count>
       How many of the longest stack trees should be saved and reported with -ed, and aggregated
       into the flame graph with -ef, default is 10. The stack tree which is kept is dropped for a
       longer one when the count is reached, so the kept ones are the longest calls which the query
       matches.
+
+  -mnc, --max_node_count <count>
+      How many nodes of one stack tree should be printed with -ed, 0 for no limit, default is 100.
+      The nodes over the count are not printed, and their place is marked with '...'. The count is
+      the count of the nodes of one reported stack tree, so every stack tree is limited separately.
+
+  -md, --max_depth <depth>
+      How many levels of one stack tree should be printed with -ed, 0 for no limit, default is 8.
+      The nodes which are deeper than the depth are not printed, and their place is marked with
+      '...', once per node of the deepest printed level. The first level of the tree is 1.
 
   -mrf, --max_record_frame <count>
       How many of the longest game frames should be recorded and reported, default is 10.
@@ -426,6 +475,27 @@ Options:
 					return -1;
 				}
 			}
+			else if (argv_string == "-dbc" || argv_string == "--duration_bucket_count")
+			{
+				if (i + 1 < argc)
+				{
+					std::size_t value = 0;
+					std::string_view sub_argv = argv[i + 1];
+					if (Format::DirectDeformat(sub_argv, value))
+					{
+						statistic_config.duration_bucket_count = value;
+						++i;
+					}
+					else {
+						Log::Log<CommandLineLogCategory, Log::LogLevel::Error, L"-dbc --duration_bucket_count <count> : <{}> is not a valid count, use -h for detailed help">(sub_argv);
+						return -1;
+					}
+				}
+				else {
+					Log::Log<CommandLineLogCategory, Log::LogLevel::Error, L"Unsupport command -dbc --duration_bucket_count, use -h for detailed help">();
+					return -1;
+				}
+			}
 			else if (argv_string == "-mvc" || argv_string == "--max_view_count")
 			{
 				if (i + 1 < argc)
@@ -445,6 +515,48 @@ Options:
 				}
 				else {
 					Log::Log<CommandLineLogCategory, Log::LogLevel::Error, L"Unsupport command -mvc --max_view_count, use -h for detailed help">();
+					return -1;
+				}
+			}
+			else if (argv_string == "-mnc" || argv_string == "--max_node_count")
+			{
+				if (i + 1 < argc)
+				{
+					std::size_t value = 0;
+					std::string_view sub_argv = argv[i + 1];
+					if (Format::DirectDeformat(sub_argv, value))
+					{
+						detail_config.max_node_count = value;
+						++i;
+					}
+					else {
+						Log::Log<CommandLineLogCategory, Log::LogLevel::Error, L"-mnc --max_node_count <count> : <{}> is not a valid count, use -h for detailed help">(sub_argv);
+						return -1;
+					}
+				}
+				else {
+					Log::Log<CommandLineLogCategory, Log::LogLevel::Error, L"Unsupport command -mnc --max_node_count, use -h for detailed help">();
+					return -1;
+				}
+			}
+			else if (argv_string == "-md" || argv_string == "--max_depth")
+			{
+				if (i + 1 < argc)
+				{
+					std::size_t value = 0;
+					std::string_view sub_argv = argv[i + 1];
+					if (Format::DirectDeformat(sub_argv, value))
+					{
+						detail_config.max_depth = value;
+						++i;
+					}
+					else {
+						Log::Log<CommandLineLogCategory, Log::LogLevel::Error, L"-md --max_depth <depth> : <{}> is not a valid depth, use -h for detailed help">(sub_argv);
+						return -1;
+					}
+				}
+				else {
+					Log::Log<CommandLineLogCategory, Log::LogLevel::Error, L"Unsupport command -md --max_depth, use -h for detailed help">();
 					return -1;
 				}
 			}

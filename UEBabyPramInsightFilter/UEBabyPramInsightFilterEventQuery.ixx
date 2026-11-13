@@ -109,7 +109,7 @@ export namespace UEBabyPram::InsightFilter
 
 		// What one discovered event is by the queries: whether the name of the event is matched by the regular expression
 		// of any chain element of any query, and whether the event is exported, which needs an element of the
-		// QueryAndStatistic kind to match it.
+		// QueryAndStatistic or the QueryAndStatisticMerged kind to match it.
 		struct AddEventResult
 		{
 			// Whether the name is matched by the regular expression of any chain element of any query.
@@ -122,7 +122,6 @@ export namespace UEBabyPram::InsightFilter
 		};
 
 		// The visitor of the exported matches of one event: the event, the query and the chain element which exports it.
-		// It is called once per exporting element which the name of the event is matched by.
 		using ExportVisitorT = Potato::TMP::FunctionRef<void(EventID id, std::size_t query_index, std::size_t node_index)>;
 
 		// Resolve one discovered event against the chain of every query. It has to be called once per

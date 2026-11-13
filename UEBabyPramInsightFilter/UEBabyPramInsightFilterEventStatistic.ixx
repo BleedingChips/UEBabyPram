@@ -61,6 +61,10 @@ export namespace UEBabyPram::InsightFilter
 			// 0 for none.
 			std::size_t top_count = 5;
 			std::pmr::memory_resource* resource = std::pmr::get_default_resource();
+			// How many buckets the histogram of the duration of the single occurrence carries, it is only built when the
+			// count of the occurrences of an event is greater than top_count, and the range from the shortest duration to
+			// the longest one is split into this count of buckets.
+			std::size_t duration_bucket_count = 5;
 		};
 
 		// One of the longest occurrences of an event name, the time range of the occurrence, its
@@ -137,6 +141,12 @@ export namespace UEBabyPram::InsightFilter
 			// The ids of the events which carry the name of the statistic, an occurrence of any one of them is counted
 			// here, and the stack tree finds the statistic by the id of its event.
 			std::pmr::vector<EventID> event_ids;
+			// Whether the statistic merges every event which its chain element matches: the name of such a statistic is
+			// the regular expression of the element, and the ids of all matched events are counted together.
+			bool is_merged = false;
+			// The index of the chain element of the merged statistic, it is only set when is_merged is true, and it is
+			// the key of the statistic together with the query.
+			std::size_t merged_node_index = 0;
 			// The copy of the name of the event, it is the name which the event was discovered with.
 			std::pmr::u8string event_name;
 			// The count of the occurrences of the event.
@@ -152,7 +162,7 @@ export namespace UEBabyPram::InsightFilter
 			std::pmr::vector<FrameCountStatistic> frame_count_statistics;
 			// The histogram of the duration of the single occurrence, it is built in AllAnalyzeDone() when the count of the
 			// occurrences is greater than Config::top_count: the range from the shortest duration to the longest one is split
-			// into Config::top_count buckets.
+			// into Config::duration_bucket_count buckets.
 			std::pmr::vector<DurationDistributionBucket> duration_distribution;
 			// The total duration of the occurrences, which is the sum of the duration of every
 			// single occurrence.
@@ -197,14 +207,15 @@ export namespace UEBabyPram::InsightFilter
 
 	protected:
 
+		// Mark the id in the statistic of the element inside the query: a normal element keys its statistic by the name
 		// Find the statistic of the query which counts the id, nullptr when no statistic carries the id. The stack tree
 		// is only counted when its statistic is found, the occurrence is dropped otherwise.
 		EventStatistic* FindEventStatistic(std::size_t query_index, EventID id);
-		// Mark the id in the statistic of the name inside the query: the statistic is found by the name, the id is pushed
-		// into it, and the statistic of the name is only created when the query does not count the name yet. The name is
-		// copied into the statistic, so the report does not need a manager of the event specs.
-		EventStatistic& AddEventStatistic(std::size_t query_index, EventID id, std::u8string_view event_name);
-		EventStatistic& AddEventStatistic(std::size_t query_index, EventID id, std::wstring_view event_name);
+		// of the event, and a merged element keys its statistic by the element itself, so all of the events which it
+		// matches share one statistic. The name is copied into a statistic which is keyed by the name, and the
+		// regular expression of the element is copied into a merged one.
+		EventStatistic& AddEventStatistic(std::size_t query_index, std::size_t node_index, EventID id, EventQuery::ChainElement::Kind kind, std::u8string_view event_name);
+		EventStatistic& AddEventStatistic(std::size_t query_index, std::size_t node_index, EventID id, EventQuery::ChainElement::Kind kind, std::wstring_view event_name);
 		// Record one occurrence of the event of the statistic: the occurrence count, the total
 		// duration and the total exclude time are accumulated, the sample of the occurrence is
 		// stored for the median and the standard deviation, and the time range of the occurrence is
@@ -215,8 +226,8 @@ export namespace UEBabyPram::InsightFilter
 		// recorder of the game frames collected.
 		void BuildFrameStatistic(EventStatistic& statistic);
 		// Build the histogram of the duration of the single occurrence when the count of the occurrences is greater than
-		// top_count: the range from the shortest duration to the longest one is split into top_count buckets, and every
-		// bucket keeps how many occurrences fell into it and the share of them over the whole count.
+		// top_count: the range from the shortest duration to the longest one is split into duration_bucket_count buckets,
+		// and every bucket keeps how many occurrences fell into it and the share of them over the whole count.
 		void BuildDurationDistribution(EventStatistic& statistic);
 		// Print the timing of one event, the name is the copy which the statistic carries.
 		void PrintEventStatistic(Potato::Log::LogPrinter& printer, EventStatistic const& statistic) const;
@@ -240,5 +251,7 @@ export namespace UEBabyPram::InsightFilter
 		std::pmr::vector<EventID> scope_event_ids;
 
 		std::size_t top_count = 5;
+		// The count of the buckets of the histogram of the duration of the single occurrence.
+		std::size_t duration_bucket_count = 5;
 	};
 }

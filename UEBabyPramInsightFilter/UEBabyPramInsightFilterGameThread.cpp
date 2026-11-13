@@ -301,14 +301,14 @@ namespace UEBabyPram::InsightFilter
 
 		OutputLog<L"GameThreadParser Output:">(printer);
 
-		OutputLog<L"    Total GameThread Time: <{:.3f}s>, Total GameFrame :<{:}>, Avg GameThread Time: <{:.3f}ms>:">(
+		OutputLog<L"    Total GameThread Time: <{:.3f}s>, Total GameFrame: <{}>, Avg GameThread Time: <{:.3f}ms>">(
 			printer,
 			total_time.count(),
 			total_count,
 			std::chrono::duration_cast<
 				std::chrono::duration<double, std::milli>
 			>(total_time / total_count).count()
-			);
+		);
 
 		OutputLog<L"    Fps: [{:.2f}%]>=120Fps, [{:.2f}%]>=60Fps, [{:.2f}%]>=30Fps, [{:.2f}%]>=15Fps, [{:.2f}%]<15FPS">(
 			printer,
@@ -333,7 +333,7 @@ namespace UEBabyPram::InsightFilter
 			sampled_range_display_end
 		);
 
-		OutputLog<L"{}Top <{}> Longgest GameThread :">(
+		OutputLog<L"{}Top <{}> Longest GameThread:">(
 			printer,
 			printer.EndLineString(),
 			max_record_frame
@@ -348,8 +348,6 @@ namespace UEBabyPram::InsightFilter
 		for (auto& ite : event_records)
 		{
 			++count;
-			//ThreadCPUEventView view;
-			//view.view = std::span(ite.event_ids.data(), ite.event_ids.size());
 			auto range = ite.time_range;
 
 			// The context switch time of the frame is read from the listener of the frame, a frame which carries no
@@ -389,7 +387,7 @@ namespace UEBabyPram::InsightFilter
 			DisplayTimePoint m1{ ite.max_time_range.Begin() };
 			DisplayTimePoint m2{ ite.max_time_range.End() };
 
-			OutputLog< L"    Name:<{:}> -> E:<{:.2f}ms>, ENCS:<{:.2f}m>, OC:<{:}>, TR:[{}, {}];">(
+			OutputLog< L"    Name:<{:}> -> E:<{:.2f}ms>, ENCS:<{:.2f}ms>, OC:<{:}>, TR:[{}, {}];">(
 				printer,
 				ite.event_name,
 				std::chrono::duration_cast<
@@ -419,7 +417,7 @@ namespace UEBabyPram::InsightFilter
 			DisplayTimePoint m1{ ite.max_time_range.Begin() };
 			DisplayTimePoint m2{ ite.max_time_range.End() };
 
-			OutputLog< L"    Name:<{:}> -> E:<{:.2f}ms>, ENCS:<{:.2f}m>, OC:<{:}>, TR:[{}, {}]. From <No.{:}> Top Frame;">(
+			OutputLog< L"    Name:<{:}> -> E:<{:.2f}ms>, ENCS:<{:.2f}ms>, OC:<{:}>, TR:[{}, {}]. From <No.{:}> Top Frame;">(
 				printer,
 				ite.event_name,
 				std::chrono::duration_cast<

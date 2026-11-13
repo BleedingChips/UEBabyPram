@@ -10,7 +10,7 @@ UEBabyPramInsightFilter 是一个用于分析 Unreal Engine（UE4/UE5）`.utrace
 - 默认模式：报告 GameThread 的帧耗时与统计；
 - 事件位置搜索（`-r`）；
 - 事件耗时统计（`-es`），含 Top N 最长 occurrence；
-- 保存并打印指定调用堆栈（`-ed`），含每个事件的耗时与 Exclude Time；
+- 保存并打印指定调用堆栈（`-ed`），打印**完整**调用树（含时间片外的事件），含每个事件的耗时与 Exclude Time，并按节点数/层数上限截断；
 - 生成火焰图（`-ef`），聚合所有匹配的调用路径；
 - 线程搜索（`-ts`）。
 
@@ -52,7 +52,10 @@ UEBabyPramInsightFilter 是一个用于分析 Unreal Engine（UE4/UE5）`.utrace
 | `-h, --help` | 打印帮助 |
 | `-mlc, --max_location_count <count>` | `-r` 最多报告多少个事件位置，0 表示不限，默认 256 |
 | `-tx, --top_count <count>` | `-es` 每个事件名保留的 Top N 最长 occurrence，默认 5 |
+| `-dbc, --duration_bucket_count <count>` | `-es` 耗时分布直方图的分组数，默认 5 |
 | `-mvc, --max_view_count <count>` | `-ed` 保存、`-ef` 聚合的最长 stack tree 个数，默认 10 |
+| `-mnc, --max_node_count <count>` | `-ed` 单棵 stack tree 最多打印多少个节点，超出不打印并以 `...` 标记，0 表示不限，默认 100 |
+| `-md, --max_depth <depth>` | `-ed` 单棵 stack tree 最多打印多少层，超出不打印并以 `...` 标记，0 表示不限，默认 8（根节点为第 1 层） |
 | `-mrf, --max_record_frame <count>` | 默认模式记录的最长帧数量，默认 10 |
 | `-metc, --max_exclude_time_count <count>` | 每个 Top 列表保留的最长 Exclude Time 事件数量，默认 30 |
 | `-sr, --sampling_ratio <ratio>` | 默认模式采样的时间比例，`[0.0, 1.0]`，默认 1.0（分析完整时间范围） |
@@ -64,20 +67,20 @@ UEBabyPramInsightFilter 是一个用于分析 Unreal Engine（UE4/UE5）`.utrace
 ```
 chain [ '&' 'Time' '=' [TimePoint, TimePoint]+ ] [ '&' 'Thread' '=' (^Regex^) ]
 chain     := elem ( '->' elem )*
-elem      := (^Regex^)   只作为调用链的一部分，不统计
-          |  [^Regex^]   匹配该事件并统计其耗时
-          |  (%)         匹配任意事件，只作为调用链的一部分
-TimePoint := Integer 'm' Decimal 's' | Decimal 's' | Integer 's' | Integer 'm' Integer 's'
+elem      := (^Regex^)     只作为调用链的一部分，不统计
+          |  [^Regex^]     匹配该事件并统计其耗时
+          |  %[^Regex^]    匹配该事件并统计其耗时，且该元素匹配到的所有事件合并成同一个统计口径
+          |  %            匹配任意事件，只作为调用链的一部分
 ```
 
 规则：
 
 - 所有正则使用 RE2 语法，必须匹配**完整**事件名；
 - 调用链按调用顺序匹配，后一个元素必须是前一个元素的后代（中间可以隔着其他事件）；
-- 只有 `[...]` 包裹的元素会被统计/保存，`(...)` 与 `(%)` 只用于补全调用链；
+- 只有 `[^...^]` 与 `%[^...^]` 元素会被统计/保存，`(^...^)` 与 `%` 只用于补全调用链；前者按事件名各一个统计，后者把该元素匹配到的所有事件合并成一个统计（报告里以 `Regex:<...>` 呈现）；
 - `Time` 条件只过滤被统计的 occurrence，时间范围写成 `[begin, end]`，如 `&Time=[0s,10s]`；
 - `Thread` 条件匹配完整线程名，如 `&Thread=(^.*GameThread.*^)`；
-- `(%)` 表示任意事件，比用"匹配所有名字"的正则（如 `(^.*^)`）高效得多；
+- 正则由一对 `^` 界定：`[`、`]`、`(`、`)`、`%`、`->` 等语法字符可以直接出现在正则里，不需要转义；正则内部若要表示 `^`，需要写成 `\^`；
 - `-es` 可以重复给多个 query，每个 query 独立统计。
 
 示例：
@@ -85,7 +88,7 @@ TimePoint := Integer 'm' Decimal 's' | Decimal 's' | Integer 's' | Integer 'm' I
 ```text
 (^FEngineLoop::Tick^)->[^.*TickActor.*^]
 [^UWorld::Tick^]&Time=[0s,10s]&Thread=(^.*GameThread.*^)
-(%)->[^UWorld::Tick^]
+%[^UWorld::Tick^]
 ```
 
 ---
@@ -97,6 +100,8 @@ TimePoint := Integer 'm' Decimal 's' | Decimal 's' | Integer 's' | Integer 'm' I
 报告匹配事件名对应的定义位置（文件与行号）；CPU scope logger 事件没有位置，报告为 unknown file、line 0。
 
 输出的文件路径是**产生 utrace 的包体打包时的源文件路径**，指向打包机器；需要用户自行将其转换为本地工作目录/源码树路径（例如替换构建机路径前缀）。
+
+> **性能提示**：`-r` 的正则要对 trace 里的**每一个事件名**（真实 trace 常有数千个）做一次完整匹配，`.*`、`.*Tick.*` 这类宽正则会显著拖慢整次扫描并让报告膨胀；请尽量写确定的部分，例如 `FEngineLoop::Tick` 优于 `.*Tick.*`。
 
 ### -es 事件耗时统计
 
@@ -122,7 +127,7 @@ EventStatisticParser Output:
   - `Frames`：出现 N 次的帧数；
   - `Mean Total D`：这些帧里该事件总耗时的平均值；
   - `Longest TR` / `Longest D`：出现 N 次的帧中总耗时最长的帧的时间范围与耗时。
-- `Duration Distribution <N> Bucket(s)`：当该事件的出现次数大于 `-tx` 的 N 时，把单个 occurrence 的耗时从最短到最长均分为 N 个区间，每行给出区间范围、落入该区间的个数与占总个数的百分比。
+- `Duration Distribution <N> Bucket(s)`：当该事件的出现次数大于 `-tx`（Top N）时，把单个 occurrence 的耗时从最短到最长均分为 `-dbc` 个区间（默认 5，与 `-tx` 无关），每行给出区间范围、落入该区间的个数与占总个数的百分比。
 
 ### -ed 详细调用堆栈
 
@@ -138,7 +143,30 @@ EventStatisticParser Output:
 - `View` 行的 `E` 是整棵 stack tree 的总耗时；
 - 节点行：`TR` 时间范围、`D` 耗时、`E` Exclude Time；
 - `CS` 为该事件 Exclude Time 中线程不在 CPU 上的时间，仅在不为 0 时打印；
-- 与查询 `Time` 条件无交集的事件只输出 `...`，其所有子事件一并省略。
+- **总是打印完整调用树**：查询的 `Time` 条件只决定"保留哪些 stack tree"，不决定树里打印哪些事件。保留下来的树里，落在时间范围外（时间片外）的事件照样完整打印，其耗时字段也照常计算；
+- 单棵树最多打印 `-mnc` 个节点（默认 100）与 `-md` 层（默认 8，根节点为第 1 层），两个上限对**每棵树分别生效**，超过上限的节点不打印，用 `...` 标记：
+  - 节点数超限：按先序（父节点 → 子树）取前 `-mnc` 个节点，到上限的位置只打印一个 `...`，其后的节点（含整棵子树）全部省略；
+  - 层数超限：被截断的最深一层，每个父节点下各打印一个 `...` 代表被省略的子树；
+  - `-mnc 0` 或 `-md 0` 表示该维度不限。
+
+截断示例（`-mnc 5 -md 2`）：
+
+```text
+    View <0>: TName:<GameThread>, TR:<[0m0.000000s, 0m10.000000s]>, E:<10000.000ms>
+        <A>, TR:<[0m0.000000s, 0m10.000000s]>, D:<10000.000ms>, E:<6000.000ms>
+        ├─ <B>, TR:<[0m2.000000s, 0m4.000000s]>, D:<2000.000ms>, E:<2000.000ms>
+        │  └─ ...
+        └─ <C>, TR:<[0m6.000000s, 0m8.000000s]>, D:<2000.000ms>, E:<2000.000ms>
+           └─ ...
+```
+
+节点数上限触发时的示例：
+
+```text
+        <A>, TR:<[0m0.000000s, 0m10.000000s]>, D:<10000.000ms>, E:<6000.000ms>
+        ├─ <B>, TR:<[0m2.000000s, 0m4.000000s]>, D:<2000.000ms>, E:<2000.000ms>
+        └─ ...
+```
 
 ### -ef 火焰图
 
@@ -197,13 +225,19 @@ EventFlameGraphParser Output:
 & ".\scripts\UEBabyPramInsightFilter.exe" -f "Capture.utrace" -ed "[^UWorld::Tick^]" -mvc 5
 ```
 
-### 6. 生成 UWorld::Tick 的火焰图
+### 6. 打印完整调用树但限制规模（每棵树最多 200 个节点、20 层）
+
+```powershell
+& ".\scripts\UEBabyPramInsightFilter.exe" -f "Capture.utrace" -ed "[^UWorld::Tick^]" -mnc 200 -md 20
+```
+
+### 7. 生成 UWorld::Tick 的火焰图
 
 ```powershell
 & ".\scripts\UEBabyPramInsightFilter.exe" -f "Capture.utrace" -ef "[^UWorld::Tick^]"
 ```
 
-### 7. 搜索 GameThread
+### 8. 搜索 GameThread
 
 ```powershell
 & ".\scripts\UEBabyPramInsightFilter.exe" -f "Capture.utrace" -ts ".*GameThread.*"
@@ -215,11 +249,11 @@ EventFlameGraphParser Output:
 
 1. `-r`、`-es`、`-ed`、`-ef`、`-ts` 互斥，只能选一个。
 2. 事件名与线程名正则必须匹配完整名称。
-3. `-es` 中只有 `[...]` 元素会被统计，`(...)` 与 `(%)` 仅补全调用链。
+3. `-es` 中只有 `[^...^]`/`%[^...^]` 元素会被统计，`(^...^)` 与 `%` 仅补全调用链；`%[^...^]` 会把该元素命中的所有事件合并为一个统计口径。
 4. `-es` 的 `Time` 条件按被统计事件**占用的时间范围**与查询时间范围是否相交过滤（只贴边不算相交），不影响补全调用链的事件。
 5. `-ed` 保存、`-ef` 聚合的都是**最长的 N 个** stack tree，由 `-mvc` 限制（默认 10，两种模式同一选项同一含义）；满了以后更长的会顶掉最短的那个。
-6. `-ef` 只聚合 `-mvc` 个最长的匹配 stack tree（不再是"全部聚合"）。
-7. 路径含空格时使用双引号包裹。
-8. `.utrace` 的开头与结尾是触发保存 trace 的时刻，保存本身会进入这些帧的耗时，所以这两端的数据不准；`-sr` 取小于 1.0 时只分析中间部分以避开两端（默认 1.0 分析完整范围）。
-9. `-r`、`-es`、`-ed`、`-ef` 的筛选范围要尽量缩小：范围太大时会输出大量信息，既慢又难以阅读。
+6. `-ed` 打印的树是**完整**的：查询 `Time` 条件只决定保留哪些树，不裁剪树里的事件；树规模由 `-mnc`（节点数，默认 100）与 `-md`（层数，默认 8）限制，超出的节点用 `...` 标记，且两个限制对每棵树分别生效（`0` 表示不限）。看到 `...` 说明该处被截断，可调大 `-mnc`/`-md` 重新运行。
+7. `-ef` 只聚合 `-mvc` 个最长的匹配 stack tree（不再是"全部聚合"）。
+8. **宽正则有性能风险**：`-r`、`-es`、`-ed`、`-ef`（以及 `-ts`）的每个正则都要对每个事件名（或线程名）逐一完整匹配，`.*`、`(^.*^)`、`[^.*Tick.*^]` 这类写法会让整次分析变慢、报告变大；优先写名字里的确定片段，query 里若"任意事件"即可，用不带正则的 `%` 元素（它完全不参与名字匹配）。
+9. `.utrace` 的开头与结尾是触发保存 trace 的时刻，保存本身会进入这些帧的耗时，所以这两端的数据不准；`-sr` 取小于 1.0 时只分析中间部分以避开两端（默认 1.0 分析完整范围）。
 10. 报告默认写到标准输出；用 `-o <path>` 可写入文件（文件会被清空重建），文件内容是 UTF-8 纯文本。

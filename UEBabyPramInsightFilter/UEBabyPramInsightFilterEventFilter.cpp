@@ -30,10 +30,15 @@ namespace
 	// The event chain is required, the time and the thread parts are optional and
 	// joined by '&', the 'Time' part may carry more than one time range. The lexical
 	// terminals carry the masks CaretReg[1], Integer[2] and Decimal[3], the reduce
-	// masks are: 1 Query, 2/3 Chain, 4/5/19 ChainElem, 6/7/8 QueryTail, 9/10 TimeTail,
+	// masks are: 1 Query, 2/3 Chain, 4/5/19/20 ChainElem, 6/7/8 QueryTail, 9/10 TimeTail,
 	// 11 ThreadCond, 12/13 TimeRanges, 14 TimeRange, 15/16/17/18 TimePoint.
+	//
+	// The text of a CaretReg is '^pattern^': the two '^' which surround it are the delimiters of the
+	// terminal, so the characters which the grammar of the query itself uses, ex: '[', ']', '(', ')',
+	// '%' and '->', are parsed as a part of the pattern without any escape, while a '^' inside the
+	// pattern has to be written as '\^', because the terminal does not accept a bare one.
 	static std::u8string_view ebnf_string = u8R"(
-CaretReg := '\^[^\^]+\^' : [1] ;
+CaretReg := '\^(?:[^\\]|(?:\\.))*\^' : [1] ;
 Integer  := '[0-9]+' : [2] ;
 Decimal  := '[0-9]+\.[0-9]+' : [3] ;
 $        := '\s+' ;
@@ -49,7 +54,8 @@ $ := <Query> ;
 
 <ChainElem> := '(' CaretReg ')' : [4] ;
             := '[' CaretReg ']' : [5] ;
-            := '(' '%' ')' : [19] ;
+			:= '%' '[' CaretReg ']': [20];
+            := '%' : [19] ;
 
 <QueryTail> := '&' 'Time' '=' <TimeRanges> <TimeTail> : [6] ;
             := <ThreadCond> : [7] ;
@@ -201,7 +207,6 @@ namespace UEBabyPram::InsightFilter
 					result.chain = production[0].Consume<std::vector<EventQuery::ChainElement>>();
 					QueryTailData tail = production[1].Consume<QueryTailData>();
 					result.time_ranges = std::move(tail.time_ranges);
-					result.thread_matcher = std::move(tail.thread_matcher);
 					return result;
 				}
 				case 2:
@@ -228,6 +233,14 @@ namespace UEBabyPram::InsightFilter
 					return EventQuery::ChainElement{
 						EventQuery::ChainElement::Kind::QueryAndStatistic,
 						production[1].Consume<std::shared_ptr<re2::RE2>>()
+					};
+				}
+				case 20:
+				{
+					// The element accumulates the timing of every event which it matches into one statistic.
+					return EventQuery::ChainElement{
+						EventQuery::ChainElement::Kind::QueryAndStatisticMerged,
+						production[2].Consume<std::shared_ptr<re2::RE2>>()
 					};
 				}
 				case 19:

@@ -45,6 +45,7 @@ namespace UEBabyPram::InsightFilter
 		, event_statistics(&resource)
 		, scope_event_ids(&resource)
 		, top_count(in_config.top_count)
+		, duration_bucket_count(in_config.duration_bucket_count)
 	{
 		// The queries are built and checked by the creator of the config, so the parser only takes the
 		// ones which are ready to be analyzed.
@@ -67,7 +68,10 @@ namespace UEBabyPram::InsightFilter
 		// statistic of the event is created for every element which exports it, with a copy of the name of the event,
 		// so the report does not need the events manager. The file and the line of the spec are not used here.
 		query_mapping.AddEvent(id, event_name, [this, &event_name](EventID exported_id, std::size_t query_index, std::size_t node_index) {
-			AddEventStatistic(query_index, exported_id, event_name);
+			// The kind of the chain element is what the statistic is keyed by: a merged element shares one statistic
+			// between every event which it matches.
+			EventQuery::ChainElement::Kind kind = query_mapping.GetQueries()[query_index].nodes[node_index].kind;
+			AddEventStatistic(query_index, node_index, exported_id, kind, event_name);
 		});
 
 		game_frame_recoder.RecordEvent(id, event_name);
@@ -90,7 +94,10 @@ namespace UEBabyPram::InsightFilter
 		scope_event_ids.push_back(id);
 
 		query_mapping.AddEvent(id, event_name, [this, &event_name](EventID exported_id, std::size_t query_index, std::size_t node_index) {
-			AddEventStatistic(query_index, exported_id, event_name);
+			// The kind of the chain element is what the statistic is keyed by: a merged element shares one statistic
+			// between every event which it matches.
+			EventQuery::ChainElement::Kind kind = query_mapping.GetQueries()[query_index].nodes[node_index].kind;
+			AddEventStatistic(query_index, node_index, exported_id, kind, event_name);
 		});
 
 		game_frame_recoder.RecordEvent(id, event_name);
@@ -231,13 +238,56 @@ namespace UEBabyPram::InsightFilter
 		return nullptr;
 	}
 
-	EventStatisticParser::EventStatistic& EventStatisticParser::AddEventStatistic(std::size_t query_index, EventID id, std::u8string_view event_name)
+	EventStatisticParser::EventStatistic& EventStatisticParser::AddEventStatistic(std::size_t query_index, std::size_t node_index, EventID id, EventQuery::ChainElement::Kind kind, std::u8string_view event_name)
 	{
-		// The statistic is found by the name first: the events which carry the same name share one statistic inside one
-		// query, and only the id is pushed into it, so the name is only copied when it is not counted yet.
+		// The statistic of a merged element is keyed by the element itself: every event which the element matches shares
+		// one statistic, and the name of the statistic is the regular expression of the element, so the report tells
+		// which element the timing belongs to.
+		if (kind == EventQuery::ChainElement::Kind::QueryAndStatisticMerged)
+		{
+			for (auto& statistic : event_statistics)
+			{
+				if (statistic.query_index != query_index || !statistic.is_merged || statistic.merged_node_index != node_index)
+				{
+					continue;
+				}
+
+				if (std::find(statistic.event_ids.begin(), statistic.event_ids.end(), id) == statistic.event_ids.end())
+				{
+					statistic.event_ids.push_back(id);
+				}
+				return statistic;
+			}
+
+			auto& statistic = event_statistics.emplace_back(&resource);
+			statistic.query_index = query_index;
+			statistic.is_merged = true;
+			statistic.merged_node_index = node_index;
+			statistic.event_ids.push_back(id);
+
+			// The name of a merged statistic is the regular expression of its element, it is written back with the
+			// delimiters of the query grammar, so the report tells which element the timing belongs to.
+			auto const& node = query_mapping.GetQueries()[query_index].nodes[node_index];
+			if (node.matcher)
+			{
+				std::string_view pattern = node.matcher->pattern();
+				statistic.event_name.push_back(u8'\u005e');
+				statistic.event_name.append(
+					reinterpret_cast<char8_t const*>(pattern.data()),
+					static_cast<std::size_t>(pattern.size())
+				);
+				statistic.event_name.push_back(u8'\u005e');
+			}
+
+			return statistic;
+		}
+
+		// The statistic of a normal element is found by the name first: the events which carry the same name share one
+		// statistic inside one query, and only the id is pushed into it, so the name is only copied when it is not
+		// counted yet.
 		for (auto& statistic : event_statistics)
 		{
-			if (statistic.query_index != query_index || statistic.event_name != event_name)
+			if (statistic.query_index != query_index || statistic.is_merged || statistic.event_name != event_name)
 			{
 				continue;
 			}
@@ -256,13 +306,13 @@ namespace UEBabyPram::InsightFilter
 		return statistic;
 	}
 
-	EventStatisticParser::EventStatistic& EventStatisticParser::AddEventStatistic(std::size_t query_index, EventID id, std::wstring_view event_name)
+	EventStatisticParser::EventStatistic& EventStatisticParser::AddEventStatistic(std::size_t query_index, std::size_t node_index, EventID id, EventQuery::ChainElement::Kind kind, std::wstring_view event_name)
 	{
 		// The name of an event spec is wide, it is encoded into the temporary storage first, so the name is compared and
 		// copied in the same form as the name which is UTF-8 already.
 		std::pmr::u8string encoded_event_name{ &resource };
 		Potato::Encode::UnicodeEncoder<wchar_t, char8_t>::EncodeTo(event_name, std::back_inserter(encoded_event_name));
-		return AddEventStatistic(query_index, id, std::u8string_view{ encoded_event_name });
+		return AddEventStatistic(query_index, node_index, id, kind, std::u8string_view{ encoded_event_name });
 	}
 	void EventStatisticParser::RecordEventOccurrence(ThreadCPUEventView event_scope, ThreadCPUEventView::EventView event_view, DurationSec exclude_time, EventStatistic& statistic)
 	{
@@ -520,19 +570,19 @@ namespace UEBabyPram::InsightFilter
 	{
 		// The histogram is only built for the events which occur more than top_count times, a histogram of a few
 		// occurrences tells nothing.
-		if (top_count == 0 || statistic.count <= top_count || statistic.durations.empty())
+		if (duration_bucket_count == 0 || statistic.count <= top_count || statistic.durations.empty())
 		{
 			return;
 		}
 
 		// The durations are sorted before this is called, so the first one is the shortest and the last one is the
-		// longest, and the range between them is split into top_count buckets of the same width.
+		// longest, and the range between them is split into duration_bucket_count buckets of the same width.
 		double min_duration = statistic.durations.front().count();
 		double max_duration = statistic.durations.back().count();
-		double bucket_width = (max_duration - min_duration) / static_cast<double>(top_count);
+		double bucket_width = (max_duration - min_duration) / static_cast<double>(duration_bucket_count);
 
-		statistic.duration_distribution.resize(top_count);
-		for (std::size_t bucket_index = 0; bucket_index < top_count; ++bucket_index)
+		statistic.duration_distribution.resize(duration_bucket_count);
+		for (std::size_t bucket_index = 0; bucket_index < duration_bucket_count; ++bucket_index)
 		{
 			auto& bucket = statistic.duration_distribution[bucket_index];
 			bucket.duration_range = Potato::Misc::IndexSpan<DurationSec>{
@@ -547,11 +597,11 @@ namespace UEBabyPram::InsightFilter
 		{
 			// The bucket of a duration is found by its distance from the shortest one, and the longest duration, which
 			// is on the end of the last bucket, is counted by the last bucket.
-			std::size_t bucket_index = top_count - 1;
+			std::size_t bucket_index = duration_bucket_count - 1;
 			if (bucket_width > 0.0)
 			{
 				std::size_t index = static_cast<std::size_t>((duration.count() - min_duration) / bucket_width);
-				if (index < top_count)
+				if (index < duration_bucket_count)
 				{
 					bucket_index = index;
 				}
@@ -575,7 +625,8 @@ namespace UEBabyPram::InsightFilter
 		}
 
 		// The name of the event is the copy which the statistic carries, so the report is built from the statistic
-		// alone.
+		// alone. The name of a merged statistic is the regular expression of its element, which is reported with the
+		// label of the regex, and the count of the merged events is reported with it.
 		std::u8string_view event_name = statistic.event_name.empty()
 			? std::u8string_view{ u8"<Unknow>" }
 			: std::u8string_view{ statistic.event_name };
@@ -585,18 +636,34 @@ namespace UEBabyPram::InsightFilter
 		double mean_duration = (statistic.total_duration / static_cast<double>(statistic.count)).count() * 1000.0;
 		double mean_exclude_time = (statistic.total_exclude_time / static_cast<double>(statistic.count)).count() * 1000.0;
 
-		OutputLog<L"            Name:<{:}>, Count:<{}>, Total D:<{:.3f}ms>, Mean D:<{:.3f}ms>, Median D:<{:.3f}ms>, Std D:<{:.3f}ms>, Total E:<{:.3f}ms>, Mean E:<{:.3f}ms>">(
-			printer,
-			event_name,
-			statistic.count,
-			statistic.total_duration.count() * 1000.0,
-			mean_duration,
-			statistic.median_duration.count() * 1000.0,
-			statistic.duration_standard_deviation.count() * 1000.0,
-			statistic.total_exclude_time.count() * 1000.0,
-			mean_exclude_time
-		);
-
+		if (statistic.is_merged)
+		{
+			OutputLog<L"            Regex:<{:}>, Merged Event(s):<{}>, Count:<{}>, Total D:<{:.3f}ms>, Mean D:<{:.3f}ms>, Median D:<{:.3f}ms>, Std D:<{:.3f}ms>, Total E:<{:.3f}ms>, Mean E:<{:.3f}ms>">(
+				printer,
+				event_name,
+				statistic.event_ids.size(),
+				statistic.count,
+				statistic.total_duration.count() * 1000.0,
+				mean_duration,
+				statistic.median_duration.count() * 1000.0,
+				statistic.duration_standard_deviation.count() * 1000.0,
+				statistic.total_exclude_time.count() * 1000.0,
+				mean_exclude_time
+			);
+		}
+		else {
+			OutputLog<L"            Name:<{:}>, Count:<{}>, Total D:<{:.3f}ms>, Mean D:<{:.3f}ms>, Median D:<{:.3f}ms>, Std D:<{:.3f}ms>, Total E:<{:.3f}ms>, Mean E:<{:.3f}ms>">(
+				printer,
+				event_name,
+				statistic.count,
+				statistic.total_duration.count() * 1000.0,
+				mean_duration,
+				statistic.median_duration.count() * 1000.0,
+				statistic.duration_standard_deviation.count() * 1000.0,
+				statistic.total_exclude_time.count() * 1000.0,
+				mean_exclude_time
+			);
+		}
 		if (statistic.top_occurrences.empty())
 		{
 			return;
@@ -691,30 +758,53 @@ namespace UEBabyPram::InsightFilter
 		{
 			auto const& query = queries[query_index];
 
-			// The query is printed back from the regular expressions of its elements, the elements which
-			// the '[' and ']' surround are the ones whose timing is collected, the ones which the '(' and
-			// ')' surround are only matched as a part of the call chain.
+			// The query is printed back from the regular expressions of its elements, with the same delimiters which the
+			// grammar of the query accepts, so the printed query can be used as an input query again: '(^Re^)' for a
+			// query only element, '[^Re^]' for an element which collects its timing, '%[^Re^]' for an element which
+			// merges the timing of every event which it matches, and '%' for the element which matches any event.
 			std::wstring header = std::format(L"    Query <{}>:", query_index);
 			for (std::size_t node_index = 0; node_index < query.nodes.size(); ++node_index)
 			{
 				auto const& node = query.nodes[node_index];
 				header += node_index == 0 ? L" " : L" -> ";
 
-				bool is_statistic = node.kind == EventQuery::ChainElement::Kind::QueryAndStatistic;
-				header += is_statistic ? L"[" : L"(";
+				switch (node.kind)
+				{
+				case EventQuery::ChainElement::Kind::Any:
+					// The element matches any event, it carries no regular expression.
+					header += L"%";
+					break;
+				case EventQuery::ChainElement::Kind::QueryOnly:
+					header += L"(";
+					break;
+				case EventQuery::ChainElement::Kind::QueryAndStatistic:
+					header += L"[";
+					break;
+				case EventQuery::ChainElement::Kind::QueryAndStatisticMerged:
+					header += L"%[";
+					break;
+				}
+
 				if (node.matcher)
 				{
 					// The regular expression is written back with the '^' which the grammar of the query surrounds it
-					// with, so the printed query can be used as an input query again.
+					// with, and the element is closed with the delimiter which its kind opened.
 					header += L"^";
 					header += EncodePattern(*node.matcher);
 					header += L"^";
 				}
-				else {
-					// The element matches any event, it carries no regular expression.
-					header += L"%";
+
+				switch (node.kind)
+				{
+				case EventQuery::ChainElement::Kind::Any:
+					break;
+				case EventQuery::ChainElement::Kind::QueryOnly:
+					header += L")";
+					break;
+				default:
+					header += L"]";
+					break;
 				}
-				header += is_statistic ? L"]" : L")";
 			}
 
 			if (query.thread_matcher)
