@@ -35,6 +35,87 @@ namespace UEBabyPram::InsightFilter
 			ThreadCPUEventView::EventView event_view;
 			std::size_t query_index = 0;
 		};
+
+		// Append one field of the CSV file: a field which carries the delimiter, the quote or a line break is quoted,
+		// and the quote inside it is doubled, which is what RFC 4180 requires, so an event name which carries a comma
+		// stays one field.
+		void AppendCSVField(std::u8string& line, std::u8string_view field)
+		{
+			bool is_quoted =
+				field.find(u8',') != std::u8string_view::npos
+				|| field.find(u8'"') != std::u8string_view::npos
+				|| field.find(u8'\n') != std::u8string_view::npos
+				|| field.find(u8'\r') != std::u8string_view::npos;
+
+			if (!is_quoted)
+			{
+				line.append(field);
+				return;
+			}
+
+			line.push_back(u8'"');
+			for (char8_t character : field)
+			{
+				if (character == u8'"')
+				{
+					line.push_back(u8'"');
+				}
+				line.push_back(character);
+			}
+			line.push_back(u8'"');
+		}
+
+		// Write one row of the CSV file: the fields are separated by the delimiter of the file, and the row is
+		// closed by its line break, so the caller only appends the fields in the column order.
+		struct CSVRowWriter
+		{
+			explicit CSVRowWriter(std::u8string& output)
+				: output(output) {}
+
+			// Append a text field, the field is quoted when it has to be.
+			void Text(std::u8string_view field)
+			{
+				Separate();
+				AppendCSVField(output, field);
+			}
+
+			// Append a count or an index field.
+			void Integer(std::size_t value)
+			{
+				std::string text = std::format("{}", value);
+				Text(std::u8string_view{ reinterpret_cast<char8_t const*>(text.data()), text.size() });
+			}
+
+			// Append a time field, the milliseconds are written with 6 decimals, so a duration of one nanosecond
+			// keeps its precision.
+			void Milliseconds(DurationSec value)
+			{
+				std::string text = std::format("{:.6f}", value.count() * 1000.0);
+				Text(std::u8string_view{ reinterpret_cast<char8_t const*>(text.data()), text.size() });
+			}
+
+			// Close the row, the next row starts with the same writer.
+			void EndLine()
+			{
+				output.push_back(u8'\n');
+				has_field = false;
+			}
+
+		protected:
+
+			void Separate()
+			{
+				if (has_field)
+				{
+					output.push_back(u8',');
+				}
+
+				has_field = true;
+			}
+
+			std::u8string& output;
+			bool has_field = false;
+		};
 	}
 
 	EventStatisticParser::EventStatisticParser(Config in_config)
@@ -46,6 +127,7 @@ namespace UEBabyPram::InsightFilter
 		, scope_event_ids(&resource)
 		, top_count(in_config.top_count)
 		, duration_bucket_count(in_config.duration_bucket_count)
+		, csv_path(std::move(in_config.csv_path))
 	{
 		// The queries are built and checked by the creator of the config, so the parser only takes the
 		// ones which are ready to be analyzed.
@@ -743,9 +825,201 @@ namespace UEBabyPram::InsightFilter
 		}
 	}
 
+	std::wstring EventStatisticParser::FormatQueryText(std::size_t query_index) const
+	{
+		// The query is written back from the regular expressions of its elements, with the same delimiters which the
+		// grammar of the query accepts, so the text can be used as an input query again: '(^Re^)' for a query only
+		// element, '[^Re^]' for an element which collects its timing, '%[^Re^]' for an element which merges the timing
+		// of every event which it matches, and '%' for the element which matches any event.
+		auto queries = query_mapping.GetQueries();
+		if (query_index >= queries.size())
+		{
+			return {};
+		}
+
+		auto const& query = queries[query_index];
+
+		std::wstring text;
+		for (std::size_t node_index = 0; node_index < query.nodes.size(); ++node_index)
+		{
+			auto const& node = query.nodes[node_index];
+			if (node_index != 0)
+			{
+				text += L" -> ";
+			}
+
+			switch (node.kind)
+			{
+			case EventQuery::ChainElement::Kind::Any:
+				// The element matches any event, it carries no regular expression.
+				text += L"%";
+				break;
+			case EventQuery::ChainElement::Kind::QueryOnly:
+				text += L"(";
+				break;
+			case EventQuery::ChainElement::Kind::QueryAndStatistic:
+				text += L"[";
+				break;
+			case EventQuery::ChainElement::Kind::QueryAndStatisticMerged:
+				text += L"%[";
+				break;
+			}
+
+			if (node.matcher)
+			{
+				// The regular expression is written back with the '^' which the grammar of the query surrounds it
+				// with, and the element is closed with the delimiter which its kind opened.
+				text += L"^";
+				text += EncodePattern(*node.matcher);
+				text += L"^";
+			}
+
+			switch (node.kind)
+			{
+			case EventQuery::ChainElement::Kind::Any:
+				break;
+			case EventQuery::ChainElement::Kind::QueryOnly:
+				text += L")";
+				break;
+			default:
+				text += L"]";
+				break;
+			}
+		}
+
+		if (query.thread_matcher)
+		{
+			text += L" & Thread=(^";
+			text += EncodePattern(*query.thread_matcher);
+			text += L"^)";
+		}
+
+		if (!query.time_ranges.empty())
+		{
+			text += L" & Time=";
+			for (std::size_t range_index = 0; range_index < query.time_ranges.size(); ++range_index)
+			{
+				if (range_index != 0)
+				{
+					text += L", ";
+				}
+				auto const& range = query.time_ranges[range_index];
+				text += std::format(
+					L"[{}, {}]",
+					DisplayTimePoint{ range.Begin() },
+					DisplayTimePoint{ range.End() }
+				);
+			}
+		}
+
+		return text;
+	}
+
+	bool EventStatisticParser::WriteCSV() const
+	{
+		assert(csv_path.has_value());
+
+		// The file is created and its previous content is emptied, the same as the report of -o, so the CSV file
+		// always carries the result of one analysis.
+		Potato::Document::DocumentWriter writer{
+			*csv_path,
+			Potato::Document::DocumentWriter::OpenMode::CREATE_OR_EMPTY
+		};
+
+		if (!writer)
+		{
+			Potato::Log::Log<L"Cannot open the CSV file <{}>">(csv_path->generic_wstring());
+			return false;
+		}
+
+		std::u8string content;
+		CSVRowWriter row{ content };
+
+		// The header names every column, the user of the file never has to look at the order of the report.
+		row.Text(u8"QueryIndex");
+		row.Text(u8"Event");
+		row.Text(u8"Kind");
+		row.Text(u8"EventIdCount");
+		row.Text(u8"OccurrenceCount");
+		row.Text(u8"TotalD_ms");
+		row.Text(u8"MeanD_ms");
+		row.Text(u8"MedianD_ms");
+		row.Text(u8"StdD_ms");
+		row.Text(u8"TotalE_ms");
+		row.Text(u8"MeanE_ms");
+		row.Text(u8"Query");
+		row.EndLine();
+
+		auto queries = query_mapping.GetQueries();
+		for (std::size_t query_index = 0; query_index < queries.size(); ++query_index)
+		{
+			// The query text is written with every row of it, so a row stays meaningful when the rows of several
+			// queries are mixed, ex: by sorting the file of a spreadsheet.
+			std::wstring query_text = FormatQueryText(query_index);
+			std::u8string encoded_query_text;
+			Potato::Encode::UnicodeEncoder<wchar_t, char8_t>::EncodeTo(query_text, std::back_inserter(encoded_query_text));
+
+			// The statistics of the query which carry an occurrence, the longest one is written first, so the events
+			// which cost the most time are the first rows of the query.
+			std::vector<EventStatistic const*> statistics;
+			for (auto const& statistic : event_statistics)
+			{
+				if (statistic.query_index == query_index && statistic.count != 0)
+				{
+					statistics.push_back(&statistic);
+				}
+			}
+
+			std::sort(statistics.begin(), statistics.end(), [](EventStatistic const* left, EventStatistic const* right) {
+				if (left->total_duration != right->total_duration)
+				{
+					return left->total_duration > right->total_duration;
+				}
+				return left->event_name < right->event_name;
+			});
+
+			for (auto const* statistic : statistics)
+			{
+				// The name of a merged statistic is the regular expression of its element, and the row tells the kind
+				// so the two are never mixed up.
+				std::u8string_view event_name = statistic->event_name.empty()
+					? std::u8string_view{ u8"<Unknow>" }
+					: std::u8string_view{ statistic->event_name };
+
+				row.Integer(query_index);
+				row.Text(event_name);
+				row.Text(statistic->is_merged ? u8"Regex" : u8"Name");
+				row.Integer(statistic->event_ids.size());
+				row.Integer(statistic->count);
+				row.Milliseconds(statistic->total_duration);
+				row.Milliseconds(statistic->total_duration / static_cast<double>(statistic->count));
+				row.Milliseconds(statistic->median_duration);
+				row.Milliseconds(statistic->duration_standard_deviation);
+				row.Milliseconds(statistic->total_exclude_time);
+				row.Milliseconds(statistic->total_exclude_time / static_cast<double>(statistic->count));
+				row.Text(encoded_query_text);
+				row.EndLine();
+			}
+		}
+
+		writer.Write(std::span<std::byte const>{
+			reinterpret_cast<std::byte const*>(content.data()),
+			content.size()
+		});
+
+		return true;
+	}
+
 	bool EventStatisticParser::PrintToLog(Potato::Log::LogPrinter& printer)
 	{
 		using InsightFilter::OutputLog;
+
+		// The CSV file is written instead of the text report: the report nests the statistics of an event below its
+		// name, which is hard to consume, while the CSV file carries one statistic per row.
+		if (csv_path)
+		{
+			return WriteCSV();
+		}
 
 		OutputLog<L"EventStatisticParser Output:">(printer);
 
@@ -756,81 +1030,11 @@ namespace UEBabyPram::InsightFilter
 		auto queries = query_mapping.GetQueries();
 		for (std::size_t query_index = 0; query_index < queries.size(); ++query_index)
 		{
-			auto const& query = queries[query_index];
-
 			// The query is printed back from the regular expressions of its elements, with the same delimiters which the
-			// grammar of the query accepts, so the printed query can be used as an input query again: '(^Re^)' for a
-			// query only element, '[^Re^]' for an element which collects its timing, '%[^Re^]' for an element which
-			// merges the timing of every event which it matches, and '%' for the element which matches any event.
+			// grammar of the query accepts, so the printed query can be used as an input query again.
 			std::wstring header = std::format(L"    Query <{}>:", query_index);
-			for (std::size_t node_index = 0; node_index < query.nodes.size(); ++node_index)
-			{
-				auto const& node = query.nodes[node_index];
-				header += node_index == 0 ? L" " : L" -> ";
-
-				switch (node.kind)
-				{
-				case EventQuery::ChainElement::Kind::Any:
-					// The element matches any event, it carries no regular expression.
-					header += L"%";
-					break;
-				case EventQuery::ChainElement::Kind::QueryOnly:
-					header += L"(";
-					break;
-				case EventQuery::ChainElement::Kind::QueryAndStatistic:
-					header += L"[";
-					break;
-				case EventQuery::ChainElement::Kind::QueryAndStatisticMerged:
-					header += L"%[";
-					break;
-				}
-
-				if (node.matcher)
-				{
-					// The regular expression is written back with the '^' which the grammar of the query surrounds it
-					// with, and the element is closed with the delimiter which its kind opened.
-					header += L"^";
-					header += EncodePattern(*node.matcher);
-					header += L"^";
-				}
-
-				switch (node.kind)
-				{
-				case EventQuery::ChainElement::Kind::Any:
-					break;
-				case EventQuery::ChainElement::Kind::QueryOnly:
-					header += L")";
-					break;
-				default:
-					header += L"]";
-					break;
-				}
-			}
-
-			if (query.thread_matcher)
-			{
-				header += L" & Thread=(^";
-				header += EncodePattern(*query.thread_matcher);
-				header += L"^)";
-			}
-
-			if (!query.time_ranges.empty())
-			{
-				header += L" & Time=";
-				for (std::size_t range_index = 0; range_index < query.time_ranges.size(); ++range_index)
-				{
-					if (range_index != 0)
-					{
-						header += L", ";
-					}
-					auto const& range = query.time_ranges[range_index];
-					header += std::format(
-						L"[{}, {}]",
-						DisplayTimePoint{ range.Begin() },
-						DisplayTimePoint{ range.End() }
-					);
-				}
-			}
+			header += L' ';
+			header += FormatQueryText(query_index);
 
 			OutputLog<L"{}">(printer, header);
 

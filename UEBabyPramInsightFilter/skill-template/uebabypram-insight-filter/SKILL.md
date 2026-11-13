@@ -9,9 +9,9 @@ UEBabyPramInsightFilter 是一个用于分析 Unreal Engine（UE4/UE5）`.utrace
 
 - 默认模式：报告 GameThread 的帧耗时与统计；
 - 事件位置搜索（`-r`）；
-- 事件耗时统计（`-es`），含 Top N 最长 occurrence；
+- 事件耗时统计（`-es`），含 Top N 最长 occurrence，可用 `-csv <path>` 直接导出 CSV 文件；
 - 保存并打印指定调用堆栈（`-ed`），打印**完整**调用树（含时间片外的事件），含每个事件的耗时与 Exclude Time，并按节点数/层数上限截断；
-- 生成火焰图（`-ef`），聚合所有匹配的调用路径；
+- 生成火焰图（`-ef`），聚合所有匹配的调用路径，可用 `-fs <path>` 直接导出 folded stacks 文件；
 - 线程搜索（`-ts`）。
 
 ## 工具路径
@@ -48,17 +48,20 @@ UEBabyPramInsightFilter 是一个用于分析 Unreal Engine（UE4/UE5）`.utrace
 | 选项 | 说明 |
 |------|------|
 | `-f, --file <path>` | 必填，`.utrace` 文件路径 |
-| `-o, --output <path>` | 报告写入的文件（存在则清空重建），不给则写标准输出 |
+| `-o, --output <path>` | 报告写入的文件（存在则清空重建），不给则写标准输出；写文件时每条消息的字节数与累计字节数会直接打印到终端 |
+| `-a, --append <path>` | 报告**追加**到该文件末尾（不存在则创建、原有内容保留，仅支持纯文本）；不能与 `-o` 同时使用 |
 | `-h, --help` | 打印帮助 |
 | `-mlc, --max_location_count <count>` | `-r` 最多报告多少个事件位置，0 表示不限，默认 256 |
 | `-tx, --top_count <count>` | `-es` 每个事件名保留的 Top N 最长 occurrence，默认 5 |
 | `-dbc, --duration_bucket_count <count>` | `-es` 耗时分布直方图的分组数，默认 5 |
+| `-csv, --csv <path>` | `-es` 把统计结果写成 CSV 文件（UTF-8，RFC 4180）而不是文本报告；不能与 `-o` 同时使用，只能与 `-es` 一起用 |
+| `-fs, --folded_stack <path>` | `-ef` 把火焰图写成 folded stacks 文件（`帧;帧 <微秒>`）而不是文本报告；不能与 `-o` 同时使用，只能与 `-ef` 一起用 |
 | `-mvc, --max_view_count <count>` | `-ed` 保存、`-ef` 聚合的最长 stack tree 个数，默认 10 |
 | `-mnc, --max_node_count <count>` | `-ed` 单棵 stack tree 最多打印多少个节点，超出不打印并以 `...` 标记，0 表示不限，默认 100 |
 | `-md, --max_depth <depth>` | `-ed` 单棵 stack tree 最多打印多少层，超出不打印并以 `...` 标记，0 表示不限，默认 8（根节点为第 1 层） |
 | `-mrf, --max_record_frame <count>` | 默认模式记录的最长帧数量，默认 10 |
 | `-metc, --max_exclude_time_count <count>` | 每个 Top 列表保留的最长 Exclude Time 事件数量，默认 30 |
-| `-sr, --sampling_ratio <ratio>` | 默认模式采样的时间比例，`[0.0, 1.0]`，默认 1.0（分析完整时间范围） |
+| `-sr, --sampling_ratio <ratio>` | 默认模式采样的时间比例，`[0.0, 1.0]`，默认 **0.9**（只分析中间 90% 的时间范围）；报告只统计与采样时间范围有交集的帧 |
 
 ---
 
@@ -95,6 +98,30 @@ elem      := (^Regex^)     只作为调用链的一部分，不统计
 
 ## 各模式输出说明
 
+### 默认模式 GameThread 帧耗时
+
+```text
+GameThreadParser Output:
+    (Every frame, statistic and list below only covers the frames whose time range intersects the Sampled Range of -sr: a frame entirely out of the Sampled Range is not counted, and a frame which only crosses its boundary is counted with its whole time)
+    Total GameThread Time: <18.663s>, Total GameFrame: <691>, Avg GameThread Time: <27.009ms>
+    Frame Rate: Total <691> Frame(s), Mean Frame Time <27.009ms>, Mean <37.02> FPS
+        FPS Level       Frame Time              Frames     Share
+        > 120 FPS       < 8.33 ms                    0     0.00%
+        60 ~ 120 FPS    8.33 ~ 16.67 ms              2     0.29%
+        30 ~ 60 FPS     16.67 ~ 33.33 ms           652    94.36%
+        15 ~ 30 FPS     33.33 ~ 66.67 ms            28     4.05%
+        <= 15 FPS       >= 66.67 ms                  9     1.30%
+        Frames Above 60 FPS: <2> (<0.29%>), Above 30 FPS: <654> (<94.65%>), Above 15 FPS: <682> (<98.70%>)
+    Time Range: [1m36.925707s, 1m57.655903s] Sampled Range: [1m37.962217s, 1m56.619394s] Sampled Ratio: <0.90>
+```
+
+- **报告顶部那行括号就是采样口径声明**：下面所有帧数、帧率、耗时与 Top 列表，统计的都是**与采样时间范围（Sampled Range）有交集**的帧；完全落在采样范围外的帧不统计、不列出；跨采样范围边界的帧按**整帧耗时**统计（时间不裁剪）。
+- 帧率按 5 档（120 / 60 / 30 / 15 FPS）统计：每行给出**档位**（`> 120 FPS`、`60 ~ 120 FPS` … `<= 15 FPS`）、对应的**帧耗时区间**、**帧数**与**占比**；5 档占比之和为 100%。
+- `Frames Above X FPS` 是**累计**统计：帧率高于 X FPS 的帧数与占比（即该档位及以上各档之和），用来回答"有多少帧跑到了 X FPS 以上"。
+- `Mean FPS` 由平均帧耗时换算（`1 / 平均帧耗时`），不是各帧帧率的算术平均。
+- `-sr`（默认 **0.9**，即只取 trace 中间 90% 的时间范围）决定 `Sampled Range`；`Time Range` 是 trace 里记录的完整帧区间，`Sampled Ratio` 是实际生效的采样比例。
+- 若 trace 里没有记录到 GameFrame，报告只有一行 `No GameFrame is recorded, there is nothing to report.`。
+
 ### -r 事件位置搜索
 
 报告匹配事件名对应的定义位置（文件与行号）；CPU scope logger 事件没有位置，报告为 unknown file、line 0。
@@ -128,6 +155,27 @@ EventStatisticParser Output:
   - `Mean Total D`：这些帧里该事件总耗时的平均值；
   - `Longest TR` / `Longest D`：出现 N 次的帧中总耗时最长的帧的时间范围与耗时。
 - `Duration Distribution <N> Bucket(s)`：当该事件的出现次数大于 `-tx`（Top N）时，把单个 occurrence 的耗时从最短到最长均分为 `-dbc` 个区间（默认 5，与 `-tx` 无关），每行给出区间范围、落入该区间的个数与占总个数的百分比。
+
+#### `-es` 导出 CSV（`-csv <path>`）
+
+加上 `-csv <path>` 后**不再打印文本报告**，而是直接把统计结果写进 `<path>`（文件存在则清空重建）：
+
+```powershell
+& ".\scripts\UEBabyPramInsightFilter.exe" -f "Capture.utrace" -es "[^UWorld::Tick^]" -csv "result.csv"
+```
+
+- 每行一个事件统计（只有 occurrence 数 > 0 的事件才写），列顺序固定为：
+
+  `QueryIndex, Event, Kind, EventIdCount, OccurrenceCount, TotalD_ms, MeanD_ms, MedianD_ms, StdD_ms, TotalE_ms, MeanE_ms, Query`
+
+  - `Kind`：`Name`（按事件名的统计口径）或 `Regex`（`%[^...^]` 合并口径，此时 `Event` 列是正则文本）；
+  - `EventIdCount`：该统计口径覆盖的事件 id 数量（`Name` 通常为 1，`Regex` 是被合并的事件数）；
+  - 耗时列单位均为毫秒，保留 6 位小数；
+  - `Query` 列重复该行所属查询的查询文本，便于筛选/透视。
+- 行顺序：先按 `QueryIndex`，同一查询内按 `TotalD_ms` 从大到小（`Name` 与 `Regex` 混排）。
+- 编码 UTF-8（**无 BOM**），字段符合 RFC 4180：含 `,`、`"` 或换行的字段用双引号包裹，内部 `"` 写成 `""`。
+- CSV 只包含事件的汇总统计；Top N occurrence、GameFrame Statistics、Duration Distribution 仍然只在文本报告里输出。
+- `-csv` 只能与 `-es` 一起用，且不能与 `-o` 同时使用（`-csv` 自己指定输出文件）。
 
 ### -ed 详细调用堆栈
 
@@ -185,7 +233,33 @@ EventFlameGraphParser Output:
 - `D` 是调用路径的 inclusive 耗时（该路径所有 occurrence 的耗时之和）；
 - `Percent` 是占全部匹配时间的百分比；
 - 子节点按耗时从大到小排列；
-- 只有落在查询 `Time` 范围内的 occurrence 才会被统计与打印；跨界的 occurrence 按**完整**耗时计入（时间不裁剪），完全在范围外的 occurrence 连同其子事件都不参与聚合。
+- **时间片只决定"聚合哪些树"，不裁剪事件时间**：只要一棵 stack tree 与查询 `Time` 条件的时间片相交，这棵树就**整棵**参与统计——树下的所有事件（包括完全落在时间片外的事件）都计入各自的调用路径，且任何事件的时间都不会被时间片裁剪；跨界的事件按**完整**耗时计入；
+- **打印比统计更窄**：只有"至少有一个 occurrence 落在时间片内"的调用路径会被打印；完全落在时间片外的调用路径不打印，但它的时间仍然属于其父节点的 inclusive 耗时。因此打印出来的 `D` 是该调用路径的完整耗时（不裁剪），父子节点的时间之和不要求相等（inclusive 语义）。
+
+示例含义：查询 `&Time=[10s,20s]` 命中一棵 `[9s,21s]` 的 stack tree 时，整棵树（含 `9s~10s`、`20s~21s` 里的事件）都计入各自调用路径的耗时；但一条只在时间片外出现过的调用路径不会出现在报告里，它的时间只体现在其父路径的 inclusive 耗时中。
+
+#### `-ef` 导出 folded stacks（`-fs <path>`）
+
+加上 `-fs <path>` 后**不再打印文本报告**，而是把火焰图写成 folded stacks（collapsed stacks）文件，可直接交给 flamegraph.pl / speedscope 等工具出图：
+
+```powershell
+& ".\scripts\UEBabyPramInsightFilter.exe" -f "Capture.utrace" -ef "[^UWorld::Tick^]" -fs "result.folded"
+flamegraph.pl result.folded > result.svg
+```
+
+每行格式为 `帧1;帧2;...;帧N <微秒>`（权重是**微秒**整数），例如：
+
+```text
+FEngineLoop::Tick;Frame;FEngineLoop_UpdateTimeAndHandleMaxTickRate;FThreadIdleStats::FScopeIdle 315000
+FEngineLoop::Tick;Frame;Tick_Engine 4364
+```
+
+- 权重是该调用路径的**自身耗时**（inclusive 减去已导出子节点的 inclusive），因此各行权重之和 = 报告里的 `Total`，不会重复计算；
+- 只导出报告会打印的调用路径（与时间片相交的）；时间片外被略过的子路径，其时间计入持有它的父路径；
+- 帧名中的 `;` 会被换成 `:`，换行/制表符换成空格，保证一行只表示一条调用路径；
+- 自身耗时为 0 的路径不写行（其时间已在子节点的行里），文件更紧凑；
+- 行顺序与文本报告一致（按耗时从大到小深度优先遍历），同一份 trace 输出稳定；
+- `-fs` 只能与 `-ef` 一起用，且不能与 `-o` 同时使用（`-fs` 自己指定输出文件）。
 
 ### -ts 线程搜索
 
@@ -219,25 +293,38 @@ EventFlameGraphParser Output:
 & ".\scripts\UEBabyPramInsightFilter.exe" -f "Capture.utrace" -es "[^UWorld::Tick^]&Time=[0s,10s]&Thread=(^.*GameThread.*^)"
 ```
 
-### 5. 保存并打印 UWorld::Tick 的详细堆栈（最多 5 个）
+### 5. 把事件耗时统计导出为 CSV
+
+```powershell
+& ".\scripts\UEBabyPramInsightFilter.exe" -f "Capture.utrace" -es "[^UWorld::Tick^]" -csv "result.csv"
+```
+
+### 6. 保存并打印 UWorld::Tick 的详细堆栈（最多 5 个）
 
 ```powershell
 & ".\scripts\UEBabyPramInsightFilter.exe" -f "Capture.utrace" -ed "[^UWorld::Tick^]" -mvc 5
 ```
 
-### 6. 打印完整调用树但限制规模（每棵树最多 200 个节点、20 层）
+### 7. 打印完整调用树但限制规模（每棵树最多 200 个节点、20 层）
 
 ```powershell
 & ".\scripts\UEBabyPramInsightFilter.exe" -f "Capture.utrace" -ed "[^UWorld::Tick^]" -mnc 200 -md 20
 ```
 
-### 7. 生成 UWorld::Tick 的火焰图
+### 8. 生成 UWorld::Tick 的火焰图
 
 ```powershell
 & ".\scripts\UEBabyPramInsightFilter.exe" -f "Capture.utrace" -ef "[^UWorld::Tick^]"
 ```
 
-### 8. 搜索 GameThread
+### 9. 把火焰图导出为 folded stacks（可直接出图）
+
+```powershell
+& ".\scripts\UEBabyPramInsightFilter.exe" -f "Capture.utrace" -ef "[^UWorld::Tick^]" -fs "result.folded"
+flamegraph.pl result.folded > result.svg
+```
+
+### 10. 搜索 GameThread
 
 ```powershell
 & ".\scripts\UEBabyPramInsightFilter.exe" -f "Capture.utrace" -ts ".*GameThread.*"
@@ -255,5 +342,7 @@ EventFlameGraphParser Output:
 6. `-ed` 打印的树是**完整**的：查询 `Time` 条件只决定保留哪些树，不裁剪树里的事件；树规模由 `-mnc`（节点数，默认 100）与 `-md`（层数，默认 8）限制，超出的节点用 `...` 标记，且两个限制对每棵树分别生效（`0` 表示不限）。看到 `...` 说明该处被截断，可调大 `-mnc`/`-md` 重新运行。
 7. `-ef` 只聚合 `-mvc` 个最长的匹配 stack tree（不再是"全部聚合"）。
 8. **宽正则有性能风险**：`-r`、`-es`、`-ed`、`-ef`（以及 `-ts`）的每个正则都要对每个事件名（或线程名）逐一完整匹配，`.*`、`(^.*^)`、`[^.*Tick.*^]` 这类写法会让整次分析变慢、报告变大；优先写名字里的确定片段，query 里若"任意事件"即可，用不带正则的 `%` 元素（它完全不参与名字匹配）。
-9. `.utrace` 的开头与结尾是触发保存 trace 的时刻，保存本身会进入这些帧的耗时，所以这两端的数据不准；`-sr` 取小于 1.0 时只分析中间部分以避开两端（默认 1.0 分析完整范围）。
-10. 报告默认写到标准输出；用 `-o <path>` 可写入文件（文件会被清空重建），文件内容是 UTF-8 纯文本。
+9. `.utrace` 的开头与结尾是触发保存 trace 的时刻，保存本身会进入这些帧的耗时，所以这两端的数据不准；`-sr`（默认 **0.9**）只分析中间部分以避开两端，**报告只覆盖与采样时间范围有交集的帧**（完全在范围外的帧不统计，跨边界的帧按整帧耗时统计），并且顶部会有一行明确说明这个口径；取 `-sr 1.0` 则分析完整范围。
+10. 报告默认写到标准输出；用 `-o <path>` 可写入文件（文件会被清空重建），用 `-a <path>` 可**追加**到已有文件末尾（不存在则创建，仅纯文本），`-o` 与 `-a` 不能同时使用。写文件时，每写一条报告消息都会在终端打印该条消息的字节数与本次运行已写入的累计字节数（这些进度行不会进入报告文件），可用来观察长报告的输出进度。
+11. `-es` 想给程序消费时用 `-csv <path>`：直接生成 CSV 文件、不打印文本报告；它只能与 `-es` 一起用，且不能与 `-o` 或 `-a` 同时使用。CSV 只含事件汇总（不含 Top occurrence / GameFrame / 直方图）。
+12. `-ef` 想直接出图时用 `-fs <path>`：直接生成 folded stacks 文件（不打印文本报告），权重为该调用路径的自身耗时（微秒），各行之和等于报告的 `Total`；它只能与 `-ef` 一起用，且不能与 `-o` 或 `-a` 同时使用。

@@ -29,6 +29,13 @@ export namespace UEBabyPram::InsightFilter
 	// The query is the same call chain which EventDetailParser (see EventQuery and GetFilterEbnf()):
 	// a stack tree is aggregated when one of its events completes the chain, the thread condition and
 	// the time ranges of the query are matched as well.
+	//
+	// The time ranges of the query only decide which stack trees are aggregated, not which events of an
+	// aggregated tree are counted: a stack tree which overlaps one of the ranges is aggregated whole,
+	// every event which it carries is counted, and the time of an event is never cut to the ranges. The
+	// report is narrower than the aggregation: a call path is printed only when one of its occurrences
+	// overlaps one of the ranges, so the events which the query did not select are left out of the
+	// report, while their time is still a part of the inclusive time of the node which holds them.
 	struct EventFlameGraphParser : public Parser
 	{
 		struct Config
@@ -44,6 +51,11 @@ export namespace UEBabyPram::InsightFilter
 			// longer one when the count is reached, 0 for none. It is the same option with the same meaning as
 			// EventDetailParser::Config::max_view_count.
 			std::size_t max_view_count = 10;
+			// The path of the folded stack file which the flame graph is written into instead of the text report, the
+			// file is created and its previous content is emptied. Every line of the file is one call path and the time
+			// which it took on its own, "<Frame>;<Frame>;... <Microsecond>", which is the format of the folded stacks
+			// which the flame graph tools (ex: flamegraph.pl) read. The text report is not printed when the path is set.
+			std::optional<std::filesystem::path> folded_stack_path;
 			std::pmr::memory_resource* resource = std::pmr::get_default_resource();
 		};
 
@@ -66,7 +78,6 @@ export namespace UEBabyPram::InsightFilter
 		virtual void AllAnalyzeDone() override;
 		// Report the flame graph, the analysis has to be done before this is called.
 		bool PrintToLog(Potato::Log::LogPrinter& printer) override;
-
 	protected:
 
 		// One node of the flame graph. The children are the indices of the nodes of the storage, so a
@@ -77,8 +88,15 @@ export namespace UEBabyPram::InsightFilter
 				: children(resource) {}
 
 			EventID event_id;
-			// The sum of the duration of every occurrence of this call path.
+			// The sum of the duration of every occurrence of this call path. The duration of an occurrence is the
+			// time from its beginning to the end of its subtree, and it is never cut to the time ranges of the
+			// query: an occurrence which crosses the boundary of a range counts with its whole time.
 			DurationSec total_duration = DurationSec::zero();
+			// Whether at least one occurrence of this call path overlaps the time ranges of the query. A node which
+			// carries such an occurrence is printed, the node which only carries the occurrences outside of the
+			// ranges is not: its time is still a part of the inclusive time of the node which holds it, because the
+			// whole stack tree of an aggregated stack tree is counted, see EventFlameGraphParser::AggregateStackTree().
+			bool has_occurrence_in_query_time_range = false;
 			std::pmr::vector<std::size_t> children;
 		};
 
@@ -102,6 +120,9 @@ export namespace UEBabyPram::InsightFilter
 		// Aggregate one kept stack tree into the flame graph, the query which keeps it is recorded with the call
 		// paths which the tree creates.
 		void AggregateStackTree(ThreadCPUEventView event_scope, std::size_t query_index);
+		// Write the flame graph into the folded stack file of Config::folded_stack_path instead of the text report:
+		// every line is one call path and the time which the path took on its own, the format of the folded stacks.
+		bool WriteFoldedStack() const;
 
 		std::pmr::unsynchronized_pool_resource resource;
 		EventSpecManager events_manager;
@@ -114,5 +135,8 @@ export namespace UEBabyPram::InsightFilter
 		// The stack trees which are kept, they are the Config::max_view_count longest ones which the query matches.
 		std::pmr::vector<StoredView> stored_views;
 		std::size_t max_view_count = 10;
+		// The path of the folded stack file which the flame graph is written into instead of the text report, it is
+		// described by Config::folded_stack_path.
+		std::optional<std::filesystem::path> folded_stack_path;
 	};
 }

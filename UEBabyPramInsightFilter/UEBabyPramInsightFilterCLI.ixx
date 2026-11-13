@@ -21,7 +21,10 @@ export namespace UEBabyPram::InsightFilter
 	{
 		std::filesystem::path insight_path;
 		// The file which the report is written into, it is empty when the report is written into the standard output.
+		// It is named by -o, which creates the file and empties it, or by -a, which keeps its previous content.
 		std::filesystem::path output_path;
+		// Whether the report is appended to the end of output_path instead of replacing it, which is what -a asks for.
+		bool append = false;
 		std::unique_ptr<Parser> parser;
 	};
 

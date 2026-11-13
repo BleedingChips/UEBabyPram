@@ -22,10 +22,11 @@ export namespace UEBabyPram::InsightFilter
 		{
 			std::size_t max_record_frame = 10;
 			std::size_t max_exclude_time_count = 30;
-			// The ratio of the time range which is analyzed, 1.0 analyzes the whole range. The beginning and the end of the
-			// trace are the time when the trace is saved, so the frames there are not accurate, and the middle of the range is
-			// what the sampling is for.
-			double sampling_ratio = 1.0;
+			// The ratio of the time range which is analyzed, 0.9 is the default and analyzes the middle 90% of the range.
+			// The beginning and the end of the trace are the time when the trace is saved, so the frames there are not
+			// accurate, and the middle of the range is what the sampling is for. Only the frames whose time range
+			// intersects the sampled range are counted and listed, see GameThreadParser::PrintToLog().
+			double sampling_ratio = 0.9;
 			std::pmr::memory_resource* resource = std::pmr::get_default_resource();
 		};
 
@@ -77,8 +78,8 @@ export namespace UEBabyPram::InsightFilter
 		ThreadID game_thread_id;
 		ThreadSystemID game_thread_system_id;
 		std::vector<EventID> tick_event_id;
-		// The ratio of the time range which is analyzed, 1.0 analyzes the whole range.
-		double sampling_ratio = 1.0;
+		// The ratio of the time range which is analyzed, it is Config::sampling_ratio and it is 0.9 by default.
+		double sampling_ratio = 0.9;
 
 		struct CrossFrameEventRecord
 		{

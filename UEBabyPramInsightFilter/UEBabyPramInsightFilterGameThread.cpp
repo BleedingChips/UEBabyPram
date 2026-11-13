@@ -301,22 +301,140 @@ namespace UEBabyPram::InsightFilter
 
 		OutputLog<L"GameThreadParser Output:">(printer);
 
+		// The report is built from the frames whose time range intersects the sampled range, which is the middle of the
+		// trace according to Config::sampling_ratio, so the note of the report tells which data are listed: a frame
+		// which is entirely out of the sampled range is not counted, and a frame which only crosses the boundary of the
+		// sampled range is counted with the whole time of the frame, the time of a frame is never cut to the range.
+		OutputLog<L"    (Every frame, statistic and list below only covers the frames whose time range intersects the Sampled Range of -sr: a frame entirely out of the Sampled Range is not counted, and a frame which only crosses its boundary is counted with its whole time)">(
+			printer
+		);
+
+		// A trace which carries no game frame has nothing to report, and every average of the report would be a
+		// division by zero.
+		if (total_count == 0)
+		{
+			OutputLog<L"    No GameFrame is recorded, there is nothing to report.">(printer);
+			return true;
+		}
+
+		double mean_frame_time_millisecond = std::chrono::duration_cast<
+			std::chrono::duration<double, std::milli>
+		>(total_time / total_count).count();
+
 		OutputLog<L"    Total GameThread Time: <{:.3f}s>, Total GameFrame: <{}>, Avg GameThread Time: <{:.3f}ms>">(
 			printer,
 			total_time.count(),
 			total_count,
-			std::chrono::duration_cast<
-				std::chrono::duration<double, std::milli>
-			>(total_time / total_count).count()
+			mean_frame_time_millisecond
 		);
 
-		OutputLog<L"    Fps: [{:.2f}%]>=120Fps, [{:.2f}%]>=60Fps, [{:.2f}%]>=30Fps, [{:.2f}%]>=15Fps, [{:.2f}%]<15FPS">(
+		// The frame rate is reported as a table instead of one line: every level keeps the range of the frame time which
+		// belongs to it, how many frames fell into it and their share, so the level of a share is read from the row
+		// which carries it. The levels and the frame time ranges are written from the same thresholds which the frames
+		// are classified by, so the table and the classification never go out of sync.
+		auto frame_rate_of = [](DurationSec threshold) { return 1.0 / threshold.count(); };
+		auto frame_time_limit_text = [](std::wstring_view prefix, DurationSec limit) {
+			return std::wstring{ prefix } + L" " + std::format(L"{:.2f} ms", limit.count() * 1000.0);
+		};
+		auto frame_time_range_text = [](DurationSec begin, DurationSec end) {
+			return std::format(L"{:.2f} ~ {:.2f} ms", begin.count() * 1000.0, end.count() * 1000.0);
+		};
+
+		// The columns of the table are aligned by padding the cell, which is ASCII for every cell of the table.
+		constexpr std::size_t level_width = 14;
+		constexpr std::size_t frame_time_width = 20;
+		constexpr std::size_t count_width = 8;
+		constexpr std::size_t share_width = 8;
+
+		auto pad_left = [](std::wstring_view text, std::size_t width) {
+			std::wstring padded{ text };
+			if (padded.size() < width)
+			{
+				padded.append(width - padded.size(), L' ');
+			}
+			return padded;
+		};
+		auto pad_right = [](std::wstring_view text, std::size_t width) {
+			std::wstring padded;
+			if (text.size() < width)
+			{
+				padded.append(width - text.size(), L' ');
+			}
+			padded.append(text);
+			return padded;
+		};
+		auto share_of = [this](std::size_t frame_count) {
+			return static_cast<double>(frame_count) / static_cast<double>(total_count) * 100.0;
+		};
+		auto print_frame_rate_row = [&](std::wstring_view level, std::wstring_view frame_time, std::size_t frame_count) {
+			OutputLog<L"        {}  {}  {}  {}">(
+				printer,
+				pad_left(level, level_width),
+				pad_left(frame_time, frame_time_width),
+				pad_right(std::format(L"{}", frame_count), count_width),
+				pad_right(std::format(L"{:.2f}%", share_of(frame_count)), share_width)
+			);
+		};
+
+		double mean_frame_rate = total_time.count() > 0.0
+			? static_cast<double>(total_count) / total_time.count()
+			: 0.0;
+
+		OutputLog<L"    Frame Rate: Total <{}> Frame(s), Mean Frame Time <{:.3f}ms>, Mean <{:.2f}> FPS">(
 			printer,
-			fps_frame_record[0] / static_cast<double>(total_count) * 100.0,
-			fps_frame_record[1] / static_cast<double>(total_count) * 100.0,
-			fps_frame_record[2] / static_cast<double>(total_count) * 100.0,
-			fps_frame_record[3] / static_cast<double>(total_count) * 100.0,
-			fps_frame_record[4] / static_cast<double>(total_count) * 100.0
+			total_count,
+			mean_frame_time_millisecond,
+			mean_frame_rate
+		);
+
+		OutputLog<L"        {}  {}  {}  {}">(
+			printer,
+			pad_left(L"FPS Level", level_width),
+			pad_left(L"Frame Time", frame_time_width),
+			pad_right(L"Frames", count_width),
+			pad_right(L"Share", share_width)
+		);
+
+		print_frame_rate_row(
+			std::format(L"> {:.0f} FPS", frame_rate_of(fps_thresholds[0])),
+			frame_time_limit_text(L"<", fps_thresholds[0]),
+			fps_frame_record[0]
+		);
+		print_frame_rate_row(
+			std::format(L"{:.0f} ~ {:.0f} FPS", frame_rate_of(fps_thresholds[1]), frame_rate_of(fps_thresholds[0])),
+			frame_time_range_text(fps_thresholds[0], fps_thresholds[1]),
+			fps_frame_record[1]
+		);
+		print_frame_rate_row(
+			std::format(L"{:.0f} ~ {:.0f} FPS", frame_rate_of(fps_thresholds[2]), frame_rate_of(fps_thresholds[1])),
+			frame_time_range_text(fps_thresholds[1], fps_thresholds[2]),
+			fps_frame_record[2]
+		);
+		print_frame_rate_row(
+			std::format(L"{:.0f} ~ {:.0f} FPS", frame_rate_of(fps_thresholds[3]), frame_rate_of(fps_thresholds[2])),
+			frame_time_range_text(fps_thresholds[2], fps_thresholds[3]),
+			fps_frame_record[3]
+		);
+		print_frame_rate_row(
+			std::format(L"<= {:.0f} FPS", frame_rate_of(fps_thresholds[3])),
+			frame_time_limit_text(L">=", fps_thresholds[3]),
+			fps_frame_record[4]
+		);
+
+		// The levels are exclusive, so the share of the frames which are above a threshold is the sum of the levels
+		// above it, which is the question of "did the game hold this frame rate".
+		std::size_t frame_count_over_60 = fps_frame_record[0] + fps_frame_record[1];
+		std::size_t frame_count_over_30 = frame_count_over_60 + fps_frame_record[2];
+		std::size_t frame_count_over_15 = frame_count_over_30 + fps_frame_record[3];
+
+		OutputLog<L"        Frames Above 60 FPS: <{}> (<{:.2f}%>), Above 30 FPS: <{}> (<{:.2f}%>), Above 15 FPS: <{}> (<{:.2f}%>)">(
+			printer,
+			frame_count_over_60,
+			share_of(frame_count_over_60),
+			frame_count_over_30,
+			share_of(frame_count_over_30),
+			frame_count_over_15,
+			share_of(frame_count_over_15)
 		);
 
 		DisplayTimePoint total_range_display_begin{ total_range.Begin() };
@@ -325,12 +443,13 @@ namespace UEBabyPram::InsightFilter
 		DisplayTimePoint sampled_range_display_begin{ sampled_range.Begin() };
 		DisplayTimePoint sampled_range_display_end{ sampled_range.End() };
 
-		OutputLog<L"    Time Range: [{}, {}] Sampled Range: [{}, {}]">(
+		OutputLog<L"    Time Range: [{}, {}] Sampled Range: [{}, {}] Sampled Ratio: <{:.2f}>">(
 			printer,
 			total_range_display_begin,
 			total_range_display_end,
 			sampled_range_display_begin,
-			sampled_range_display_end
+			sampled_range_display_end,
+			std::clamp(sampling_ratio, 0.0, 1.0)
 		);
 
 		OutputLog<L"{}Top <{}> Longest GameThread:">(

@@ -65,6 +65,12 @@ export namespace UEBabyPram::InsightFilter
 			// count of the occurrences of an event is greater than top_count, and the range from the shortest duration to
 			// the longest one is split into this count of buckets.
 			std::size_t duration_bucket_count = 5;
+			// The path of the CSV file which the statistics are written into instead of the text report, the file is
+			// created and its previous content is emptied. Every statistic which carries an occurrence is one row of
+			// the file, the content is UTF-8 and the fields follow RFC 4180 (a field which carries the delimiter, the
+			// quote or a line break is quoted, and the quotes inside it are doubled), so a spreadsheet or a script can
+			// read it. The text report is not printed when the path is set.
+			std::optional<std::filesystem::path> csv_path;
 		};
 
 		// One of the longest occurrences of an event name, the time range of the occurrence, its
@@ -231,6 +237,14 @@ export namespace UEBabyPram::InsightFilter
 		void BuildDurationDistribution(EventStatistic& statistic);
 		// Print the timing of one event, the name is the copy which the statistic carries.
 		void PrintEventStatistic(Potato::Log::LogPrinter& printer, EventStatistic const& statistic) const;
+		// Write every statistic which carries an occurrence into the CSV file of Config::csv_path, the file is
+		// created or emptied. One row carries one statistic, and the rows are ordered by the query and by the total
+		// duration of the statistic, the longest one first. The header of the file names the columns.
+		bool WriteCSV() const;
+		// Write one query back into the text of the query grammar: the regular expression of every element with the
+		// delimiters of its kind, and the thread and the time conditions, so the text can be used as an input query
+		// again. The text is also reported with the query and with every row of the CSV file.
+		std::wstring FormatQueryText(std::size_t query_index) const;
 
 		std::pmr::unsynchronized_pool_resource resource;
 		// The streamer of the context switch events, the blocks of the events are streamed to the listeners which
@@ -253,5 +267,8 @@ export namespace UEBabyPram::InsightFilter
 		std::size_t top_count = 5;
 		// The count of the buckets of the histogram of the duration of the single occurrence.
 		std::size_t duration_bucket_count = 5;
+		// The path of the CSV file which the statistics are written into instead of the text report, it is
+		// described by Config::csv_path.
+		std::optional<std::filesystem::path> csv_path;
 	};
 }

@@ -106,22 +106,11 @@ namespace UEBabyPram::InsightFilter
 			return;
 		}
 
-		// The query system has already filtered the thread and the time of the query, and it tells whether the
-		// whole call chain of the query is matched inside the tree, which is what the tree is kept by. The
-		// chain may carry no statistic element, so the answer does not depend on the matches. The query which
-		// keeps the tree is recorded with it, so the report of the tree is limited by the time ranges of that
-		// query and not by the time ranges of every query.
-		std::size_t query_index = 0;
-		bool has_query_index = false;
-		bool is_chain_matched = query_mapping.ForEachMatchedEvent(event_scope, [&](EventQueryMapping::EventMatch const& match) {
-			if (!has_query_index)
-			{
-				query_index = match.query_index;
-				has_query_index = true;
-			}
-		});
-
-		if (!is_chain_matched)
+		// The query system has already filtered the thread and the time of the query, and it tells whether the whole
+		// call chain of the query is completed inside the tree, which is what the tree is kept by. The chain may carry
+		// no statistic element, so the answer does not depend on the matches, and the chain only has to be completed
+		// once: the judge stops at the first completion instead of enumerating every match of the tree.
+		if (!query_mapping.IsMatched(event_scope))
 		{
 			return;
 		}
@@ -158,7 +147,6 @@ namespace UEBabyPram::InsightFilter
 		// stack tree is analyzed, so the events are copied into the storage of the parser.
 		auto& stored_view = stored_views.emplace_back(&resource);
 		stored_view.duration = duration;
-		stored_view.query_index = query_index;
 		stored_view.thread_id = event_scope.thread_id;
 		stored_view.system_thread_id = event_scope.system_thread_id;
 		stored_view.frame_count = event_scope.frame_count;

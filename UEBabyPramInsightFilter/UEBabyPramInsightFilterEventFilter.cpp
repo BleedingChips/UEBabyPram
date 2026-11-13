@@ -37,8 +37,13 @@ namespace
 	// terminal, so the characters which the grammar of the query itself uses, ex: '[', ']', '(', ')',
 	// '%' and '->', are parsed as a part of the pattern without any escape, while a '^' inside the
 	// pattern has to be written as '\^', because the terminal does not accept a bare one.
+	//
+	// The payload of the terminal excludes the backslash and the caret, so the token always stops at the first
+	// caret which is not escaped: without the exclusion of the caret the repeat would swallow every delimiter of
+	// the query which follows the pattern, ex: the ']' and the '->' of a chain of two elements, and the whole query
+	// would be read as one regular expression.
 	static std::u8string_view ebnf_string = u8R"(
-CaretReg := '\^(?:[^\\]|(?:\\.))*\^' : [1] ;
+CaretReg := '\^(?:[^\\\^]|(?:\\.))*\^' : [1] ;
 Integer  := '[0-9]+' : [2] ;
 Decimal  := '[0-9]+\.[0-9]+' : [3] ;
 $        := '\s+' ;
@@ -207,6 +212,9 @@ namespace UEBabyPram::InsightFilter
 					result.chain = production[0].Consume<std::vector<EventQuery::ChainElement>>();
 					QueryTailData tail = production[1].Consume<QueryTailData>();
 					result.time_ranges = std::move(tail.time_ranges);
+					// The thread condition is a part of the query as well: without it the query would silently count
+					// every thread, which is what a query without the condition means.
+					result.thread_matcher = std::move(tail.thread_matcher);
 					return result;
 				}
 				case 2:

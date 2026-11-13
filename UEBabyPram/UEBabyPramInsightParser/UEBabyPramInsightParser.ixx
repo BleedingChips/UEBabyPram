@@ -398,7 +398,7 @@ export namespace UEBabyPram::InsightParser
 		{
 			EventID event_id;
 			std::size_t index_offset = std::numeric_limits<std::size_t>::max();
-			std::size_t depth;
+			std::size_t depth = std::numeric_limits<std::size_t>::max();
 			DurationSec time_point;
 			operator bool() const { return index_offset != std::numeric_limits<std::size_t>::max(); }
 		};
@@ -408,6 +408,12 @@ export namespace UEBabyPram::InsightParser
 			return FindFirstEventID(event_ids, Potato::Misc::IndexSpan<>{find_offset, std::numeric_limits<std::size_t>::max()});
 		}
 		FindResult FindFirstEventID(std::span<EventID const> event_ids, Potato::Misc::IndexSpan<> index_range) const;
+		FindResult FindFirstEventIDOrDepth(std::span<EventID const> event_ids, std::size_t target_depth, Potato::Misc::IndexSpan<> index_range) const;
+		FindResult FindFirstEventIDOrDepth(std::span<EventID const> event_ids, std::size_t target_depth, std::size_t offset = 0) const
+		{
+			return FindFirstEventIDOrDepth(event_ids, target_depth, { offset, std::numeric_limits<std::size_t>::max() });
+		}
+
 		FindResult FindFirstDepth(std::size_t depth, std::size_t find_offset = 0) const
 		{
 			return FindFirstDepth(depth, Potato::Misc::IndexSpan<>{find_offset, std::numeric_limits<std::size_t>::max()});

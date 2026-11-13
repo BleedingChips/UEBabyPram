@@ -48,7 +48,17 @@ Options:
 
   -o, --output <path>
       Path of the file which the report is written into, the file is created and its previous content is
-      emptied. When it is not given, the report is written into the standard output.
+      emptied. When neither -o nor -a is given, the report is written into the standard output.
+      Every message of the report tells the terminal the bytes which it carried and the bytes of the whole
+      report which is written so far, so the terminal shows the progress of a long report, the report file
+      itself only carries the report.
+
+  -a, --append <path>
+      Path of the file which the report is appended to, the file is created when it does not exist and its
+      previous content is kept, so the reports of several runs are collected in one file. Only plain text is
+      supported: the report is UTF-8 text and nothing is written before it, so it starts at the end of the
+      previous content. The byte count of every message is reported to the terminal the same as -o.
+      -a and -o can not be used at the same time.
 
   -r, --regex <regex>
       Regular expression of the event name, in the re2 (RE2) syntax.
@@ -117,6 +127,13 @@ Options:
       the shortest duration of the single occurrence to the longest one is split into top count buckets,
       and every bucket is reported with its range, the count of the occurrences which fell into it and
       the share of them over the whole count.
+      The statistics can be written into a CSV file instead of the text report with -csv <path>: every
+      statistic is one row of the file, so a spreadsheet or a script reads the result without parsing
+      the text report. The rows are ordered by the query and by the total duration of the statistic,
+      the longest one first, and every row repeats the text of its query. Only the statistics which
+      carry an occurrence are written, the same as the text report. The CSV file carries the summary of
+      every event, the top occurrences, the game frame statistics and the duration distribution are
+      only carried by the text report.
       Narrow the filter as much as possible: a filter which is too wide reports a very large
       amount of information, which is slow to print and hard to read.
       Performance: every regular expression is tested against the name of every event which the trace
@@ -153,10 +170,21 @@ Options:
       Query of the stack trees which should be aggregated into a flame graph, the grammar is the same
       as -es. The call paths of every matched stack tree are merged, and the time of every call path
       is reported with its percentage of the whole matched time. The -mvc longest stack trees are
-      aggregated, the same as -ed. Only the occurrences which are inside the time ranges of the query are
-      aggregated and reported: an occurrence which is entirely out of the ranges is not a part of the flame
-      graph, and the occurrence which crosses the boundary of a range counts with its whole time, the time of
-      an occurrence is never cut to the ranges.
+      aggregated, the same as -ed.
+      The time ranges of the query only decide which stack trees are aggregated, not which events of
+      an aggregated tree are counted: a stack tree which overlaps one of the ranges is aggregated
+      whole, so every event which it carries is counted, and the time of an event is never cut to the
+      ranges, an event which crosses the boundary of a range counts with its whole time.
+      The report is narrower than the aggregation: a call path is only printed when one of its
+      occurrences is inside the ranges, the call paths which are entirely out of the ranges are not
+      printed, while their time is still a part of the inclusive time of the call path which holds
+      them. So the time of a printed call path is the whole time of that path, it is never cut to the
+      ranges.
+      The flame graph can be written into a folded stack file with -fs <path> instead of the text
+      report: every line of the file is one call path and the time which the path took on its own in
+      microseconds, "<Frame>;<Frame>;... <Microsecond>", which is the format of the folded stacks
+      which the flame graph tools read, ex: flamegraph.pl. Only the call paths which the report
+      prints are written, and the sum of the weights is the whole matched time of the graph.
       Narrow the filter as much as possible: a filter which is too wide reports a very large
       amount of information, which is slow to print and hard to read.
       Performance: every regular expression is tested against the name of every event which the trace
@@ -187,6 +215,30 @@ Options:
       top count (-tx), and the range from the shortest duration of the single occurrence to the longest
       one is split into this count of buckets.
 
+  -csv, --csv <path>
+      Write the statistics of -es into <path> as a CSV file instead of the text report, the file is
+      created and its previous content is emptied, and the text report is not printed. The content is
+      UTF-8 without a BOM and the fields follow RFC 4180, so a field which carries ',', '"' or a line
+      break is quoted. The columns are QueryIndex, Event, Kind, EventIdCount, OccurrenceCount,
+      TotalD_ms, MeanD_ms, MedianD_ms, StdD_ms, TotalE_ms, MeanE_ms and Query, where Kind is Name for
+      a statistic of one event name and Regex for a merged element, and EventIdCount is the count of
+      the event ids which the statistic of the row carries. The rows are ordered by the query and by
+      the total duration of the statistic, the longest one first. -csv can only be used with -es, and
+      it can not be used with -o at the same time.
+
+  -fs, --folded_stack <path>
+      Write the flame graph of -ef into <path> as a folded stack file instead of the text report, the
+      file is created and its previous content is emptied, and the text report is not printed. Every
+      line is one call path and the time which it took on its own, "<Frame>;<Frame>;... <Microsecond>",
+      which is the format of the folded stacks which the flame graph tools read, ex: flamegraph.pl, so
+      the file can be turned into a picture, ex:
+        flamegraph.pl result.folded > result.svg
+      The delimiter ';', the line break and the tab of a frame name are replaced, so one line always
+      carries one call path. Only the call paths which the report prints are written, the call paths
+      which the time ranges of the query left out are counted as the time of the path which holds
+      them, so the sum of the weights is the whole matched time of the graph. -fs can only be used
+      with -ef, and it can not be used with -o at the same time.
+
   -mvc, --max_view_count <count>
       How many of the longest stack trees should be saved and reported with -ed, and aggregated
       into the flame graph with -ef, default is 10. The stack tree which is kept is dropped for a
@@ -210,12 +262,16 @@ Options:
       How many of the longest exclude time events should be kept in every top list, default is 30.
 
   -sr, --sampling_ratio <ratio>
-      Sampling ratio of the analyzed time range, a value in [0.0, 1.0], default is 1.0, which
-      analyzes the whole time range. The beginning and the end of the .utrace are the time when the
-      trace is saved, which is triggered at the start and at the end of the capture, so the frames
-      there take the saving into the timing and their data is not accurate; a ratio below 1.0 only
-      analyzes the middle of the time range and leaves both ends out, ex: 0.8 analyzes the middle
-      80% of the range.
+      Sampling ratio of the analyzed time range, a value in [0.0, 1.0], default is 0.9, which
+      analyzes the middle 90% of the time range. The beginning and the end of the .utrace are the time
+      when the trace is saved, which is triggered at the start and at the end of the capture, so the
+      frames there take the saving into the timing and their data is not accurate; a ratio below 1.0
+      only analyzes the middle of the time range and leaves both ends out, ex: 0.8 analyzes the middle
+      80% of the range, and 1.0 analyzes the whole range.
+      The report only covers the frames whose time range intersects the sampled range: a frame which
+      is entirely out of it is not counted and not listed, and a frame which only crosses the boundary
+      of the sampled range is counted with the whole time of the frame, the time of a frame is never
+      cut to the range. The Sampled Range and the ratio which is used are reported with the report.
 
   -h, --help
       Print this help.
@@ -233,9 +289,16 @@ Options:
 		ThreadSearchParser::Config thread_config;
 		bool search_event = false;
 		bool statistic_event = false;
+		// Whether the statistics of -es are written into a CSV file, the path is taken from -csv.
+		bool csv_statistic = false;
+		// Whether the flame graph of -ef is written into a folded stack file, the path is taken from -fs.
+		bool folded_stack_event = false;
 		bool detail_event = false;
 		bool flame_event = false;
 		bool search_thread = false;
+		// Whether the report file is named by -o or by -a, the two can not be given at the same time.
+		bool output_given = false;
+		bool append_given = false;
 		std::u8string path_buffer;
 
 		for (std::size_t i = 1; i < argc; ++i)
@@ -277,10 +340,27 @@ Options:
 					path_buffer.clear();
 					Encode::STDInputEncoder<char8_t>::EncodeTo(argv[i + 1], std::back_insert_iterator{ path_buffer });
 					setting.output_path = std::filesystem::path{ path_buffer };
+					output_given = true;
 					++i;
 				}
 				else {
 					Log::Log<CommandLineLogCategory, Log::LogLevel::Error, L"Unsupport command -o --output, use -h for detailed help">();
+					return -1;
+				}
+			}
+			else if (argv_string == "-a" || argv_string == "--append")
+			{
+				if (i + 1 < argc)
+				{
+					path_buffer.clear();
+					Encode::STDInputEncoder<char8_t>::EncodeTo(argv[i + 1], std::back_insert_iterator{ path_buffer });
+					setting.output_path = std::filesystem::path{ path_buffer };
+					setting.append = true;
+					append_given = true;
+					++i;
+				}
+				else {
+					Log::Log<CommandLineLogCategory, Log::LogLevel::Error, L"Unsupport command -a --append, use -h for detailed help">();
 					return -1;
 				}
 			}
@@ -496,6 +576,42 @@ Options:
 					return -1;
 				}
 			}
+			else if (argv_string == "-csv" || argv_string == "--csv")
+			{
+				if (i + 1 < argc)
+				{
+					path_buffer.clear();
+					Encode::STDInputEncoder<char8_t>::EncodeTo(argv[i + 1], std::back_insert_iterator{ path_buffer });
+
+					// The file is opened by the statistic parser when the report is written, so the path is only stored
+					// here, the error of a path which can not be opened is reported then.
+					statistic_config.csv_path = std::filesystem::path{ path_buffer };
+					csv_statistic = true;
+					++i;
+				}
+				else {
+					Log::Log<CommandLineLogCategory, Log::LogLevel::Error, L"Unsupport command -csv --csv, use -h for detailed help">();
+					return -1;
+				}
+			}
+			else if (argv_string == "-fs" || argv_string == "--folded_stack")
+			{
+				if (i + 1 < argc)
+				{
+					path_buffer.clear();
+					Encode::STDInputEncoder<char8_t>::EncodeTo(argv[i + 1], std::back_insert_iterator{ path_buffer });
+
+					// The file is opened by the flame graph parser when the graph is written, so the path is only stored
+					// here, the error of a path which can not be opened is reported then.
+					flame_config.folded_stack_path = std::filesystem::path{ path_buffer };
+					folded_stack_event = true;
+					++i;
+				}
+				else {
+					Log::Log<CommandLineLogCategory, Log::LogLevel::Error, L"Unsupport command -fs --folded_stack, use -h for detailed help">();
+					return -1;
+				}
+			}
 			else if (argv_string == "-mvc" || argv_string == "--max_view_count")
 			{
 				if (i + 1 < argc)
@@ -628,6 +744,41 @@ Options:
 				Log::Log<CommandLineLogCategory, Log::LogLevel::Error, L"Unsupport command <{}>, use -h to see the available commands">(argv_string);
 				return -1;
 			}
+		}
+
+		// -o replaces the file and -a keeps its previous content, so the report file is named by exactly one of them.
+		if (output_given && append_given)
+		{
+			Log::Log<CommandLineLogCategory, Log::LogLevel::Error, L"-o --output and -a --append can not be used at the same time, use -h for detailed help">();
+			return -1;
+		}
+
+		// The CSV file is the format of the statistics report, so it is only accepted with -es, and it names the file
+		// which the report is written into itself, so it is not mixed with -o or -a.
+		if (csv_statistic && !statistic_event)
+		{
+			Log::Log<CommandLineLogCategory, Log::LogLevel::Error, L"-csv --csv can only be used with -es --event_stat, use -h for detailed help">();
+			return -1;
+		}
+
+		if (csv_statistic && !setting.output_path.empty())
+		{
+			Log::Log<CommandLineLogCategory, Log::LogLevel::Error, L"-csv --csv and -o --output or -a --append can not be used at the same time, use -h for detailed help">();
+			return -1;
+		}
+
+		// The folded stack file is the format of the flame graph, so it is only accepted with -ef, and it names the file
+		// which the graph is written into itself, so it is not mixed with -o.
+		if (folded_stack_event && !flame_event)
+		{
+			Log::Log<CommandLineLogCategory, Log::LogLevel::Error, L"-fs --folded_stack can only be used with -ef --event_flame_graph, use -h for detailed help">();
+			return -1;
+		}
+
+		if (folded_stack_event && !setting.output_path.empty())
+		{
+			Log::Log<CommandLineLogCategory, Log::LogLevel::Error, L"-fs --folded_stack and -o --output or -a --append can not be used at the same time, use -h for detailed help">();
+			return -1;
 		}
 
 		if (statistic_event && search_event)

@@ -309,6 +309,146 @@ namespace UEBabyPram::InsightFilter
 		return is_chain_matched;
 	}
 
+	bool EventQueryMapping::IsChainMatched(ThreadCPUEventView event_scope, Query const& query)
+	{
+		assert(!query.nodes.empty());
+
+		// The chain is walked the same way as ForEachMatchedEvent() walks it, the candidate of an element is searched
+		// inside the subtree of the element before it, and the next candidate of an element is searched after the whole
+		// subtree of the candidate which was visited. The walk stops as soon as the whole chain is completed, because
+		// the only answer which is asked for is whether the chain is completed at all, so the rest of the combinations
+		// of the chain is not visited and no occurrence is exported.
+		struct FindedNode
+		{
+			ThreadCPUEventView::EventView event_view;
+			std::size_t node_index = 0;
+		};
+
+		std::vector<FindedNode> finded_stack;
+		finded_stack.reserve(query.nodes.size());
+
+		auto first_candidate = event_scope.FindChildEvent(query.nodes[0].GetEventIDs());
+		if (!first_candidate)
+		{
+			return false;
+		}
+
+		finded_stack.push_back(FindedNode{ first_candidate, 0 });
+
+		while (!finded_stack.empty())
+		{
+			std::size_t top_node_index = finded_stack.back().node_index;
+
+			if (top_node_index + 1 < query.nodes.size())
+			{
+				// The candidate of the next element is searched inside the subtree of the element before it, so the
+				// events which are not a part of the chain may be between them.
+				auto const& next_node = query.nodes[top_node_index + 1];
+				auto child_candidate = event_scope.FindChildEvent(next_node.GetEventIDs(), finded_stack.back().event_view);
+				if (child_candidate)
+				{
+					finded_stack.push_back(FindedNode{ child_candidate, top_node_index + 1 });
+					continue;
+				}
+			}
+			else {
+				// The whole chain is completed inside the tree, which is the answer of the walk: the tree satisfies the
+				// query, and the walk does not have to visit the other combinations of the chain.
+				return true;
+			}
+
+			// Backtrack to the next candidate of the deepest element which still carries one, the same as
+			// ForEachMatchedEvent() does, so the candidates of one element are pairwise disjoint and no event is tried
+			// twice as the same element.
+			while (!finded_stack.empty())
+			{
+				auto left_element = finded_stack.back();
+				finded_stack.pop_back();
+
+				std::size_t search_end = finded_stack.empty()
+					? event_scope.view.size()
+					: finded_stack.back().event_view.index_range.End();
+
+				auto next_candidate = event_scope.FindNextEvent(
+					query.nodes[left_element.node_index].GetEventIDs(),
+					{ left_element.event_view.index_range.End(), search_end }
+				);
+
+				if (next_candidate)
+				{
+					finded_stack.push_back(FindedNode{ next_candidate, left_element.node_index });
+					break;
+				}
+			}
+		}
+
+		return false;
+	}
+
+	std::optional<std::size_t> EventQueryMapping::FindMatchedQuery(ThreadCPUEventView event_scope) const
+	{
+		if (queries.empty())
+		{
+			return std::nullopt;
+		}
+
+		// The whole stack tree is the range which the time conditions are checked against first, a query whose time
+		// ranges do not overlap the tree can not match any occurrence of it.
+		auto tree_time_range = event_scope.GetTimeRange();
+		if (!tree_time_range)
+		{
+			return std::nullopt;
+		}
+
+		for (std::size_t query_index = 0; query_index < queries.size(); ++query_index)
+		{
+			auto const& query = queries[query_index];
+			assert(!query.nodes.empty());
+
+			// A query which carries no thread condition counts every thread, and a query which carries no time range
+			// counts every occurrence, so the two conditions only filter the queries which carry them.
+			if (!IsThreadMatched(query, event_scope.thread_id))
+			{
+				continue;
+			}
+
+			if (!IsTimeRangeOverlapped(query, *tree_time_range))
+			{
+				continue;
+			}
+
+			// An element whose regular expression matched no event never completes the chain, so the chain of the query
+			// can not be matched in this tree at all. The element which matches any event never carries an id, it is
+			// always resolvable.
+			bool chain_resolvable = true;
+			for (auto const& node : query.nodes)
+			{
+				if (node.kind != EventQuery::ChainElement::Kind::Any && node.event_ids.empty())
+				{
+					chain_resolvable = false;
+					break;
+				}
+			}
+
+			if (!chain_resolvable)
+			{
+				continue;
+			}
+
+			if (IsChainMatched(event_scope, query))
+			{
+				return query_index;
+			}
+		}
+
+		return std::nullopt;
+	}
+
+	bool EventQueryMapping::IsMatched(ThreadCPUEventView event_scope) const
+	{
+		return FindMatchedQuery(event_scope).has_value();
+	}
+
 	bool EventQueryMapping::IsThreadMatched(ThreadID thread_id) const
 	{
 		for (auto const& query : queries)

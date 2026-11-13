@@ -188,6 +188,22 @@ export namespace UEBabyPram::InsightFilter
 		// element), because such a chain never reports a match to the visitor.
 		bool ForEachMatchedEvent(ThreadCPUEventView event_scope, MatchVisitorT visitor) const;
 
+		// Whether the stack tree satisfies the queries, which is the question of whether a tree is kept by a query: the
+		// thread condition and the time ranges of a query are matched, and its whole call chain is completed at least
+		// once inside the tree.
+		//
+		// The chain only has to be completed once, so the walk of the chain stops at the first completion instead of
+		// enumerating every completion of the tree, which is what ForEachMatchedEvent() does, and the matches are
+		// never exported. It is what makes the judge cheaper than the walk of ForEachMatchedEvent() on a tree which
+		// satisfies the query, and it is the answer which a parser needs when it only keeps the tree or drops it.
+		bool IsMatched(ThreadCPUEventView event_scope) const;
+
+		// The index of the query which the stack tree satisfies (see GetQueries()), std::nullopt when no query is
+		// satisfied by the tree. It is judged the same way as IsMatched(), with the same walk which stops at the first
+		// completion, and the index is what a caller keeps the tree by: the report of a tree is limited by the time
+		// ranges of the query which kept it.
+		std::optional<std::size_t> FindMatchedQuery(ThreadCPUEventView event_scope) const;
+
 	protected:
 
 		// Whether the query counts the occurrences which happened on the thread, a query which carries no
@@ -201,6 +217,11 @@ export namespace UEBabyPram::InsightFilter
 		// occurrence whose time range overlaps none of the ranges is not counted). A query which carries no
 		// time range is overlapped by every range, so it counts every occurrence.
 		static bool IsTimeRangeOverlapped(Query const& query, Potato::Misc::IndexSpan<DurationSec> time_range);
+
+		// Whether the whole call chain of the query is completed at least once inside the tree, the walk stops at the
+		// first completion and the matches are not exported. The thread condition and the time ranges of the query are
+		// judged by the caller, so the walk only answers the chain condition.
+		static bool IsChainMatched(ThreadCPUEventView event_scope, Query const& query);
 
 		std::pmr::unsynchronized_pool_resource resource;
 		std::pmr::vector<Query> queries;

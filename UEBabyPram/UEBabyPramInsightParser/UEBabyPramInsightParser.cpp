@@ -535,9 +535,37 @@ namespace UEBabyPram::InsightParser
 		for (std::size_t index = index_range.Begin(); index < end; ++index)
 		{
 			auto& ref = view[index];
-			if (std::find(event_ids.begin(), event_ids.end(), ref.event_id) != event_ids.end() || (event_ids.empty() && ref.event_id))
+			if (ref.event_id)
+			{
+				if (
+					event_ids.empty() || std::find(event_ids.begin(), event_ids.end(), ref.event_id) != event_ids.end()
+					)
+				{
+					return FindResult{ ref.event_id, index, ref.depth, ref.time };
+				}
+			}
+		}
+		return {};
+	}
+
+	auto ThreadCPUEventView::FindFirstEventIDOrDepth(std::span<EventID const> event_ids, std::size_t target_depth, Potato::Misc::IndexSpan<> index_range) const -> FindResult
+	{
+		std::size_t end = std::min(index_range.End(), view.size());
+		for (std::size_t index = index_range.Begin(); index < end; ++index)
+		{
+			auto& ref = view[index];
+			if (ref.depth == target_depth)
 			{
 				return FindResult{ ref.event_id, index, ref.depth, ref.time };
+			}
+			if (ref.event_id)
+			{
+				if (
+					event_ids.empty() || std::find(event_ids.begin(), event_ids.end(), ref.event_id) != event_ids.end()
+					)
+				{
+					return FindResult{ ref.event_id, index, ref.depth, ref.time };
+				}
 			}
 		}
 		return {};
