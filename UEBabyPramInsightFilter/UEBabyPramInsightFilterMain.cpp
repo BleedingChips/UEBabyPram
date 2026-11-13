@@ -8,36 +8,14 @@ using namespace UEBabyPram::InsightFilter;
 
 namespace
 {
-	// The writer which appends the report to a plain text file, the file is created when it does not exist and its
-	// previous content is kept. The document writer of Potato writes at the beginning of a file which it opens without
-	// emptying it, so the appending is done by the standard stream, which opens the file at its end.
-	struct AppendDocumentWriter
-	{
-		explicit AppendDocumentWriter(std::filesystem::path const& path)
-			: stream{ path, std::ios::binary | std::ios::app } {}
-
-		std::size_t Write(std::span<std::byte const> input)
-		{
-			stream.write(reinterpret_cast<char const*>(input.data()), static_cast<std::streamsize>(input.size()));
-			return stream ? input.size() : 0;
-		}
-
-		operator bool() const { return stream.is_open(); }
-
-	protected:
-
-		std::ofstream stream;
-	};
-
 	// The printer which writes every message of the parsers into the report file, so the report of a parser is
 	// stored in the file which -o or -a names instead of the standard output. The message is a wide string, so its
 	// characters are encoded into UTF-8 while they are written. The terminal is told the bytes which the message
 	// carried and the bytes of the whole report which is written so far, which is what the progress of a long report
 	// is read from, and it is told directly, so the numbers never end up in the report file.
-	template<typename Writer>
 	struct DocumentLogPrinter : public Potato::Log::LogPrinter
 	{
-		DocumentLogPrinter(Writer& writer)
+		DocumentLogPrinter(Potato::Document::DocumentWriter& writer)
 			: writer(writer) {}
 
 		virtual void Print(Potato::Log::FormatedSystemTime time, Potato::Log::LogLevel level, std::pmr::wstring const& message) override
@@ -64,7 +42,7 @@ namespace
 
 	protected:
 
-		Writer& writer;
+		Potato::Document::DocumentWriter& writer;
 		// The bytes of the whole report which is written by this run, it is the total which every message reports.
 		std::size_t total_byte_count = 0;
 	};
@@ -113,27 +91,14 @@ int main(int argc, char* argv[])
 			return -1;
 		}
 	}
-	else if (setting.append)
-	{
-		AppendDocumentWriter writer{ setting.output_path };
-
-		if (!writer)
-		{
-			Potato::Log::Log<L"Cannot open the output file <{}> to append">(setting.output_path.generic_wstring());
-			return -1;
-		}
-
-		DocumentLogPrinter<AppendDocumentWriter> printer{ writer };
-		if (!setting.parser->PrintToLog(printer))
-		{
-			return -1;
-		}
-	}
 	else {
-		Potato::Document::DocumentWriter writer{
-			setting.output_path,
-			Potato::Document::DocumentWriter::OpenMode::CREATE_OR_EMPTY
-		};
+		// -o empties the file, while -a keeps its previous content and writes at the end of it, which is the reason
+		// why the writer is opened with the mode of the option.
+		auto open_mode = setting.append
+			? Potato::Document::DocumentWriter::OpenMode::APPEND_OR_CREATE
+			: Potato::Document::DocumentWriter::OpenMode::CREATE_OR_EMPTY;
+
+		Potato::Document::DocumentWriter writer{ setting.output_path, open_mode };
 
 		if (!writer)
 		{
@@ -141,7 +106,7 @@ int main(int argc, char* argv[])
 			return -1;
 		}
 
-		DocumentLogPrinter<Potato::Document::DocumentWriter> printer{ writer };
+		DocumentLogPrinter printer{ writer };
 		if (!setting.parser->PrintToLog(printer))
 		{
 			return -1;

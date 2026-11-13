@@ -23,6 +23,9 @@ namespace UEBabyPram::InsightParser
 
 	void ContextSwitchStreamer::AddContextSwitchEvent(ThreadSystemID thread_id, std::size_t active_core, Potato::Misc::IndexSpan<DurationSec> active_time)
 	{
+		// The event is counted, so a parser tells whether the trace carries the context switch channel at all.
+		context_switch_event_count += 1;
+
 		auto& stream = GetOrCreateStream(thread_id);
 
 		// The block which is being written is only empty after the whole stream is completed, so the block which the
@@ -62,10 +65,33 @@ namespace UEBabyPram::InsightParser
 			}
 		}
 
-		// The listener is held by the stream of the thread as well, so it collects the blocks while the streamer is
-		// alive, even when the requester drops its own pointer.
+		// The listener is held by the stream of the thread weakly, so it collects the blocks while the requester holds
+		// its pointer, and the entries of the listeners which the requester dropped are removed by the prune below and
+		// by the walk of the blocks.
 		stream.listeners.push_back(listener);
+
+		// The expired listeners are removed from the stream every listener_prune_interval additions, so the list does
+		// not grow with the listeners which are never collected again: a parser creates a listener for every event
+		// which it records, and most of them are dropped before the end of the analysis.
+		stream.listener_add_count += 1;
+		if (stream.listener_add_count % listener_prune_interval == 0)
+		{
+			PruneListeners(stream);
+		}
+
 		return listener;
+	}
+
+	void ContextSwitchStreamer::PruneListeners(ThreadStream& stream)
+	{
+		stream.listeners.erase(
+			std::remove_if(
+				stream.listeners.begin(),
+				stream.listeners.end(),
+				[](std::weak_ptr<Listener> const& listener) { return listener.expired(); }
+			),
+			stream.listeners.end()
+		);
 	}
 
 	void ContextSwitchStreamer::Flush()
@@ -140,7 +166,14 @@ namespace UEBabyPram::InsightParser
 
 		for (auto ite = stream.listeners.begin(); ite != stream.listeners.end(); )
 		{
-			auto& listener = *ite;
+			// The listener is only held weakly, so a listener which its requester dropped is removed here: it can not
+			// collect the block any more, and there is no reason to keep the entry.
+			auto listener = ite->lock();
+			if (!listener)
+			{
+				ite = stream.listeners.erase(ite);
+				continue;
+			}
 
 			// The block overlaps the time span of the listener, so the listener collects it, and the block stays valid
 			// while the listener holds it.

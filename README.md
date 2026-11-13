@@ -173,6 +173,7 @@ UEBabyPramInsightFilter -f .\Capture.utrace -ts ".*GameThread.*"
 #### 输出字段说明
 
 - 默认模式：`Total GameThread Time`／`Total GameFrame`／`Avg GameThread Time` 给出总耗时、帧数与平均帧耗时；`Frame Rate` 段落用表格给出 5 档帧率（`> 120`、`60 ~ 120`、`30 ~ 60`、`15 ~ 30`、`<= 15` FPS）的帧耗时区间、帧数与占比（占比之和 100%），`Frames Above X FPS` 给出累计占比（帧率高于 X FPS 的帧），`Mean FPS` 由平均帧耗时换算；其后是 `Time Range`／`Sampled Range`／`Sampled Ratio` 与最长帧、最长 Exclude Time 列表。报告顶部有一行口径声明：**所有帧数、帧率与 Top 列表只统计与采样时间范围（`-sr`，默认 0.9）有交集的帧**，完全在范围外的帧不统计、跨边界的帧按整帧耗时统计。没有记录到 GameFrame 时只输出一行提示。
+- 上下文切换：若 trace 未采集 context switch 通道（没有任何 context switch 事件），默认模式 / `-es` / `-ed` 会在报告标题下打印 `No Context Switch event is recorded in the trace ...`，此时 `CS` 恒为 0、`ENCS` 等于 `E`（耗时是线程被调度的时间，不是真正占用 CPU 的时间）。
 - `-r`：文件路径是产生 utrace 的包体打包时的源文件路径，指向打包机器；需要用户自行转换为本地工作目录/源码树路径。
 - `-es`：`Count`、`Total D/Mean D/Median D/Std D`、`Total E/Mean E`；Top occurrence 行的 `D`（耗时）、`E`（Exclude Time）、`ENCS`（去除离核时间后的 Exclude Time）、`CS`（Context Switch Time）、`TR`（时间范围）、`TName`（线程名）；Call Context 以 box-drawing 打印父链与子树。加 `-csv <path>` 时改为写 CSV 文件，列顺序为 `QueryIndex, Event, Kind, EventIdCount, OccurrenceCount, TotalD_ms, MeanD_ms, MedianD_ms, StdD_ms, TotalE_ms, MeanE_ms, Query`（`Kind` 为 `Name` 或 `Regex`，耗时单位 ms、6 位小数），按查询与总耗时从大到小排序，UTF-8 无 BOM、字段符合 RFC 4180；CSV 只含事件汇总，Top occurrence／GameFrame／直方图仍只在文本报告里。
 - `-ed`：`View` 行的 `E` 为整棵 stack tree 总耗时；节点行的 `TR` 为时间范围、`D` 为耗时、`E` 为 Exclude Time、`CS` 为 Exclude Time 中线程不在 CPU 上的时间（为 0 时不打印）。打印的是**完整**调用树：查询的 `Time` 条件只决定保留哪些树，时间片外的事件照样打印；单棵树规模由 `-mnc`（节点数，默认 100）与 `-md`（层数，默认 8）限制，超出的节点不打印并以 `...` 标记，两个限制对每棵树分别生效（`0` 表示不限）。
@@ -197,6 +198,13 @@ xmake build-insight-filter-skill
 ```
 
 打包流程会先以 release 配置构建对应 target，再用 `xmake install -o <staging>` 安装到临时目录，最后把 `bin` 下的可执行文件与运行时 DLL 一起复制到 skill 的 `scripts` 目录。
+
+也可以直接运行仓库根目录下的两个脚本，它们分别执行上面两条指令（多给的参数会透传，例如 `--output=<dir>`）：
+
+```powershell
+.\xmake_build_logfilter_skill.ps1
+.\xmake_build_insight_filter_skill.ps1
+```
 
 生成目录可通过 `--output=<dir>` 指定，默认为仓库根目录下的 `Skills`。
 

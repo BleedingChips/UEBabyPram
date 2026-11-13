@@ -1023,6 +1023,14 @@ namespace UEBabyPram::InsightFilter
 
 		OutputLog<L"EventStatisticParser Output:">(printer);
 
+		// The context switch time of an occurrence is the time which the thread spent out of the CPU inside it, so a
+		// trace which carries no context switch event carries no such time, and the report tells it instead of
+		// printing the ENCS column as if the thread was always on the CPU.
+		if (!context_switch_streamer.HasContextSwitchEvent())
+		{
+			OutputNoContextSwitchEventNote(printer);
+		}
+
 		OutputLog<L"    (D: Duration of the single occurrence; E: Exclude Time, the duration without the time of the child events; ENCS: Exclude Time WithOut Context Switch Time; CS: Context Switch Time, the time which the thread spent out of the CPU in the time range of the occurrence; Mean D / Median D / Std D: the mean, the median and the standard deviation of the single duration; TName: the name of the thread which the occurrence happened on; TR: Time Range of the occurrence)">(
 			printer
 		);

@@ -346,3 +346,4 @@ flamegraph.pl result.folded > result.svg
 10. 报告默认写到标准输出；用 `-o <path>` 可写入文件（文件会被清空重建），用 `-a <path>` 可**追加**到已有文件末尾（不存在则创建，仅纯文本），`-o` 与 `-a` 不能同时使用。写文件时，每写一条报告消息都会在终端打印该条消息的字节数与本次运行已写入的累计字节数（这些进度行不会进入报告文件），可用来观察长报告的输出进度。
 11. `-es` 想给程序消费时用 `-csv <path>`：直接生成 CSV 文件、不打印文本报告；它只能与 `-es` 一起用，且不能与 `-o` 或 `-a` 同时使用。CSV 只含事件汇总（不含 Top occurrence / GameFrame / 直方图）。
 12. `-ef` 想直接出图时用 `-fs <path>`：直接生成 folded stacks 文件（不打印文本报告），权重为该调用路径的自身耗时（微秒），各行之和等于报告的 `Total`；它只能与 `-ef` 一起用，且不能与 `-o` 或 `-a` 同时使用。
+13. 若 trace 没有采集 **context switch** 通道（没有任何 context switch 事件），默认模式、`-es`、`-ed` 的报告会在标题下打印一行 `No Context Switch event is recorded in the trace ...`：此时 `CS` 恒为 0、`ENCS` 与 `E` 相同，报告里的耗时是线程"被调度"的时间而不是真正占用 CPU 的时间，不要据此刻画 CPU 占用。

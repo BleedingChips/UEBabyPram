@@ -30,6 +30,17 @@ export namespace UEBabyPram::InsightFilter
 		);
 	}
 
+	// Report that the trace carries no Context Switch event, which every parser which reads the context switch
+	// streamer tells its report: the Context Switch Time of every event of such a trace is 0, and the Exclude Time
+	// WithOut Context Switch Time is the same as the Exclude Time, so the time which a thread spent out of the CPU is
+	// missing from the trace instead of being 0, and the time of the report is the time which the thread was scheduled.
+	inline void OutputNoContextSwitchEventNote(Potato::Log::LogPrinter& printer)
+	{
+		OutputLog<L"    (No Context Switch event is recorded in the trace: the Context Switch Time (CS) of every event is 0 and the Exclude Time WithOut Context Switch Time (ENCS) is the same as the Exclude Time (E), the trace is captured without the context switch channel of the CPU)">(
+			printer
+		);
+	}
+
 	// Check whether the event name is fully matched by the matcher, a partial match is not accepted.
 	// The matcher needs the event name in UTF-8, the utf8_buffer is a scratch storage of the caller
 	// which avoids an allocation per call.

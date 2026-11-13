@@ -174,6 +174,14 @@ namespace UEBabyPram::InsightFilter
 		using InsightFilter::OutputLog;
 
 		OutputLog<L"EventDetailParser Output:">(printer);
+
+		// The context switch time of a node is the time which the thread spent out of the CPU inside it, so a trace
+		// which carries no context switch event carries no such time, and the report tells it instead of leaving the
+		// CS column out as if the thread was never switched out.
+		if (!context_switch_streamer.HasContextSwitchEvent())
+		{
+			OutputNoContextSwitchEventNote(printer);
+		}
 		OutputLog<L"    (View: E: Elapsed Time of the whole stack tree; Node: D: Duration of the event, E: Exclude Time of the event, CS: Context Switch Time of the Exclude Time, it is only printed when the thread spent time off the CPU in the exclude time; TR: Time Range)">(
 			printer
 		);

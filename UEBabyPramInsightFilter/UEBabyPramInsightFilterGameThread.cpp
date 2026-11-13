@@ -301,6 +301,14 @@ namespace UEBabyPram::InsightFilter
 
 		OutputLog<L"GameThreadParser Output:">(printer);
 
+		// The context switch time of an event is the time which the thread spent out of the CPU, so a trace which
+		// carries no context switch event carries no such time, and the report tells it instead of reporting 0 as the
+		// time which the thread was switched out.
+		if (!context_switch_streamer.HasContextSwitchEvent())
+		{
+			OutputNoContextSwitchEventNote(printer);
+		}
+
 		// The report is built from the frames whose time range intersects the sampled range, which is the middle of the
 		// trace according to Config::sampling_ratio, so the note of the report tells which data are listed: a frame
 		// which is entirely out of the sampled range is not counted, and a frame which only crosses the boundary of the

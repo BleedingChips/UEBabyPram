@@ -24,11 +24,18 @@ export namespace UEBabyPram::InsightParser
 	// appended to the listener, and the listener holds the block by a shared pointer, so a block which a listener
 	// collected stays valid while the listener holds it. A listener is removed from the thread when the end of a
 	// completed block passes the end of its time span, because none of the blocks which follow can overlap it any
-	// more, and it is created by AddListener() and held by the streamer and by the requester together.
+	// more, and it is created by AddListener() and owned by the requester: the streamer only holds it weakly, so a
+	// listener which the requester drops is not kept alive by the streamer, and the streamer removes the listeners
+	// which are gone every Config::listener_prune_interval additions of a thread.
 	struct ContextSwitchStreamer
 	{
 		// How many context switch events one memory block holds, every block has exactly this many events.
 		static constexpr std::size_t block_event_capacity = 1024 * 16;
+
+		// How many listeners one thread may add before the streamer removes the listeners which are already gone from
+		// it: a listener is only held weakly, so the ones which the requester dropped stay in the list until they are
+		// removed, and they are removed once per this count of additions.
+		static constexpr std::size_t listener_prune_interval = 2048;
 
 		struct Config
 		{
@@ -64,9 +71,10 @@ export namespace UEBabyPram::InsightParser
 		};
 
 		// The listener of the context switch events of one thread, it collects the blocks whose time range overlaps
-		// the time span which it is created with. It is created by AddListener(), and it is held by a shared pointer,
-		// so the streamer and the requester own it together, and the blocks which it collected stay valid while it is
-		// alive, because every block is held by a shared pointer as well.
+		// the time span which it is created with. It is created by AddListener(), and it is owned by the requester:
+		// the streamer keeps a weak reference of it, so the listener is destroyed when the requester drops it, and
+		// the blocks which it collected stay valid while it is alive, because every block is held by a shared
+		// pointer as well.
 		struct Listener
 		{
 			Listener(Potato::Misc::IndexSpan<DurationSec> time_range, std::pmr::memory_resource* resource = std::pmr::get_default_resource())
@@ -108,12 +116,22 @@ export namespace UEBabyPram::InsightParser
 		// and the block is completed when it is full.
 		void AddContextSwitchEvent(ThreadSystemID thread_id, std::size_t active_core, Potato::Misc::IndexSpan<DurationSec> active_time);
 
+		// Whether any context switch event is stored, i.e. whether the trace carries the context switch channel at
+		// all. A trace which carries no such event carries no time which a thread spent out of the CPU, so the
+		// reporters which use the streamer report the Context Switch Time of every event as 0, and they tell the
+		// user that the time is missing instead of the time which the thread was really on the CPU.
+		bool HasContextSwitchEvent() const { return context_switch_event_count != 0; }
+
+		// How many context switch events are stored, 0 when the trace carries none of them.
+		std::size_t GetContextSwitchEventCount() const { return context_switch_event_count; }
+
 		// Create and register a listener of one thread for a time span, and return it. Every block of that thread
 		// which is completed while its time range overlaps the span is collected by the listener, and the blocks
 		// which are completed before the listener is created are collected as well, so a listener which is created
 		// after the events which it is interested in are stored still collects them. The listener is removed when the
-		// end of the completed block passes the end of the span. The listener is held by the thread as well, so it
-		// collects the blocks while the streamer is alive, even when the requester drops its pointer.
+		// end of the completed block passes the end of the span. The listener is only held weakly by the thread, so it
+		// collects the blocks while the requester holds it, and a listener which the requester drops is removed the
+		// next time the listeners of the thread are pruned.
 		std::shared_ptr<Listener> AddListener(ThreadSystemID thread_id, Potato::Misc::IndexSpan<DurationSec> time_range);
 
 		// Give the block which is being written of every thread to the listeners of the thread as a completed block,
@@ -139,8 +157,13 @@ export namespace UEBabyPram::InsightParser
 			std::pmr::vector<std::shared_ptr<EventBlock>> blocks;
 			// The block which the next event is appended to, it is empty after the whole stream is completed.
 			std::shared_ptr<EventBlock> current_block;
-			// The listeners of the thread.
-			std::pmr::vector<std::shared_ptr<Listener>> listeners;
+			// The listeners of the thread, the thread only holds them weakly, so a listener which its requester
+			// dropped goes away by itself, and the entry which is left is removed by PruneListeners().
+			std::pmr::vector<std::weak_ptr<Listener>> listeners;
+			// How many listeners the thread has added, the expired listeners are removed from the stream every
+			// ContextSwitchStreamer::listener_prune_interval additions, so the list does not grow with the listeners
+			// which are never collected again.
+			std::size_t listener_add_count = 0;
 		};
 
 		ThreadStream& GetOrCreateStream(ThreadSystemID thread_id);
@@ -152,6 +175,11 @@ export namespace UEBabyPram::InsightParser
 		// Set the time range of the block, append it to the block list of every listener of the thread which it
 		// overlaps, and remove the listeners which the block has passed.
 		void CollectBlock(ThreadStream& stream, std::shared_ptr<EventBlock> const& block);
+		// Remove the listeners of the thread which are already gone: the stream only holds them weakly, so an entry
+		// whose listener was dropped by its requester is removed here. It is called every
+		// listener_prune_interval additions of the thread, and the walk of the blocks removes the expired entries as
+		// well.
+		static void PruneListeners(ThreadStream& stream);
 		// The time which the kept blocks of the thread cover, from the beginning of the earliest block to the end of
 		// the newest one.
 		DurationSec GetRetainedTimeSpan(ThreadStream const& stream) const;
@@ -160,5 +188,7 @@ export namespace UEBabyPram::InsightParser
 		std::pmr::memory_resource* resource;
 		std::size_t max_block_count = 3;
 		DurationSec min_time_span = DurationSec{ 1 };
+		// How many context switch events are stored, it is what HasContextSwitchEvent() is answered from.
+		std::size_t context_switch_event_count = 0;
 	};
 }
