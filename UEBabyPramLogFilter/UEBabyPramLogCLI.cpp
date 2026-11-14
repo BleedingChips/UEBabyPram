@@ -2,6 +2,13 @@ module;
 
 module UEBabyPramLogCLI;
 
+namespace
+{
+	// The version of the tool, which -v --version reports. It is kept in the command line of this tool only, so the
+	// insight filter carries its own version and a new version of one tool never rebuilds the other one.
+	constexpr std::string_view version = "1.0";
+}
+
 std::u8string_view general_help_string = u8R"(
 UEBabyPramLogFilter - UE4 log filtering and formatting tool
 
@@ -13,6 +20,8 @@ By default, filtered logs are saved in the same directory as the input file with
 Commands:
 
   -h, --help [topic]           Show this help or detailed help for a specific topic
+
+  -v, --version                Show the version of the tool
 
   -f, --file <path>            Add a .log file as input
                                Use -h file for detailed help
@@ -361,6 +370,14 @@ namespace UEBabyPram::LogFilter
 		for (std::size_t i = 1; i < argc; ++i)
 		{
 			std::string_view argv_string = argv[i];
+
+			if (argv_string == "-v" || argv_string == "--version")
+			{
+				// The version is reported with the name of the tool, so the output of the tools of the repository is told
+				// apart by a script which reads it, and it is the version which this tool carries itself.
+				LogToConsole<Log::LogLevel::Display, L"UEBabyPramLogFilter <{}>">(version);
+				return 1;
+			}
 
 			if (argv_string == "-h" || argv_string == "--help")
 			{

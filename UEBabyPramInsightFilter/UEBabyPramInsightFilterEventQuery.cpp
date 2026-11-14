@@ -37,6 +37,7 @@ namespace UEBabyPram::InsightFilter
 			auto& target = queries.emplace_back(&resource);
 			target.thread_matcher = std::move(query.thread_matcher);
 			target.time_ranges.assign(query.time_ranges.begin(), query.time_ranges.end());
+			target.time_condition = query.time_condition;
 
 			for (auto& element : query.chain)
 			{
@@ -185,7 +186,9 @@ namespace UEBabyPram::InsightFilter
 				continue;
 			}
 
-			if (!IsTimeRangeOverlapped(query, *tree_time_range))
+			// The tree can only carry an occurrence which the time conditions of the query accept when one of the
+			// ranges overlaps it, which is checked for the Time and for the ITime condition at once.
+			if (!IsTreeTimeMatched(query, *tree_time_range))
 			{
 				continue;
 			}
@@ -255,7 +258,7 @@ namespace UEBabyPram::InsightFilter
 							)
 						{
 							stack_ite.has_export = true;
-							if (IsTimeRangeOverlapped(query, stack_ite.event_view.time_range))
+							if (IsTimeRangeMatched(query, stack_ite.event_view.time_range))
 							{
 								visitor(
 									EventMatch{
@@ -412,7 +415,9 @@ namespace UEBabyPram::InsightFilter
 				continue;
 			}
 
-			if (!IsTimeRangeOverlapped(query, *tree_time_range))
+			// The tree can only carry an occurrence which the time conditions of the query accept when one of the
+			// ranges overlaps it, which is checked for the Time and for the ITime condition at once.
+			if (!IsTreeTimeMatched(query, *tree_time_range))
 			{
 				continue;
 			}
@@ -444,11 +449,89 @@ namespace UEBabyPram::InsightFilter
 		return std::nullopt;
 	}
 
+
 	bool EventQueryMapping::IsMatched(ThreadCPUEventView event_scope) const
 	{
 		return FindMatchedQuery(event_scope).has_value();
 	}
 
+	bool EventQueryMapping::IsTimeRangeMatched(Query const& query, Potato::Misc::IndexSpan<DurationSec> time_range)
+	{
+		switch (query.time_condition)
+		{
+		case EventQuery::TimeConditionKind::None:
+			// A query which carries no time condition counts every occurrence.
+			return true;
+		case EventQuery::TimeConditionKind::Overlap:
+			// The occurrence is counted when its time range overlaps one of the slices.
+			for (auto const& time_slice : query.time_ranges)
+			{
+				if (time_slice.IsOverlap(time_range))
+				{
+					return true;
+				}
+			}
+			return false;
+		case EventQuery::TimeConditionKind::Contained:
+			// The occurrence is counted when one of the slices contains it or is equal to it, so a part of it which
+			// crosses the boundary of a slice is not counted at all.
+			for (auto const& time_slice : query.time_ranges)
+			{
+				if (time_slice.IsContainsOrEqual(time_range))
+				{
+					return true;
+				}
+			}
+			return false;
+		}
+
+		return true;
+	}
+
+	bool EventQueryMapping::IsTreeTimeMatched(Query const& query, Potato::Misc::IndexSpan<DurationSec> tree_time_range)
+	{
+		if (query.time_condition == EventQuery::TimeConditionKind::None)
+		{
+			return true;
+		}
+
+		for (auto const& time_slice : query.time_ranges)
+		{
+			if (time_slice.IsOverlap(tree_time_range))
+			{
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	bool EventQueryMapping::IsTreeInsideTime(std::size_t query_index, Potato::Misc::IndexSpan<DurationSec> tree_time_range) const
+	{
+		if (query_index >= queries.size())
+		{
+			return true;
+		}
+
+		auto const& query = queries[query_index];
+
+		// Only the Contained condition selects the tree itself, the Overlap condition selects the trees which its
+		// slices overlap, which is what FindMatchedQuery() has already decided.
+		if (query.time_condition != EventQuery::TimeConditionKind::Contained)
+		{
+			return true;
+		}
+
+		for (auto const& time_slice : query.time_ranges)
+		{
+			if (time_slice.IsContainsOrEqual(tree_time_range))
+			{
+				return true;
+			}
+		}
+
+		return false;
+	}
 	bool EventQueryMapping::IsThreadMatched(ThreadID thread_id) const
 	{
 		for (auto const& query : queries)
@@ -497,24 +580,4 @@ namespace UEBabyPram::InsightFilter
 		return std::find(query.thread_system_ids.begin(), query.thread_system_ids.end(), thread_system_id) != query.thread_system_ids.end();
 	}
 
-	bool EventQueryMapping::IsTimeRangeOverlapped(Query const& query, Potato::Misc::IndexSpan<DurationSec> time_range)
-	{
-		// A query which carries no time range is overlapped by every range.
-		if (query.time_ranges.empty())
-		{
-			return true;
-		}
-
-		// The range is checked against every range of the query, the adjacent ranges are not overlapped, so
-		// a range which only touches the end of a query range is not counted.
-		for (auto const& range : query.time_ranges)
-		{
-			if (range.IsOverlap(time_range))
-			{
-				return true;
-			}
-		}
-
-		return false;
-	}
 }

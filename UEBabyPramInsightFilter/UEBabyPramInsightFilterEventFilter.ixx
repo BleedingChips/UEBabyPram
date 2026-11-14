@@ -20,7 +20,7 @@ export namespace UEBabyPram::InsightFilter
 {
 	// The event query which is built from the query text, the grammar is described by
 	// GetFilterEbnf():
-	//   chain [ '&' Time '=' [TimePoint, TimePoint]+ ] [ '&' Thread '=' (^Regex^) ]
+	//   chain [ '&' ( 'Time' | 'ITime' ) '=' [TimePoint, TimePoint]+ ] [ '&' Thread '=' (^Regex^) ]
 	// Every chain element is (^Regex^) if the event is only matched as a part of the call chain, [^Regex^] if
 	// its timing is also accumulated, %[^Regex^] if every event which it matches is accumulated into one
 	// statistic, or % if any event is matched.
@@ -50,10 +50,28 @@ export namespace UEBabyPram::InsightFilter
 			std::shared_ptr<re2::RE2> matcher;
 		};
 
+		// Which time condition the query carries. A query carries at most one of them, because an occurrence which
+		// the contained condition selects is a part of an occurrence which the overlap condition selects, so the two
+		// are one value with the slices which it is applied to instead of two lists of slices.
+		enum class TimeConditionKind : std::uint8_t
+		{
+			// The query carries no time condition, every occurrence of the chain is counted.
+			None,
+			// Time: an occurrence is counted when its time range overlaps one of the slices.
+			Overlap,
+			// ITime: an occurrence is counted when one of the slices contains it or is equal to it, so the whole time
+			// range of the occurrence has to be inside that slice.
+			Contained,
+		};
+
 		// The event call chain, the order is the call order, it is never empty.
 		std::vector<ChainElement> chain;
-		// The time ranges of the query, every [TimePoint, TimePoint] is one range.
+		// The slices of the time condition which the query carries, every [TimePoint, TimePoint] is one of them, and
+		// the kind of the condition decides what they mean. The slices are written one after another in the query
+		// text, so '&Time=[0s,10s][20s,30s]' carries two of them, and the list is empty when the kind is None.
 		std::vector<Potato::Misc::IndexSpan<DurationSec>> time_ranges;
+		// The time condition which the slices above are applied with.
+		TimeConditionKind time_condition = TimeConditionKind::None;
 		// The thread name matcher, empty when the query does not filter the thread.
 		std::shared_ptr<re2::RE2> thread_matcher;
 	};

@@ -27,6 +27,11 @@ export namespace UEBabyPram::InsightFilter
 			// accurate, and the middle of the range is what the sampling is for. Only the frames whose time range
 			// intersects the sampled range are counted and listed, see GameThreadParser::PrintToLog().
 			double sampling_ratio = 0.9;
+			// The path of the CSV file which the frames are written into instead of the text report, the file is
+			// created and its previous content is emptied. Every analyzed frame is one row, ordered by the time, and
+			// the frames are not cut to the longest ones, so the file carries the whole timeline of the frames before
+			// the report does. The text report is not printed when the path is set.
+			std::optional<std::filesystem::path> csv_path;
 			std::pmr::memory_resource* resource = std::pmr::get_default_resource();
 		};
 
@@ -66,7 +71,25 @@ export namespace UEBabyPram::InsightFilter
 			std::pmr::vector<ThreadCPUEvent> events;
 		};
 
+		// One analyzed frame of the default mode, it is what the CSV report of the frames is written from: the summary
+		// is taken before the records are sorted and cut to the longest ones, so the file carries every analyzed frame
+		// in the order of the time, while the text report only carries the longest ones.
+		struct FrameSummary
+		{
+			Potato::Misc::IndexSpan<DurationSec> time_range;
+			DurationSec duration = DurationSec::zero();
+			std::shared_ptr<ContextSwitchStreamer::Listener> context_switch_listener;
+		};
+
+		// Write the frames of the default mode into the CSV file of Config::csv_path, the file is created or emptied.
+		// One row carries one frame, and the rows are ordered by the time, which is what the text report does not do:
+		// it only reports the longest frames.
+		bool WriteCSV() const;
+
 		std::pmr::vector<FrameRecord> event_records;
+		std::pmr::vector<FrameSummary> frame_summaries;
+		// The path of the CSV file of the frames, it is described by Config::csv_path.
+		std::optional<std::filesystem::path> csv_path;
 		DurationSec min_duration = DurationSec::zero();
 		std::size_t max_record_frame = 10;
 		std::size_t max_exclude_time_count = 30;

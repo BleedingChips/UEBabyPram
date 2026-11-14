@@ -76,6 +76,9 @@ xmake build-logfilter-skill
 ```powershell
 UEBabyPramLogFilter -f "D:\Logs\MyGame.log" -c "Level >= Warning"
 UEBabyPramLogFilter -f "D:\Logs\MyGame.log" -c "Level >= Error" -ostd -or 0 50
+
+# 查看版本（输出 UEBabyPramLogFilter <1.0>）
+UEBabyPramLogFilter -v
 ```
 
 ### InsightFilter
@@ -94,7 +97,7 @@ UEBabyPramLogFilter -f "D:\Logs\MyGame.log" -c "Level >= Error" -ostd -or 0 50
 #### 事件查询语法（`-es` / `-ed` / `-ef`）
 
 ```text
-chain [ '&' 'Time' '=' [TimePoint, TimePoint]+ ] [ '&' 'Thread' '=' (^Regex^) ]
+chain [ '&' ( 'Time' | 'ITime' ) '=' [TimePoint, TimePoint]+ ] [ '&' 'Thread' '=' (^Regex^) ]
 chain     := elem ( '->' elem )*
 elem      := (^Regex^)     只作为调用链的一部分，不统计
           |  [^Regex^]     匹配该事件并统计其耗时
@@ -103,15 +106,20 @@ elem      := (^Regex^)     只作为调用链的一部分，不统计
 TimePoint := Integer 'm' Decimal 's' | Decimal 's' | Integer 's' | Integer 'm' Integer 's'
 ```
 - 调用链按调用顺序匹配，后一个元素必须是前一个元素的后代；
+- **单个查询节点在一棵子树里只会匹配一次**：某节点匹配成功后，同一节点的下一个候选从它整棵子树之后继续查找，所以同一节点的候选之间不会嵌套；用 `[^.*^]`/`(^.*^)` 这类"匹配全部名字"的写法时只会统计到调用树的**根节点**（根是第一个候选，其余匹配都在根的子树内），不能用来枚举所有事件——要统计具体事件请写明确的名字，只用于补全调用链的节点用 `%`；
 - 只有 `[^...^]`/`%[^...^]` 元素会被统计（`%[^...^]` 合并该元素命中的所有事件为一个统计口径），`(^...^)` 与 `%` 仅补全调用链；
 - 正则由一对 `^` 界定：`[`、`]`、`(`、`)`、`%`、`->` 等语法字符可直接出现在正则里，正则内表示 `^` 需写成 `\^`；
-- `Time` 条件只过滤被统计的 occurrence，例如 `&Time=[0s,10s]`；
+- **时间片可连写合并**：同一条件的多个时间片直接连写、无分隔符，例如 `&Time=[0s,10s][20s,30s]`；
+- `Time` 条件按**相交**过滤被统计的 occurrence，例如 `&Time=[0s,10s]`；
+- `ITime` 条件按**包含或相等**过滤：事件的时间范围必须整段落在某个时间片内（完全相等也算），跨边界或只有部分交集都不通过，例如 `&ITime=[0s,10s][20s,30s]`；`Time` 与 `ITime` 只能二选一；
+- `-es` 的 `Time`/`ITime` 过滤的是被统计的 occurrence；`-ed`/`-ef` 报告整棵树，因此时间片选择的是整棵树（`ITime` 只选整棵树都在时间片内的树）；
 - `Thread` 条件匹配完整线程名，例如 `&Thread=(^.*GameThread.*^)`。
 
 示例：
 ```text
 (^FEngineLoop::Tick^)->[^.*TickActor.*^]
 [^UWorld::Tick^]&Time=[0s,10s]&Thread=(^.*GameThread.*^)
+[^UWorld::Tick^]&ITime=[0s,10s][20s,30s]
 %[^UWorld::Tick^]
 ```
 
@@ -123,9 +131,10 @@ TimePoint := Integer 'm' Decimal 's' | Decimal 's' | Integer 's' | Integer 'm' I
 | `-f, --file <path>` | 必填，`.utrace` 文件路径 |
 | `-o, --output <path>` | 报告写入的文件（存在则清空重建），不给则写标准输出；写文件时每条消息的字节数与累计字节数会直接打印到终端 |
 | `-a, --append <path>` | 报告追加到该文件末尾（不存在则创建、原有内容保留，仅纯文本）；不能与 `-o` 同时使用 |
+| `-v, --version` | 输出工具的版本并退出（输出形如 `UEBabyPramInsightFilter <1.0>`） |
 | `-tx, --top_count <count>` | `-es` 每个事件名保留的 Top N 最长 occurrence，默认 5 |
 | `-dbc, --duration_bucket_count <count>` | `-es` 耗时分布直方图的分组数，默认 5 |
-| `-csv, --csv <path>` | `-es` 把统计结果写成 CSV 文件（UTF-8，RFC 4180）而不是文本报告；不能与 `-o`/`-a` 同时使用，只能与 `-es` 一起用 |
+| `-csv, --csv <path>` | 把报告写成 CSV 文件（UTF-8，RFC 4180）而不是文本报告：`-es` 时每行一个事件统计；**默认模式**时每行一帧（`FrameIndex, Begin_s, End_s, Duration_ms, ENCS_ms, FPS`，覆盖采样区间内全部帧并按时间排序）。不能与 `-o`/`-a` 同时使用 |
 | `-fs, --folded_stack <path>` | `-ef` 把火焰图写成 folded stacks 文件（`帧;帧 <微秒>`）而不是文本报告；不能与 `-o`/`-a` 同时使用，只能与 `-ef` 一起用 |
 | `-mvc, --max_view_count <count>` | `-ed` 最多保存多少个 stack tree，默认 10 |
 | `-mnc, --max_node_count <count>` | `-ed` 单棵 stack tree 最多打印多少个节点，超出不打印并以 `...` 标记，0 表示不限，默认 100 |
@@ -155,6 +164,9 @@ UEBabyPramInsightFilter -f .\Capture.utrace -es "(^FEngineLoop::Tick^)->[^.*Tick
 
 # 把事件耗时统计导出为 CSV 文件（不打印文本报告）
 UEBabyPramInsightFilter -f .\Capture.utrace -es "[^UWorld::Tick^]" -csv .\result.csv
+
+# 把默认模式的逐帧数据导出为 CSV（每行一帧，覆盖采样区间内全部帧）
+UEBabyPramInsightFilter -f .\Capture.utrace -csv .\frames.csv
 
 UEBabyPramInsightFilter -f .\Capture.utrace -ed "[^UWorld::Tick^]" -mvc 5
 

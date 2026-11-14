@@ -36,86 +36,6 @@ namespace UEBabyPram::InsightFilter
 			std::size_t query_index = 0;
 		};
 
-		// Append one field of the CSV file: a field which carries the delimiter, the quote or a line break is quoted,
-		// and the quote inside it is doubled, which is what RFC 4180 requires, so an event name which carries a comma
-		// stays one field.
-		void AppendCSVField(std::u8string& line, std::u8string_view field)
-		{
-			bool is_quoted =
-				field.find(u8',') != std::u8string_view::npos
-				|| field.find(u8'"') != std::u8string_view::npos
-				|| field.find(u8'\n') != std::u8string_view::npos
-				|| field.find(u8'\r') != std::u8string_view::npos;
-
-			if (!is_quoted)
-			{
-				line.append(field);
-				return;
-			}
-
-			line.push_back(u8'"');
-			for (char8_t character : field)
-			{
-				if (character == u8'"')
-				{
-					line.push_back(u8'"');
-				}
-				line.push_back(character);
-			}
-			line.push_back(u8'"');
-		}
-
-		// Write one row of the CSV file: the fields are separated by the delimiter of the file, and the row is
-		// closed by its line break, so the caller only appends the fields in the column order.
-		struct CSVRowWriter
-		{
-			explicit CSVRowWriter(std::u8string& output)
-				: output(output) {}
-
-			// Append a text field, the field is quoted when it has to be.
-			void Text(std::u8string_view field)
-			{
-				Separate();
-				AppendCSVField(output, field);
-			}
-
-			// Append a count or an index field.
-			void Integer(std::size_t value)
-			{
-				std::string text = std::format("{}", value);
-				Text(std::u8string_view{ reinterpret_cast<char8_t const*>(text.data()), text.size() });
-			}
-
-			// Append a time field, the milliseconds are written with 6 decimals, so a duration of one nanosecond
-			// keeps its precision.
-			void Milliseconds(DurationSec value)
-			{
-				std::string text = std::format("{:.6f}", value.count() * 1000.0);
-				Text(std::u8string_view{ reinterpret_cast<char8_t const*>(text.data()), text.size() });
-			}
-
-			// Close the row, the next row starts with the same writer.
-			void EndLine()
-			{
-				output.push_back(u8'\n');
-				has_field = false;
-			}
-
-		protected:
-
-			void Separate()
-			{
-				if (has_field)
-				{
-					output.push_back(u8',');
-				}
-
-				has_field = true;
-			}
-
-			std::u8string& output;
-			bool has_field = false;
-		};
 	}
 
 	EventStatisticParser::EventStatisticParser(Config in_config)
@@ -894,16 +814,15 @@ namespace UEBabyPram::InsightFilter
 			text += L"^)";
 		}
 
-		if (!query.time_ranges.empty())
+		// The time condition is written back with the slices one after another without a separator, which is the way the
+		// grammar merges several slices, so the printed query is accepted as an input query again.
+		if (query.time_condition != EventQuery::TimeConditionKind::None)
 		{
-			text += L" & Time=";
-			for (std::size_t range_index = 0; range_index < query.time_ranges.size(); ++range_index)
+			text += L" & ";
+			text += query.time_condition == EventQuery::TimeConditionKind::Contained ? L"ITime" : L"Time";
+			text += L"=";
+			for (auto const& range : query.time_ranges)
 			{
-				if (range_index != 0)
-				{
-					text += L", ";
-				}
-				auto const& range = query.time_ranges[range_index];
 				text += std::format(
 					L"[{}, {}]",
 					DisplayTimePoint{ range.Begin() },

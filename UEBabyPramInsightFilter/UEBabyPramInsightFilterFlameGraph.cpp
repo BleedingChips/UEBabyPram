@@ -155,6 +155,14 @@ namespace UEBabyPram::InsightFilter
 			return;
 		}
 
+		// The flame graph aggregates a whole stack tree, so the tree itself is what the ITime condition selects: only
+		// the trees which one of its slices contains are aggregated, the same way the Time condition aggregates the
+		// trees which its slices overlap.
+		if (!query_mapping.IsTreeInsideTime(query_index, *time_range))
+		{
+			return;
+		}
+
 		DurationSec duration = time_range->Size();
 
 		// Config::max_view_count is the count of the longest stack trees which are aggregated: while the kept views
@@ -209,33 +217,47 @@ namespace UEBabyPram::InsightFilter
 
 	void EventFlameGraphParser::AggregateStackTree(ThreadCPUEventView event_scope, std::size_t query_index)
 	{
-		// The time ranges of the query only decide which stack trees are aggregated, not which events of an
-		// aggregated stack tree are counted: a stack tree which overlaps one of the ranges is aggregated whole, so
-		// every event which it carries is counted, and the time of an event is never cut to the ranges. Only the
-		// events which overlap one of the ranges are printed later, see PrintToLog(): the events which are out of
-		// the ranges are left out of the report, while their time is still a part of the inclusive time of the node
-		// which holds them.
+		// The time condition of the query only decides which stack trees are aggregated, not which events of an
+		// aggregated stack tree are counted: a stack tree which the condition selects is aggregated whole, so every
+		// event which it carries is counted, and the time of an event is never cut to the slices. Only the events
+		// which the time condition selects are printed later, see PrintToLog().
+		EventQuery::TimeConditionKind query_time_condition = EventQuery::TimeConditionKind::None;
 		std::span<Potato::Misc::IndexSpan<DurationSec> const> query_time_ranges;
 		if (auto queries = query_mapping.GetQueries(); query_index < queries.size())
 		{
+			query_time_condition = queries[query_index].time_condition;
 			query_time_ranges = queries[query_index].time_ranges;
 		}
 
-		auto is_in_query_time_range = [query_time_ranges](Potato::Misc::IndexSpan<DurationSec> time_range) {
-			if (query_time_ranges.empty())
+		auto is_in_query_time_range = [query_time_condition, query_time_ranges](Potato::Misc::IndexSpan<DurationSec> time_range) {
+			switch (query_time_condition)
 			{
+			case EventQuery::TimeConditionKind::None:
+				// A query which carries no time condition selects every occurrence.
 				return true;
-			}
-
-			for (auto& query_time_range : query_time_ranges)
-			{
-				if (query_time_range.IsOverlap(time_range))
+			case EventQuery::TimeConditionKind::Overlap:
+				// The occurrence is selected when its time range overlaps one of the slices.
+				for (auto& query_time_range : query_time_ranges)
 				{
-					return true;
+					if (query_time_range.IsOverlap(time_range))
+					{
+						return true;
+					}
 				}
+				return false;
+			case EventQuery::TimeConditionKind::Contained:
+				// The occurrence is selected when one of the slices contains it or is equal to it.
+				for (auto& query_time_range : query_time_ranges)
+				{
+					if (query_time_range.IsContainsOrEqual(time_range))
+					{
+						return true;
+					}
+				}
+				return false;
 			}
 
-			return false;
+			return true;
 		};
 
 		// The current call path: the depth of every level and the index of its node. The events are

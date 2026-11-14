@@ -110,7 +110,13 @@ namespace UEBabyPram::InsightFilter
 		// call chain of the query is completed inside the tree, which is what the tree is kept by. The chain may carry
 		// no statistic element, so the answer does not depend on the matches, and the chain only has to be completed
 		// once: the judge stops at the first completion instead of enumerating every match of the tree.
-		if (!query_mapping.IsMatched(event_scope))
+		//
+		// The report of this parser is the whole tree, so the tree itself is the event which the time conditions are
+		// applied to: the tree is kept when one of the slices of the Time condition overlaps it, and, when the query
+		// carries the ITime condition, only when one of the slices of that condition contains the whole tree, which is
+		// the same condition as the one the collected occurrences are selected by.
+		auto matched_query = query_mapping.FindMatchedQuery(event_scope);
+		if (!matched_query)
 		{
 			return;
 		}
@@ -119,6 +125,14 @@ namespace UEBabyPram::InsightFilter
 		if (!time_range)
 		{
 			return;
+		}
+
+		if (auto queries = query_mapping.GetQueries(); *matched_query < queries.size())
+		{
+			if (!query_mapping.IsTreeInsideTime(*matched_query, *time_range))
+			{
+				return;
+			}
 		}
 
 		DurationSec duration = time_range->Size();

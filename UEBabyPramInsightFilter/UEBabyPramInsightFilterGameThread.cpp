@@ -18,6 +18,8 @@ namespace UEBabyPram::InsightFilter
 		, context_switch_streamer(ContextSwitchStreamer::Config{ 3, DurationSec{ 1 }, &resource })
 		, events_manager(EventSpecManager::Config{ false, &resource })
 		, event_records(&resource)
+		, frame_summaries(&resource)
+		, csv_path(std::move(in_config.csv_path))
 		, max_record_frame(in_config.max_record_frame)
 		, max_exclude_time_count(in_config.max_exclude_time_count)
 		, sampling_ratio(in_config.sampling_ratio)
@@ -119,6 +121,16 @@ namespace UEBabyPram::InsightFilter
 					}),
 				event_records.end()
 			);
+
+			// The frames are summarized before the records are sorted and cut to the longest ones, so the CSV report of
+			// the frames carries every analyzed frame in the order of the time, while the text report only carries the
+			// longest ones.
+			frame_summaries.clear();
+			frame_summaries.reserve(event_records.size());
+			for (auto& record : event_records)
+			{
+				frame_summaries.push_back(FrameSummary{ record.time_range, record.duration, record.context_switch_listener });
+			}
 
 			for (auto& ite : event_records)
 			{
@@ -294,10 +306,78 @@ namespace UEBabyPram::InsightFilter
 
 	}
 
+	bool GameThreadParser::WriteCSV() const
+	{
+		assert(csv_path.has_value());
+
+		// The file is created and its previous content is emptied, the same as the report of -o, so the CSV file always
+		// carries the frames of one analysis.
+		Potato::Document::DocumentWriter writer{
+			*csv_path,
+			Potato::Document::DocumentWriter::OpenMode::CREATE_OR_EMPTY
+		};
+
+		if (!writer)
+		{
+			Potato::Log::Log<L"Cannot open the CSV file <{}>">(csv_path->generic_wstring());
+			return false;
+		}
+
+		std::u8string content;
+		CSVRowWriter row{ content };
+
+		// The header names every column, the user of the file never has to look at the order of the report.
+		row.Text(u8"FrameIndex");
+		row.Text(u8"Begin_s");
+		row.Text(u8"End_s");
+		row.Text(u8"Duration_ms");
+		row.Text(u8"ENCS_ms");
+		row.Text(u8"FPS");
+		row.EndLine();
+
+		for (std::size_t index = 0; index < frame_summaries.size(); ++index)
+		{
+			auto const& frame = frame_summaries[index];
+
+			// The context switch time of the frame is read from the listener of the frame, the same as the text report
+			// reads it, so the time which the game thread was really on the CPU is the same number in both of them.
+			auto context_switch_statis = frame.context_switch_listener
+				? frame.context_switch_listener->GetContextSwitchStatis(frame.time_range)
+				: ContextSwitchStreamer::Listener::Statis{ frame.time_range.Size(), 0 };
+
+			// The time which the frame was really on the CPU is the time with the context switch time removed, which is
+			// what the statis carries, so the column is the same number as the ENCS of the text report.
+			DurationSec on_cpu_time = context_switch_statis.removed_context_switch_time;
+			double frame_rate = frame.duration.count() > 0.0 ? 1.0 / frame.duration.count() : 0.0;
+
+			row.Integer(index + 1);
+			row.Seconds(frame.time_range.Begin());
+			row.Seconds(frame.time_range.End());
+			row.Milliseconds(frame.duration);
+			row.Milliseconds(on_cpu_time);
+			row.Fps(frame_rate);
+			row.EndLine();
+		}
+
+		writer.Write(std::span<std::byte const>{
+			reinterpret_cast<std::byte const*>(content.data()),
+			content.size()
+		});
+
+		return true;
+	}
+
 	bool GameThreadParser::PrintToLog(Potato::Log::LogPrinter& printer)
 	{
 
 		using InsightFilter::OutputLog;
+
+		// The CSV file is written instead of the text report: every analyzed frame is one row, ordered by the time,
+		// which is what the text report does not carry, because it only reports the longest frames.
+		if (csv_path)
+		{
+			return WriteCSV();
+		}
 
 		OutputLog<L"GameThreadParser Output:">(printer);
 
@@ -492,9 +572,12 @@ namespace UEBabyPram::InsightFilter
 				std::chrono::duration_cast<
 					std::chrono::duration<double, std::milli>
 				>(ite.duration).count(),
+				// The statis carries the time of the range with the context switch time removed, which is the time which
+				// the game thread was really on the CPU inside the frame, so it is the ENCS of the frame: subtracting it
+				// from the frame would print the time which the thread was switched out, which is the opposite.
 				std::chrono::duration_cast<
 					std::chrono::duration<double, std::milli>
-				>(ite.duration - context_switch_static.removed_context_switch_time).count(),
+				>(context_switch_static.removed_context_switch_time).count(),
 				start_duration,
 				end_duration
 			);
@@ -556,7 +639,9 @@ namespace UEBabyPram::InsightFilter
 				ite.count,
 				m1,
 				m2,
-				ite.from_frame_index
+				// The frames of the text report are numbered from 1, so the number of the frame which the record comes
+				// from is the same numbering, and not the index of the storage.
+				ite.from_frame_index + 1
 			);
 		}
 		return true;

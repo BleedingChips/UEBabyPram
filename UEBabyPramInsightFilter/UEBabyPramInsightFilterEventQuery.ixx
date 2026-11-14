@@ -41,6 +41,15 @@ export namespace UEBabyPram::InsightFilter
 	// occurrence only once, even when the chain is completed more than once inside the subtree of that
 	// occurrence.
 	//
+	// One element matches at most once per subtree: the first candidate of an element is searched from the beginning
+	// of the tree, and the next candidate of the same element is searched after the whole subtree of the candidate
+	// which was matched, so the candidates of one element are never nested into each other. That is what makes an
+	// element which matches every name, ex: [^.*^] or (^.*^), report only the root of the stack tree: the root is the
+	// first candidate of the element, and every other match of the name is inside the subtree of the root, which the
+	// walk of the element has already consumed. So a broad expression is not a way to enumerate every event of the
+	// tree, the names of the events which have to be counted are written in the query, and '%' is used for the
+	// elements which only complete the chain.
+	//
 	// Note: every element of the chain is resolved into all of the ids which its regular expression
 	// matches, so a name which appears in more than one element of the same chain is counted by all of
 	// those elements, the query system does not pick the topmost one of them.
@@ -101,8 +110,11 @@ export namespace UEBabyPram::InsightFilter
 			// thread id, and the events which are not carried by the stack tree, ex: the context switch event, carry
 			// the system thread id.
 			std::pmr::vector<ThreadSystemID> thread_system_ids;
-			// The time ranges of the query, it is empty when the query does not filter the time.
+			// The slices of the time condition of the query, it is empty when the query carries no time condition.
 			std::pmr::vector<Potato::Misc::IndexSpan<DurationSec>> time_ranges;
+			// The time condition which the slices above are applied with, it decides whether an occurrence has to
+			// overlap one of them (Time) or to be inside one of them (ITime).
+			EventQuery::TimeConditionKind time_condition = EventQuery::TimeConditionKind::None;
 		};
 
 		EventQueryMapping(Config config = {});
@@ -204,6 +216,13 @@ export namespace UEBabyPram::InsightFilter
 		// ranges of the query which kept it.
 		std::optional<std::size_t> FindMatchedQuery(ThreadCPUEventView event_scope) const;
 
+		// Whether the whole stack tree is inside one of the slices of the time condition of the query, which is the
+		// condition of the parsers which report a whole tree instead of the occurrences: such a parser selects the tree
+		// itself with the time conditions, so a tree is kept by the Contained condition only when one of its slices
+		// contains it, while the Overlap condition keeps the trees which its slices overlap. A query which carries no
+		// time condition accepts every tree.
+		bool IsTreeInsideTime(std::size_t query_index, Potato::Misc::IndexSpan<DurationSec> tree_time_range) const;
+
 	protected:
 
 		// Whether the query counts the occurrences which happened on the thread, a query which carries no
@@ -211,12 +230,16 @@ export namespace UEBabyPram::InsightFilter
 		static bool IsThreadMatched(Query const& query, ThreadID thread_id);
 		static bool IsThreadMatched(Query const& query, ThreadSystemID thread_system_id);
 
-		// Whether any time range of the query overlaps the range. It is used both for the whole stack tree
-		// (a query whose time ranges do not overlap the tree can not count any occurrence of it, so the
-		// search of its chains is skipped) and for every occurrence which is about to be reported (an
-		// occurrence whose time range overlaps none of the ranges is not counted). A query which carries no
-		// time range is overlapped by every range, so it counts every occurrence.
-		static bool IsTimeRangeOverlapped(Query const& query, Potato::Misc::IndexSpan<DurationSec> time_range);
+		// Whether the time range of a collected occurrence is selected by the time condition of the query, which is
+		// the question of IsOverlap for the Overlap condition and the question of IsContainsOrEqual for the Contained
+		// condition. A query which carries no time condition selects every occurrence.
+		static bool IsTimeRangeMatched(Query const& query, Potato::Misc::IndexSpan<DurationSec> time_range);
+
+		// Whether a stack tree can carry an occurrence which the time condition of the query selects, which is what the
+		// search of the chains of the query is skipped by. A tree which overlaps none of the slices can not carry such
+		// an occurrence whichever condition the query carries, because an occurrence which a slice contains is a part
+		// of the slice and of the tree, so the check is the same for both of the conditions.
+		static bool IsTreeTimeMatched(Query const& query, Potato::Misc::IndexSpan<DurationSec> tree_time_range);
 
 		// Whether the whole call chain of the query is completed at least once inside the tree, the walk stops at the
 		// first completion and the matches are not exported. The thread condition and the time ranges of the query are

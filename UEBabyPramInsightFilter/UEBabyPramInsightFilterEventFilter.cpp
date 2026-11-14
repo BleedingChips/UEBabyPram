@@ -27,10 +27,17 @@ namespace
 	//   TimePoint  := Integer 'm' Decimal 's' | Decimal 's' | Integer 's'
 	//               | Integer 'm' Integer 's'
 	//
+	// 'ITime' is the same production as 'Time', but its meaning is not the overlap of an occurrence with the ranges
+	// but the containment of an occurrence by one of them: an occurrence is counted only when one of the ranges of
+	// the ITime condition contains it or is equal to it, and a query carries one of the two conditions, not both.
+	//
+	// The time ranges of a condition are written one after another without a separator, so the ranges of one
+	// condition are merged by writing them next to each other, ex: '&Time=[0s,10s][20s,30s]'.
+	//
 	// The event chain is required, the time and the thread parts are optional and
 	// joined by '&', the 'Time' part may carry more than one time range. The lexical
 	// terminals carry the masks CaretReg[1], Integer[2] and Decimal[3], the reduce
-	// masks are: 1 Query, 2/3 Chain, 4/5/19/20 ChainElem, 6/7/8 QueryTail, 9/10 TimeTail,
+	// masks are: 1 Query, 2/3 Chain, 4/5/19/20 ChainElem, 6/7/8/21 QueryTail, 9/10 TimeTail,
 	// 11 ThreadCond, 12/13 TimeRanges, 14 TimeRange, 15/16/17/18 TimePoint.
 	//
 	// The text of a CaretReg is '^pattern^': the two '^' which surround it are the delimiters of the
@@ -63,6 +70,7 @@ $ := <Query> ;
             := '%' : [19] ;
 
 <QueryTail> := '&' 'Time' '=' <TimeRanges> <TimeTail> : [6] ;
+            := '&' 'ITime' '=' <TimeRanges> <TimeTail> : [21] ;
             := <ThreadCond> : [7] ;
             := : [8] ;
 
@@ -89,6 +97,9 @@ $ := <Query> ;
 	// The partial query which the QueryTail and the TimeTail build.
 	struct QueryTailData
 	{
+		// The time condition which the tail carries, None when the tail only carries the thread condition.
+		EventQuery::TimeConditionKind time_condition = EventQuery::TimeConditionKind::None;
+		// The slices of the time condition, they are empty when the time condition is None.
 		std::vector<IndexSpan<DurationSec>> time_ranges;
 		std::shared_ptr<re2::RE2> thread_matcher;
 	};
@@ -211,6 +222,7 @@ namespace UEBabyPram::InsightFilter
 					EventQuery result;
 					result.chain = production[0].Consume<std::vector<EventQuery::ChainElement>>();
 					QueryTailData tail = production[1].Consume<QueryTailData>();
+					result.time_condition = tail.time_condition;
 					result.time_ranges = std::move(tail.time_ranges);
 					// The thread condition is a part of the query as well: without it the query would silently count
 					// every thread, which is what a query without the condition means.
@@ -261,7 +273,20 @@ namespace UEBabyPram::InsightFilter
 				}
 				case 6:
 				{
+					// The Time condition: the occurrence of a collected event is counted when its time range overlaps
+					// one of the slices.
 					QueryTailData tail;
+					tail.time_condition = EventQuery::TimeConditionKind::Overlap;
+					tail.time_ranges = production[3].Consume<std::vector<TimeRange>>();
+					tail.thread_matcher = production[4].Consume<std::shared_ptr<re2::RE2>>();
+					return tail;
+				}
+				case 21:
+				{
+					// The ITime condition is the same production as the Time condition, only the kind of it differs:
+					// the occurrence has to be inside one of the slices instead of overlapping it.
+					QueryTailData tail;
+					tail.time_condition = EventQuery::TimeConditionKind::Contained;
 					tail.time_ranges = production[3].Consume<std::vector<TimeRange>>();
 					tail.thread_matcher = production[4].Consume<std::shared_ptr<re2::RE2>>();
 					return tail;

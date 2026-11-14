@@ -29,6 +29,13 @@ UEBabyPramLogFilter 是一个用于过滤和格式化 Unreal Engine（UE4/UE5）
 
 ## 命令参考
 
+### 通用
+
+| 选项 | 说明 |
+|------|------|
+| `-v, --version` | 输出工具的版本并退出，输出形如 `UEBabyPramLogFilter <1.0>` |
+| `-h, --help [topic]` | 输出总帮助，或某个主题的详细帮助 |
+
 ### 输入
 
 | 选项 | 说明 |

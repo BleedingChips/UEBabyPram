@@ -51,10 +51,11 @@ UEBabyPramInsightFilter 是一个用于分析 Unreal Engine（UE4/UE5）`.utrace
 | `-o, --output <path>` | 报告写入的文件（存在则清空重建），不给则写标准输出；写文件时每条消息的字节数与累计字节数会直接打印到终端 |
 | `-a, --append <path>` | 报告**追加**到该文件末尾（不存在则创建、原有内容保留，仅支持纯文本）；不能与 `-o` 同时使用 |
 | `-h, --help` | 打印帮助 |
+| `-v, --version` | 输出工具的版本并退出，输出形如 `UEBabyPramInsightFilter <1.0>` |
 | `-mlc, --max_location_count <count>` | `-r` 最多报告多少个事件位置，0 表示不限，默认 256 |
 | `-tx, --top_count <count>` | `-es` 每个事件名保留的 Top N 最长 occurrence，默认 5 |
 | `-dbc, --duration_bucket_count <count>` | `-es` 耗时分布直方图的分组数，默认 5 |
-| `-csv, --csv <path>` | `-es` 把统计结果写成 CSV 文件（UTF-8，RFC 4180）而不是文本报告；不能与 `-o` 同时使用，只能与 `-es` 一起用 |
+| `-csv, --csv <path>` | 把报告写成 CSV 文件（UTF-8，RFC 4180）而不是文本报告：`-es` 时每行一个事件统计；**默认模式**时每行一帧（`FrameIndex, Begin_s, End_s, Duration_ms, ENCS_ms, FPS`，覆盖采样区间内全部帧）。不能与 `-o`/`-a` 同时使用 |
 | `-fs, --folded_stack <path>` | `-ef` 把火焰图写成 folded stacks 文件（`帧;帧 <微秒>`）而不是文本报告；不能与 `-o` 同时使用，只能与 `-ef` 一起用 |
 | `-mvc, --max_view_count <count>` | `-ed` 保存、`-ef` 聚合的最长 stack tree 个数，默认 10 |
 | `-mnc, --max_node_count <count>` | `-ed` 单棵 stack tree 最多打印多少个节点，超出不打印并以 `...` 标记，0 表示不限，默认 100 |
@@ -68,20 +69,26 @@ UEBabyPramInsightFilter 是一个用于分析 Unreal Engine（UE4/UE5）`.utrace
 ## EventQuery 语法（-es / -ed / -ef 共用）
 
 ```
-chain [ '&' 'Time' '=' [TimePoint, TimePoint]+ ] [ '&' 'Thread' '=' (^Regex^) ]
+chain [ '&' ( 'Time' | 'ITime' ) '=' [TimePoint, TimePoint]+ ] [ '&' 'Thread' '=' (^Regex^) ]
 chain     := elem ( '->' elem )*
 elem      := (^Regex^)     只作为调用链的一部分，不统计
           |  [^Regex^]     匹配该事件并统计其耗时
           |  %[^Regex^]    匹配该事件并统计其耗时，且该元素匹配到的所有事件合并成同一个统计口径
           |  %            匹配任意事件，只作为调用链的一部分
+TimePoint := Integer 'm' Decimal 's' | Decimal 's' | Integer 's' | Integer 'm' Integer 's'
 ```
 
 规则：
 
 - 所有正则使用 RE2 语法，必须匹配**完整**事件名；
 - 调用链按调用顺序匹配，后一个元素必须是前一个元素的后代（中间可以隔着其他事件）；
+- **单个查询节点在一棵子树里只会匹配一次**：某节点匹配成功后，同一节点的下一个候选从它**整棵子树之后**继续查找，所以同一节点的候选之间不会互相嵌套。由此可得：用 `[^.*^]` / `(^.*^)` 这类"匹配全部名字"的写法时，**只会统计到调用树的根节点**（根是第一个候选，其余同名匹配都在根的子树里、已被消费），不能用来枚举所有事件；要统计具体事件请写明确的名字，只用于补全调用链的节点用 `%`；
 - 只有 `[^...^]` 与 `%[^...^]` 元素会被统计/保存，`(^...^)` 与 `%` 只用于补全调用链；前者按事件名各一个统计，后者把该元素匹配到的所有事件合并成一个统计（报告里以 `Regex:<...>` 呈现）；
-- `Time` 条件只过滤被统计的 occurrence，时间范围写成 `[begin, end]`，如 `&Time=[0s,10s]`；
+- **时间片可以连写合并**：同一个条件里的多个时间片直接写在一起，中间没有分隔符，例如 `&Time=[0s,10s][20s,30s]` 表示两段时间片（`[]` `[]` 连写）；`&ITime=` 同理；
+- `Time` 条件按**相交**过滤被统计的 occurrence：事件的 `[begin, end)` 与任一时间片有交集即通过，只贴边不算；
+- `ITime` 条件按**包含或相等**过滤：事件的 `[begin, end)` 必须**整段**落在某个时间片内部（与时间片完全相等也算通过）；事件跨出时间片边界、或只与时间片有部分交集，都不通过；
+- 一个查询只能带 `Time` 或 `ITime` 其中之一（`ITime` 通过的事件必然是 `Time` 通过的子集）；两者同时给出会解析失败；
+- `-es` 的 `Time`/`ITime` 过滤的是**被统计的 occurrence**；`-ed`/`-ef` 报告的是整棵树，因此这两个模式里时间片选择的是**整棵树**：`Time` 选与时间片相交的树，`ITime` 只选整棵树都在时间片内的树；
 - `Thread` 条件匹配完整线程名，如 `&Thread=(^.*GameThread.*^)`；
 - 正则由一对 `^` 界定：`[`、`]`、`(`、`)`、`%`、`->` 等语法字符可以直接出现在正则里，不需要转义；正则内部若要表示 `^`，需要写成 `\^`；
 - `-es` 可以重复给多个 query，每个 query 独立统计。
@@ -91,6 +98,7 @@ elem      := (^Regex^)     只作为调用链的一部分，不统计
 ```text
 (^FEngineLoop::Tick^)->[^.*TickActor.*^]
 [^UWorld::Tick^]&Time=[0s,10s]&Thread=(^.*GameThread.*^)
+[^UWorld::Tick^]&ITime=[0s,10s][20s,30s]
 %[^UWorld::Tick^]
 ```
 
@@ -175,7 +183,24 @@ EventStatisticParser Output:
 - 行顺序：先按 `QueryIndex`，同一查询内按 `TotalD_ms` 从大到小（`Name` 与 `Regex` 混排）。
 - 编码 UTF-8（**无 BOM**），字段符合 RFC 4180：含 `,`、`"` 或换行的字段用双引号包裹，内部 `"` 写成 `""`。
 - CSV 只包含事件的汇总统计；Top N occurrence、GameFrame Statistics、Duration Distribution 仍然只在文本报告里输出。
-- `-csv` 只能与 `-es` 一起用，且不能与 `-o` 同时使用（`-csv` 自己指定输出文件）。
+- `-csv` 只能与 `-es` 一起用，或与**默认模式**一起用（见下节），且不能与 `-o`/`-a` 同时使用（`-csv` 自己指定输出文件）。
+
+#### 默认模式导出帧 CSV（`-csv <path>`）
+
+在默认模式（不给 `-r`/`-es`/`-ed`/`-ef`/`-ts`）下给 `-csv <path>`，同样**不打印文本报告**，而是把**每一帧**写成一行：
+
+```powershell
+& ".\scripts\UEBabyPramInsightFilter.exe" -f "Capture.utrace" -csv "frames.csv"
+```
+
+- 列顺序固定：`FrameIndex, Begin_s, End_s, Duration_ms, ENCS_ms, FPS`
+  - `FrameIndex`：按时间顺序从 **1** 开始编号，与文本报告 `Top N Longest GameThread` 里的编号一致；
+  - `Begin_s` / `End_s`：帧的起止时间，单位秒，保留 6 位小数（trace 绝对时间）；
+  - `Duration_ms`：帧耗时（毫秒）；
+  - `ENCS_ms`：帧内**真正在 CPU 上**的时间（Exclude Time 去掉离核时间后的累计），即 `Duration_ms - 离核时间`；
+  - `FPS`：`1000 / Duration_ms`，保留 2 位小数。
+- 与文本报告的关键区别：文本报告只列最长的 `-mrf` 帧，而 CSV 覆盖**采样区间内的全部帧**并按时间排序，所以可以直接做时间序列分析（找 hitch、看 FPS 变化）。
+- 采样（`-sr`，默认 0.9）依然生效：CSV 里只有采样区间内的帧。
 
 ### -ed 详细调用堆栈
 
@@ -344,6 +369,6 @@ flamegraph.pl result.folded > result.svg
 8. **宽正则有性能风险**：`-r`、`-es`、`-ed`、`-ef`（以及 `-ts`）的每个正则都要对每个事件名（或线程名）逐一完整匹配，`.*`、`(^.*^)`、`[^.*Tick.*^]` 这类写法会让整次分析变慢、报告变大；优先写名字里的确定片段，query 里若"任意事件"即可，用不带正则的 `%` 元素（它完全不参与名字匹配）。
 9. `.utrace` 的开头与结尾是触发保存 trace 的时刻，保存本身会进入这些帧的耗时，所以这两端的数据不准；`-sr`（默认 **0.9**）只分析中间部分以避开两端，**报告只覆盖与采样时间范围有交集的帧**（完全在范围外的帧不统计，跨边界的帧按整帧耗时统计），并且顶部会有一行明确说明这个口径；取 `-sr 1.0` 则分析完整范围。
 10. 报告默认写到标准输出；用 `-o <path>` 可写入文件（文件会被清空重建），用 `-a <path>` 可**追加**到已有文件末尾（不存在则创建，仅纯文本），`-o` 与 `-a` 不能同时使用。写文件时，每写一条报告消息都会在终端打印该条消息的字节数与本次运行已写入的累计字节数（这些进度行不会进入报告文件），可用来观察长报告的输出进度。
-11. `-es` 想给程序消费时用 `-csv <path>`：直接生成 CSV 文件、不打印文本报告；它只能与 `-es` 一起用，且不能与 `-o` 或 `-a` 同时使用。CSV 只含事件汇总（不含 Top occurrence / GameFrame / 直方图）。
+11. `-es` 想给程序消费时用 `-csv <path>`：直接生成 CSV 文件、不打印文本报告；CSV 只含事件汇总（不含 Top occurrence / GameFrame / 直方图）。默认模式同样支持 `-csv <path>`（每行一帧，覆盖采样区间内全部帧，按时间排序），两种用法都不能与 `-o` 或 `-a` 同时使用。
 12. `-ef` 想直接出图时用 `-fs <path>`：直接生成 folded stacks 文件（不打印文本报告），权重为该调用路径的自身耗时（微秒），各行之和等于报告的 `Total`；它只能与 `-ef` 一起用，且不能与 `-o` 或 `-a` 同时使用。
 13. 若 trace 没有采集 **context switch** 通道（没有任何 context switch 事件），默认模式、`-es`、`-ed` 的报告会在标题下打印一行 `No Context Switch event is recorded in the trace ...`：此时 `CS` 恒为 0、`ENCS` 与 `E` 相同，报告里的耗时是线程"被调度"的时间而不是真正占用 CPU 的时间，不要据此刻画 CPU 占用。

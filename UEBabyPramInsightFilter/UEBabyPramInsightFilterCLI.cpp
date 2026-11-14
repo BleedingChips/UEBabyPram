@@ -23,6 +23,10 @@ namespace UEBabyPram::InsightFilter
 
 	namespace
 	{
+		// The version of the tool, which -v --version reports. It is kept in the command line of this tool only, so the
+		// log filter carries its own version and a new version of one tool never rebuilds the other one.
+		constexpr std::string_view version = "1.0";
+
 		void PrintGeneralHelp()
 		{
 			// The help text is longer than the limit of the compile time string template argument (8192 characters),
@@ -86,7 +90,7 @@ Options:
 
 			Log::LogTo<Log::DefaultLogFormatter, LR"HELP(  -es, --event_stat <query>
       Query of the events whose timing should be collected, the grammar is:
-        chain [ '&' 'Time' '=' [TimePoint, TimePoint]+ ] [ '&' 'Thread' '=' (^Regex^) ]
+        chain [ '&' ( 'Time' | 'ITime' ) '=' [TimePoint, TimePoint]+ ] [ '&' 'Thread' '=' (^Regex^) ]
         chain     := elem ( '->' elem )*
         elem      := (^Regex^)      the event is only matched as a part of the call chain
                   |  [^Regex^]      the event is matched and its timing is collected
@@ -96,6 +100,7 @@ Options:
         TimePoint := Integer 'm' Decimal 's' | Decimal 's' | Integer 's' | Integer 'm' Integer 's'
       Ex: -es "(^FEngineLoop::Tick^)->[^.*TickActor.*^]"
           -es "[^UWorld::Tick^]&Time=[0s,10s]&Thread=(^.*GameThread.*^)"
+          -es "[^UWorld::Tick^]&ITime=[0s,10s][20s,30s]"
           -es "%[^UWorld::Tick^]"
       Every regex is the re2 syntax and it has to match the whole event name. The text of a regex is
       delimited by its own two '^', so the characters which the grammar of the query uses as well,
@@ -109,13 +114,31 @@ Options:
       of the chain may be between them. Only the [^Regex^] and the %[^Regex^] elements collect the
       timing, one statistic per event name for the first kind, and one statistic for every event which
       a %[^Regex^] element matches.
+      One element of the chain matches at most once per subtree: the first candidate of an element is
+      searched from the beginning of the tree, and the next candidate of that element is searched after
+      the whole subtree of the candidate which was matched, so the candidates of one element are never
+      nested into each other. A query therefore reports one occurrence per matched call instead of every
+      nested match: an element which matches every name, ex: (^.*^) or [^.*^], only reports the root of
+      the call tree, because the root is its first candidate and every other match is inside the subtree
+      of the root. Write the names of the events which have to be counted, and use '%' for the elements
+      which only complete the chain (it matches any event and costs nothing).
       The same name is only collected by the topmost of the collecting elements, so one occurrence is
       never counted twice by one query.
-      The Time and the Thread conditions only filter the collected events, the events which complete
-      the call chain are not filtered by them. A collected event is selected by the Time condition
-      when the time range which the event occupies overlaps one of the ranges of the query: an event
-      which is entirely before a range, or entirely after it, or which only touches its end, is not
-      selected. The thread name has to match the whole thread name.
+      The Time, the ITime and the Thread conditions only filter the collected events, the events which
+      complete the call chain are not filtered by them.
+      Time selects a collected event when the time range which the event occupies overlaps one of the
+      slices of the condition: an event which is entirely before a slice, or entirely after it, or which
+      only touches its end, is not selected.
+      ITime selects a collected event when one of the slices of the condition contains it or is equal to
+      it, so the whole time range of the event has to be inside that slice: an event which starts before
+      the slice, or which ends after it, or which crosses its boundary, is not selected, while the event
+      which spans the slice exactly is selected.
+      Several slices of one condition are written one after another without a separator, so the slices
+      are merged by writing them next to each other, ex: '&Time=[0s,10s][20s,30s]' selects the events
+      which overlap either slice, and '&ITime=[0s,10s][20s,30s]' selects the events which are inside one
+      of the two slices. One query carries either the Time slices or the ITime slices, not both, because
+      an event which ITime selects is a part of an event which Time selects.
+      The thread name has to match the whole thread name.
       -es can be given more than once, every query keeps its own statistics, so the same event name
       may be reported several times, once per query which collects it.
       Every occurrence is grouped into the game frame which carries its beginning (the stack trees of
@@ -216,15 +239,20 @@ Options:
       one is split into this count of buckets.
 
   -csv, --csv <path>
-      Write the statistics of -es into <path> as a CSV file instead of the text report, the file is
-      created and its previous content is emptied, and the text report is not printed. The content is
-      UTF-8 without a BOM and the fields follow RFC 4180, so a field which carries ',', '"' or a line
-      break is quoted. The columns are QueryIndex, Event, Kind, EventIdCount, OccurrenceCount,
-      TotalD_ms, MeanD_ms, MedianD_ms, StdD_ms, TotalE_ms, MeanE_ms and Query, where Kind is Name for
-      a statistic of one event name and Regex for a merged element, and EventIdCount is the count of
-      the event ids which the statistic of the row carries. The rows are ordered by the query and by
-      the total duration of the statistic, the longest one first. -csv can only be used with -es, and
-      it can not be used with -o at the same time.
+      Write the report into <path> as a CSV file instead of printing it, the file is created and its
+      previous content is emptied. The content is UTF-8 without a BOM and the fields follow RFC 4180, so
+      a field which carries ',', '"' or a line break is quoted. The option is accepted by two modes:
+      -es: every statistic is one row, the columns are QueryIndex, Event, Kind, EventIdCount,
+        OccurrenceCount, TotalD_ms, MeanD_ms, MedianD_ms, StdD_ms, TotalE_ms, MeanE_ms and Query, where
+        Kind is Name for a statistic of one event name and Regex for a merged element, and EventIdCount
+        is the count of the event ids which the statistic of the row carries. The rows are ordered by the
+        query and by the total duration of the statistic, the longest one first.
+      The default mode, i.e. when neither -r, -es, -ed, -ef nor -ts is given: every analyzed frame is one
+        row, ordered by the time, and the columns are FrameIndex, Begin_s, End_s, Duration_ms, ENCS_ms and
+        FPS. The rows cover every analyzed frame, not only the longest ones which the text report carries,
+        so the file is the whole timeline of the frames of the sampled range, and ENCS_ms is the time of
+        the frame without the time which the thread spent out of the CPU in it.
+      -csv can not be used with -o or -a at the same time.
 
   -fs, --folded_stack <path>
       Write the flame graph of -ef into <path> as a folded stack file instead of the text report, the
@@ -275,6 +303,9 @@ Options:
 
   -h, --help
       Print this help.
+
+  -v, --version
+      Print the version of the tool.
 )HELP">(*Log::GetSTDOutPrinter());
 		}
 	}
@@ -289,8 +320,10 @@ Options:
 		ThreadSearchParser::Config thread_config;
 		bool search_event = false;
 		bool statistic_event = false;
-		// Whether the statistics of -es are written into a CSV file, the path is taken from -csv.
-		bool csv_statistic = false;
+		// The CSV file is the format of two reports: the statistics of -es and the frames of the default mode. It names
+		// the file which the report is written into itself, so it is not mixed with -o, and every other mode reports a
+		// text which has no CSV form yet.
+		std::optional<std::filesystem::path> csv_path;
 		// Whether the flame graph of -ef is written into a folded stack file, the path is taken from -fs.
 		bool folded_stack_event = false;
 		bool detail_event = false;
@@ -308,6 +341,14 @@ Options:
 			if (argv_string == "-h" || argv_string == "--help")
 			{
 				PrintGeneralHelp();
+				return 1;
+			}
+			else if (argv_string == "-v" || argv_string == "--version")
+			{
+				// The version is reported with the name of the tool, so the output of the tools of the repository is told
+				// apart by a script which reads it, and it is the version which this tool carries itself. It is written
+				// without the prefix of the log, so the line is exactly what a script reads.
+				OutputLog<L"UEBabyPramInsightFilter <{}>">(*Log::GetSTDOutPrinter(), version);
 				return 1;
 			}
 			else if (argv_string == "-f" || argv_string == "--file")
@@ -583,10 +624,10 @@ Options:
 					path_buffer.clear();
 					Encode::STDInputEncoder<char8_t>::EncodeTo(argv[i + 1], std::back_insert_iterator{ path_buffer });
 
-					// The file is opened by the statistic parser when the report is written, so the path is only stored
-					// here, the error of a path which can not be opened is reported then.
-					statistic_config.csv_path = std::filesystem::path{ path_buffer };
-					csv_statistic = true;
+					// The file is opened by the parser which owns the report when the report is written, so the path is
+					// only stored here, and the parser which the path belongs to is decided after every option is read.
+					// The error of a path which can not be opened is reported by that parser then.
+					csv_path = std::filesystem::path{ path_buffer };
 					++i;
 				}
 				else {
@@ -753,18 +794,31 @@ Options:
 			return -1;
 		}
 
-		// The CSV file is the format of the statistics report, so it is only accepted with -es, and it names the file
-		// which the report is written into itself, so it is not mixed with -o or -a.
-		if (csv_statistic && !statistic_event)
+		// The CSV file is the format of two reports: the statistics of -es and the frames of the default mode, which is
+		// the mode of no other option. The file names itself, so it is not mixed with -o or -a.
+		if (csv_path)
 		{
-			Log::Log<CommandLineLogCategory, Log::LogLevel::Error, L"-csv --csv can only be used with -es --event_stat, use -h for detailed help">();
-			return -1;
-		}
+			if (statistic_event)
+			{
+				statistic_config.csv_path = std::move(*csv_path);
+				csv_path.reset();
+			}
+			else if (!search_event && !detail_event && !flame_event && !search_thread)
+			{
+				config.csv_path = std::move(*csv_path);
+				csv_path.reset();
+			}
+			else
+			{
+				Log::Log<CommandLineLogCategory, Log::LogLevel::Error, L"-csv --csv can only be used with -es --event_stat or the default mode, use -h for detailed help">();
+				return -1;
+			}
 
-		if (csv_statistic && !setting.output_path.empty())
-		{
-			Log::Log<CommandLineLogCategory, Log::LogLevel::Error, L"-csv --csv and -o --output or -a --append can not be used at the same time, use -h for detailed help">();
-			return -1;
+			if (!setting.output_path.empty())
+			{
+				Log::Log<CommandLineLogCategory, Log::LogLevel::Error, L"-csv --csv and -o --output or -a --append can not be used at the same time, use -h for detailed help">();
+				return -1;
+			}
 		}
 
 		// The folded stack file is the format of the flame graph, so it is only accepted with -ef, and it names the file
