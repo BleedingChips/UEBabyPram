@@ -213,12 +213,17 @@ namespace UEBabyPram::InsightFilter
 
 		auto const queries = query_mapping.GetQueries();
 
+		// A query which carries an element whose timing is collected reports only the events which that
+		// element captured and the subtree of the last captured event; a query which collects nothing
+		// only selects the stack trees, so the whole tree of every kept stack tree is reported.
+		bool has_capture = !queries.empty() && query_mapping.HasCapture(0);
+
 		for (std::size_t view_index = 0; view_index < stored_views.size(); ++view_index)
 		{
 			auto const& stored_view = stored_views[view_index];
 
-			// The whole tree is printed, the events which are out of the time ranges of the query are printed as well:
-			// the time ranges only decide which stack trees are kept, not which events of a kept tree are reported.
+			// The time ranges only decide which stack trees are kept, not which events of a kept tree are
+			// reported, so the report of this view is not cut to the ranges whichever report it carries.
 			std::string_view thread_name{ "<Unknow>" };
 			if (auto thread_info = GetThreadInfo(stored_view.thread_id); thread_info && !thread_info->thread_name.empty())
 			{
@@ -262,22 +267,24 @@ namespace UEBabyPram::InsightFilter
 				return ThreadCPUEventView::ContextSwitchStatis{ range.Size(), 0 };
 			};
 
-			// The stack tree is built from the events of the view: the events are stored in the call
-			// order, so every event is a child of the event which is above it, and the end of the stack
-			// tree is an event without an id, which is not an event of the tree.
-			std::vector<PrintNode> nodes;
-			std::vector<std::size_t> roots;
-			std::vector<std::size_t> node_stack;
+			// Print one reported tree: the events are in the order of the call, and the depth of an event is
+			// its level in the report. The reported events are not always the events of the stack tree: when
+			// the query captures the events, the ancestors which it did not capture are left out, so the
+			// depth of a reported event is compressed into the levels which are reported.
+			auto print_event_tree = [&](std::span<ThreadCPUEventView::EventView const> reported_events)
 			{
-				std::size_t offset = 0;
-				while (true)
+				if (reported_events.empty())
 				{
-					auto current = event_scope.FindNextEvent({}, offset);
-					if (!current)
-					{
-						break;
-					}
+					return;
+				}
 
+				// The tree is built from the reported events: the events are in the call order, so every
+				// event is a child of the event which is above it.
+				std::vector<PrintNode> nodes;
+				std::vector<std::size_t> roots;
+				std::vector<std::size_t> node_stack;
+				for (auto const& current : reported_events)
+				{
 					std::size_t node_index = nodes.size();
 					nodes.push_back(PrintNode{ current, {} });
 
@@ -295,116 +302,200 @@ namespace UEBabyPram::InsightFilter
 					}
 
 					node_stack.push_back(node_index);
-					offset = current.index_range.Begin() + 1;
-				}
-			}
-
-			if (nodes.empty())
-			{
-				continue;
-			}
-
-			// The tree is printed with box drawing characters. The exclude time of an event is the time
-			// which it consumed outside of its children, and the context switch time of the exclude time
-			// is the part of it which the thread spent off the CPU, it is only printed when it is not
-			// zero.
-			// The tree is printed up to the limits of the report: the nodes over the count of the nodes and the
-			// nodes which are deeper than the depth limit are not printed, their place is marked with '...'. The
-			// mark of the nodes which are left by the count is printed once, because the rest of the tree is left as
-			// well, while the mark of the nodes which are left by the depth is printed once per level.
-			std::vector<bool> is_ellipsis_printed;
-			std::size_t printed_node_count = 0;
-			bool is_node_count_marked = false;
-			std::function<void(std::size_t, std::wstring const&, bool, bool, std::size_t)> print_node =
-				[&](std::size_t node_index, std::wstring const& prefix, bool is_last, bool is_root, std::size_t level)
-			{
-				auto const& node = nodes[node_index];
-
-				std::wstring line_prefix;
-				if (!is_root)
-				{
-					line_prefix = prefix + (is_last ? L"\u2514\u2500 " : L"\u251C\u2500 ");
 				}
 
-				// The nodes over the count are not printed, and the rest of the tree is left with them, so the mark of
-				// the count is printed once.
-				if (max_node_count != 0 && printed_node_count >= max_node_count)
+				// The tree is printed with box drawing characters. The exclude time of an event is the time
+				// which it consumed outside of its children, and the context switch time of the exclude time
+				// is the part of it which the thread spent off the CPU, it is only printed when it is not
+				// zero.
+				// The tree is printed up to the limits of the report: the nodes over the count of the nodes and the
+				// nodes which are deeper than the depth limit are not printed, their place is marked with '...'. The
+				// mark of the nodes which are left by the count is printed once, because the rest of the tree is left as
+				// well, while the mark of the nodes which are left by the depth is printed once per level.
+				std::vector<bool> is_ellipsis_printed;
+				std::size_t printed_node_count = 0;
+				bool is_node_count_marked = false;
+				std::function<void(std::size_t, std::wstring const&, bool, bool, std::size_t)> print_node =
+					[&](std::size_t node_index, std::wstring const& prefix, bool is_last, bool is_root, std::size_t level)
 				{
-					if (!is_node_count_marked)
+					auto const& node = nodes[node_index];
+
+					std::wstring line_prefix;
+					if (!is_root)
 					{
-						is_node_count_marked = true;
-						OutputLog<L"        {}...">(printer, line_prefix);
+						line_prefix = prefix + (is_last ? L"\u2514\u2500 " : L"\u251C\u2500 ");
 					}
-					return;
-				}
 
-				if (is_ellipsis_printed.size() <= level)
-				{
-					is_ellipsis_printed.resize(level + 1, false);
-				}
-
-				// The nodes which are deeper than the depth limit are not printed, the mark of such a level is printed
-				// once, and it is printed again only when a printed node of the same level comes before it.
-				if (max_depth != 0 && level > max_depth)
-				{
-					if (!is_ellipsis_printed[level])
+					// The nodes over the count are not printed, and the rest of the tree is left with them, so the mark of
+					// the count is printed once.
+					if (max_node_count != 0 && printed_node_count >= max_node_count)
 					{
-						is_ellipsis_printed[level] = true;
-						OutputLog<L"        {}...">(printer, line_prefix);
+						if (!is_node_count_marked)
+						{
+							is_node_count_marked = true;
+							OutputLog<L"        {}...">(printer, line_prefix);
+						}
+						return;
 					}
-					return;
-				}
 
-				is_ellipsis_printed[level] = false;
-				++printed_node_count;
-				std::u8string_view event_name = events_manager.GetEventSpec(node.view.event_id).name_view;
+					if (is_ellipsis_printed.size() <= level)
+					{
+						is_ellipsis_printed.resize(level + 1, false);
+					}
 
-				auto exclude_time = event_scope.GetExcludeTime(node.view, context_switch_provider);
-				DurationSec exclude = exclude_time ? exclude_time->active_time : DurationSec::zero();
-				DurationSec exclude_without_context_switch = exclude_time ? exclude_time->active_time_without_context_switch : exclude;
-				DurationSec context_switch_time = exclude - exclude_without_context_switch;
+					// The nodes which are deeper than the depth limit are not printed, the mark of such a level is printed
+					// once, and it is printed again only when a printed node of the same level comes before it.
+					if (max_depth != 0 && level > max_depth)
+					{
+						if (!is_ellipsis_printed[level])
+						{
+							is_ellipsis_printed[level] = true;
+							OutputLog<L"        {}...">(printer, line_prefix);
+						}
+						return;
+					}
 
-				if (context_switch_time.count() > context_switch_epsilon)
+					is_ellipsis_printed[level] = false;
+					++printed_node_count;
+					std::u8string_view event_name = events_manager.GetEventSpec(node.view.event_id).name_view;
+
+					// The exclude time is the one of the event in the whole stack tree, so it excludes every
+					// child of the event, including the children which are not reported; the time of such a
+					// child is not a part of the report.
+					auto exclude_time = event_scope.GetExcludeTime(node.view, context_switch_provider);
+					DurationSec exclude = exclude_time ? exclude_time->active_time : DurationSec::zero();
+					DurationSec exclude_without_context_switch = exclude_time ? exclude_time->active_time_without_context_switch : exclude;
+					DurationSec context_switch_time = exclude - exclude_without_context_switch;
+
+					if (context_switch_time.count() > context_switch_epsilon)
+					{
+						OutputLog<L"        {}<{}>, TR:<[{}, {}]>, D:<{:.3f}ms>, E:<{:.3f}ms>, CS:<{:.3f}ms>">(
+							printer,
+							line_prefix,
+							event_name,
+							DisplayTimePoint{ node.view.time_range.Begin() },
+							DisplayTimePoint{ node.view.time_range.End() },
+							node.view.time_range.Size().count() * 1000.0,
+							exclude.count() * 1000.0,
+							context_switch_time.count() * 1000.0
+						);
+					}
+					else {
+						OutputLog<L"        {}<{}>, TR:<[{}, {}]>, D:<{:.3f}ms>, E:<{:.3f}ms>">(
+							printer,
+							line_prefix,
+							event_name,
+							DisplayTimePoint{ node.view.time_range.Begin() },
+							DisplayTimePoint{ node.view.time_range.End() },
+							node.view.time_range.Size().count() * 1000.0,
+							exclude.count() * 1000.0
+						);
+					}
+
+					std::wstring child_prefix = prefix;
+					if (!is_root)
+					{
+						child_prefix += is_last ? L"   " : L"\u2502  ";
+					}
+
+					for (std::size_t child_index = 0; child_index < node.children.size(); ++child_index)
+					{
+						bool child_is_last = child_index + 1 == node.children.size();
+						print_node(node.children[child_index], child_prefix, child_is_last, false, level + 1);
+					}
+				};
+
+				for (auto root_index : roots)
 				{
-					OutputLog<L"        {}<{}>, TR:<[{}, {}]>, D:<{:.3f}ms>, E:<{:.3f}ms>, CS:<{:.3f}ms>">(
-						printer,
-						line_prefix,
-						event_name,
-						DisplayTimePoint{ node.view.time_range.Begin() },
-						DisplayTimePoint{ node.view.time_range.End() },
-						node.view.time_range.Size().count() * 1000.0,
-						exclude.count() * 1000.0,
-						context_switch_time.count() * 1000.0
-					);
-				}
-				else {
-					OutputLog<L"        {}<{}>, TR:<[{}, {}]>, D:<{:.3f}ms>, E:<{:.3f}ms>">(
-						printer,
-						line_prefix,
-						event_name,
-						DisplayTimePoint{ node.view.time_range.Begin() },
-						DisplayTimePoint{ node.view.time_range.End() },
-						node.view.time_range.Size().count() * 1000.0,
-						exclude.count() * 1000.0
-					);
-				}
-
-				std::wstring child_prefix = prefix;
-				if (!is_root)
-				{
-					child_prefix += is_last ? L"   " : L"\u2502  ";
-				}
-
-				for (std::size_t child_index = 0; child_index < node.children.size(); ++child_index)
-				{
-					bool child_is_last = child_index + 1 == node.children.size();
-					print_node(node.children[child_index], child_prefix, child_is_last, false, level + 1);
+					print_node(root_index, L"", true, true, 1);
 				}
 			};
 
-			for (auto root_index : roots)
+			if (!has_capture)
 			{
-				print_node(root_index, L"", true, true, 1);
+				// The query only selects the stack trees, so the whole tree of the view is reported.
+				std::vector<ThreadCPUEventView::EventView> reported_events;
+				std::size_t offset = 0;
+				while (true)
+				{
+					auto current = event_scope.FindNextEvent({}, offset);
+					if (!current)
+					{
+						break;
+					}
+
+					reported_events.push_back(current);
+					offset = current.index_range.Begin() + 1;
+				}
+
+				print_event_tree(reported_events);
+				continue;
+			}
+
+			// Every completion of the call chain is one report: the events which the elements whose timing
+			// is collected matched are reported in the order of the call, and the whole subtree of the last
+			// one of them is reported under it. The events which the query did not capture (the query
+			// elements of the chain and the ancestors of the first captured event) are left out.
+			struct CapturedGroup
+			{
+				std::vector<ThreadCPUEventView::EventView> captured;
+			};
+
+			std::vector<CapturedGroup> groups;
+			query_mapping.ForEachMatchedCapture(event_scope, [&groups](std::span<EventQueryMapping::CaptureMatch const> matches)
+			{
+				auto& group = groups.emplace_back();
+				group.captured.reserve(matches.size());
+				for (auto const& match : matches)
+				{
+					group.captured.push_back(match.event_view);
+				}
+			});
+
+			for (std::size_t group_index = 0; group_index < groups.size(); ++group_index)
+			{
+				auto const& captured = groups[group_index].captured;
+				assert(!captured.empty());
+
+				// The captured events are the first levels of the report, the ancestors which the query did
+				// not capture are left out, so they are compressed into the levels 1..count.
+				std::vector<ThreadCPUEventView::EventView> reported_events;
+				reported_events.reserve(captured.size());
+				std::u8string chain_text;
+				for (std::size_t capture_index = 0; capture_index < captured.size(); ++capture_index)
+				{
+					auto view = captured[capture_index];
+					view.depth = capture_index + 1;
+					reported_events.push_back(view);
+
+					if (capture_index != 0)
+					{
+						chain_text.append(u8" -> ");
+					}
+					chain_text.append(events_manager.GetEventSpec(view.event_id).name_view);
+				}
+
+				// The whole subtree of the last captured event is reported under it, the depth of an event is
+				// shifted so that the child of the last captured event is the next level of the report.
+				auto const& last_captured = captured.back();
+				std::size_t last_captured_depth = captured.size();
+				std::size_t offset = last_captured.index_range.Begin() + 1;
+				while (offset < last_captured.index_range.End())
+				{
+					auto descendant = event_scope.FindNextEvent({}, { offset, last_captured.index_range.End() });
+					if (!descendant)
+					{
+						break;
+					}
+
+					auto view = descendant;
+					view.depth = last_captured_depth + (descendant.depth - last_captured.depth);
+					reported_events.push_back(view);
+					offset = descendant.index_range.Begin() + 1;
+				}
+
+				OutputLog<L"        Match <{}>: <{}>">(printer, group_index, std::u8string_view{ chain_text });
+				print_event_tree(reported_events);
 			}
 		}
 

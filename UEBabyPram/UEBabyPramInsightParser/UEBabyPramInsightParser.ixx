@@ -719,13 +719,15 @@ export namespace UEBabyPram::InsightParser
 		std::vector<EventID> frame_event_id;
 
 		//virtual void AddThread(uint32 thread_id, char const* thread_name);
-		friend void ExecuteParser(Potato::Document::DocumentReader& Resource, ParserInterface& Parser);
+		friend void ExecuteParser(DcomentWrapper& Resource, ParserInterface& Parser);
 	};
 
-	void ExecuteParser(Potato::Document::DocumentReader& Resource, ParserInterface& Parser)
+	void ExecuteParser(DcomentWrapper& Resource, ParserInterface& Parser)
 	{
-		DcomentWrapper ResourceWrapper(Resource);
-		ExecuteParser(ResourceWrapper, Parser);
+		// The resource is already a wrapper of the document reader, so it is given to the engine as it is: a
+		// caller which has to observe the reads of the input, ex: to report their progress, passes a subclass
+		// of DcomentWrapper which overrides Read().
+		ExecuteParser(Resource, static_cast<BaseParser&>(Parser));
 	}
 }
 

@@ -8,11 +8,63 @@ using namespace UEBabyPram::InsightFilter;
 
 namespace
 {
+	// The wrapper of the document reader which reports how much of the trace has been read: the parser reads
+	// the whole trace through it, so the progress of a long input is reported while it is read. The progress is
+	// printed once per 1 GiB of the input, and the end of the input is reported when a read returns fewer bytes
+	// than it was asked for. The progress goes to the terminal, never into the report file.
+	struct ProgressDocumentWrapper : public UEBabyPram::InsightParser::DcomentWrapper
+	{
+		ProgressDocumentWrapper(Potato::Document::DocumentReader& reader)
+			: DcomentWrapper(reader) {}
+
+		virtual std::int32_t Read(void* out_data, std::uint32_t byte_size) override
+		{
+			std::int32_t read_size = DcomentWrapper::Read(out_data, byte_size);
+
+			if (read_size > 0)
+			{
+				std::size_t read_byte_count = static_cast<std::size_t>(read_size);
+				total_byte_count += read_byte_count;
+				pending_byte_count += read_byte_count;
+				read_complete = false;
+
+				if (pending_byte_count > progress_byte_step)
+				{
+					Potato::Log::Log<L"    Input <{}> byte(s), Total <{}> byte(s)">(
+						pending_byte_count,
+						total_byte_count
+					);
+					pending_byte_count = 0;
+				}
+			}
+
+			// A read which carried fewer bytes than it was asked for is the end of the input. The reads which
+			// follow the end of the input carry no bytes, so the message is only printed once.
+			if (!read_complete && read_size >= 0 && static_cast<std::uint32_t>(read_size) < byte_size)
+			{
+				read_complete = true;
+				Potato::Log::Log<L"    Input Read Complete, Total <{}> byte(s)">(total_byte_count);
+			}
+
+			return read_size;
+		}
+
+		// The byte count which one progress line is printed for, 1 GiB.
+		static constexpr std::size_t progress_byte_step = 1024ull * 1024ull * 1024ull;
+
+		// The bytes of the whole input which is read so far.
+		std::size_t total_byte_count = 0;
+		// The bytes which are read since the last progress line.
+		std::size_t pending_byte_count = 0;
+		// Whether the end of the input has been reported, it keeps the reads which follow the end of the
+		// input from reporting it again.
+		bool read_complete = false;
+	};
+
 	// The printer which writes every message of the parsers into the report file, so the report of a parser is
 	// stored in the file which -o or -a names instead of the standard output. The message is a wide string, so its
-	// characters are encoded into UTF-8 while they are written. The terminal is told the bytes which the message
-	// carried and the bytes of the whole report which is written so far, which is what the progress of a long report
-	// is read from, and it is told directly, so the numbers never end up in the report file.
+	// characters are decoded into a fixed buffer as they are written, and the buffer is flushed to the file
+	// whenever it is full, so a long message does not need a copy of its whole UTF-8 text.
 	struct DocumentLogPrinter : public Potato::Log::LogPrinter
 	{
 		DocumentLogPrinter(Potato::Document::DocumentWriter& writer)
@@ -20,20 +72,36 @@ namespace
 
 		virtual void Print(Potato::Log::FormatedSystemTime time, Potato::Log::LogLevel level, std::pmr::wstring const& message) override
 		{
-			std::pmr::u8string encoded_message;
-			Potato::Encode::UnicodeEncoder<wchar_t, char8_t>::EncodeTo(message, std::back_inserter(encoded_message));
+			std::array<char8_t, 1024> encoded_message;
+			std::size_t encoded_size = 0;
 
-			writer.Write(std::span<std::byte const>{
-				reinterpret_cast<std::byte const*>(encoded_message.data()),
-				encoded_message.size()
-			});
+			auto flush = [&](std::size_t size)
+			{
+				if (size != 0)
+				{
+					writer.Write(std::span<std::byte const>{
+						reinterpret_cast<std::byte const*>(encoded_message.data()),
+						size
+					});
+				}
+			};
 
-			total_byte_count += encoded_message.size();
+			// The iterator keeps a reference to this callable, so the callable has to outlive the encoding.
+			auto append_character = [&](char8_t character)
+			{
+				encoded_message[encoded_size] = character;
+				++encoded_size;
+				if (encoded_size == encoded_message.size())
+				{
+					flush(encoded_size);
+					encoded_size = 0;
+				}
+			};
 
-			Potato::Log::Log<L"    Output <{}> byte(s), Total <{}> byte(s)">(
-				encoded_message.size(),
-				total_byte_count
-			);
+			auto output_iterator = Potato::Misc::FunctionOutputIterator<char8_t>{ append_character };
+
+			Potato::Encode::UnicodeEncoder<wchar_t, char8_t>::EncodeTo(message, output_iterator);
+			flush(encoded_size);
 		}
 
 		// The printer is owned by the caller of PrintToLog(), so the reference count of it is never used.
@@ -43,8 +111,6 @@ namespace
 	protected:
 
 		Potato::Document::DocumentWriter& writer;
-		// The bytes of the whole report which is written by this run, it is the total which every message reports.
-		std::size_t total_byte_count = 0;
 	};
 }
 
@@ -78,7 +144,8 @@ int main(int argc, char* argv[])
 	Potato::Log::Log<L"Start With UTrace File <{}>">(setting.insight_path.generic_wstring());
 
 	Potato::Document::DocumentReader Reader(setting.insight_path);
-	UEBabyPram::InsightParser::ExecuteParser(Reader, *setting.parser);
+	ProgressDocumentWrapper Input(Reader);
+	UEBabyPram::InsightParser::ExecuteParser(Input, *setting.parser);
 
 	// The report is written into the file which -o names, which is created and emptied, or into the file which -a
 	// names, which keeps its previous content, and into the standard output when neither of them is given.

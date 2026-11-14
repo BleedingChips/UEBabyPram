@@ -25,7 +25,7 @@ namespace UEBabyPram::InsightFilter
 	{
 		// The version of the tool, which -v --version reports. It is kept in the command line of this tool only, so the
 		// log filter carries its own version and a new version of one tool never rebuilds the other one.
-		constexpr std::string_view version = "1.0";
+		constexpr std::string_view version = "1.1";
 
 		void PrintGeneralHelp()
 		{
@@ -49,19 +49,19 @@ Usage:
 Options:
   -f, --file <path>
       Path of the unreal insight .utrace file which should be analyzed. Required.
+      The terminal is told the bytes which are read once per 1 GiB of the input, and the end of the input is
+      reported when a read returns fewer bytes than it was asked for. The report file itself carries no
+      progress.
 
   -o, --output <path>
       Path of the file which the report is written into, the file is created and its previous content is
       emptied. When neither -o nor -a is given, the report is written into the standard output.
-      Every message of the report tells the terminal the bytes which it carried and the bytes of the whole
-      report which is written so far, so the terminal shows the progress of a long report, the report file
-      itself only carries the report.
 
   -a, --append <path>
       Path of the file which the report is appended to, the file is created when it does not exist and its
       previous content is kept, so the reports of several runs are collected in one file. Only plain text is
       supported: the report is UTF-8 text and nothing is written before it, so it starts at the end of the
-      previous content. The byte count of every message is reported to the terminal the same as -o.
+      previous content.
       -a and -o can not be used at the same time.
 
   -r, --regex <regex>
@@ -174,12 +174,19 @@ Options:
       stack tree is only kept while the kept ones are fewer than -mvc, or when it is longer than the
       shortest of them, which is dropped for it, so the count is the count of the longest calls, not
       the count of the calls which are matched first.
-      The whole tree of a kept stack tree is reported, the events which are out of the time ranges of
-      the query are reported as well: the time ranges only decide which stack trees are kept, not
-      which events of a kept tree are reported.
-      The report of one stack tree is limited by -mnc and -md: the nodes over the count and the nodes
-      which are deeper than the depth are not printed, and the place of the nodes which are left is
-      marked with '...'. The limits are applied to every stack tree separately.
+      The query decides which events of a kept stack tree are reported. A query which carries no
+      element whose timing is collected, i.e. neither [^Regex^] nor %[^Regex^], only selects the
+      trees, so the whole tree of every kept stack tree is reported. A query which captures reports
+      every completed call chain separately: the events which the collecting elements matched are
+      reported in the order of the call, the elements which only complete the chain above the last
+      captured event and the ancestors of the first captured event are left out, and the whole
+      subtree of the last captured event is reported under it. The events which are out of the time
+      ranges of the query are reported as well: the time ranges only decide which stack trees are
+      kept.
+      The report of one reported tree is limited by -mnc and -md: the nodes over the count and the
+      nodes which are deeper than the depth are not printed, and the place of the nodes which are left
+      is marked with '...'. The limits are applied to every reported tree separately, so every
+      captured call of the same stack tree is limited by itself.
       Narrow the filter as much as possible: a filter which is too wide reports a very large
       amount of information, which is slow to print and hard to read.
       Performance: every regular expression is tested against the name of every event which the trace
@@ -194,20 +201,23 @@ Options:
       as -es. The call paths of every matched stack tree are merged, and the time of every call path
       is reported with its percentage of the whole matched time. The -mvc longest stack trees are
       aggregated, the same as -ed.
+      The query decides which events of a kept stack tree are aggregated. A query which carries no
+      element whose timing is collected, i.e. neither [^Regex^] nor %[^Regex^], only selects the
+      trees, so the whole tree of every kept stack tree is aggregated and every call path of it is
+      printed. A query which captures aggregates every completed call chain: the events which the
+      collecting elements matched and the whole subtree of the last captured event are counted, the
+      elements which only complete the chain above the last captured event and the ancestors of the
+      first captured event are left out, and every captured call is merged into the graph.
       The time ranges of the query only decide which stack trees are aggregated, not which events of
-      an aggregated tree are counted: a stack tree which overlaps one of the ranges is aggregated
-      whole, so every event which it carries is counted, and the time of an event is never cut to the
-      ranges, an event which crosses the boundary of a range counts with its whole time.
-      The report is narrower than the aggregation: a call path is only printed when one of its
-      occurrences is inside the ranges, the call paths which are entirely out of the ranges are not
-      printed, while their time is still a part of the inclusive time of the call path which holds
-      them. So the time of a printed call path is the whole time of that path, it is never cut to the
-      ranges.
+      an aggregated tree are counted: a stack tree which overlaps one of the ranges is aggregated by
+      the rule above, so the time of an event is never cut to the ranges, and an event which crosses
+      the boundary of a range counts with its whole time. Every call path of the aggregation is
+      printed.
       The flame graph can be written into a folded stack file with -fs <path> instead of the text
       report: every line of the file is one call path and the time which the path took on its own in
       microseconds, "<Frame>;<Frame>;... <Microsecond>", which is the format of the folded stacks
-      which the flame graph tools read, ex: flamegraph.pl. Only the call paths which the report
-      prints are written, and the sum of the weights is the whole matched time of the graph.
+      which the flame graph tools read, ex: flamegraph.pl. Every call path which the report prints is
+      written, and the sum of the weights is the whole matched time of the graph.
       Narrow the filter as much as possible: a filter which is too wide reports a very large
       amount of information, which is slow to print and hard to read.
       Performance: every regular expression is tested against the name of every event which the trace
@@ -262,10 +272,9 @@ Options:
       the file can be turned into a picture, ex:
         flamegraph.pl result.folded > result.svg
       The delimiter ';', the line break and the tab of a frame name are replaced, so one line always
-      carries one call path. Only the call paths which the report prints are written, the call paths
-      which the time ranges of the query left out are counted as the time of the path which holds
-      them, so the sum of the weights is the whole matched time of the graph. -fs can only be used
-      with -ef, and it can not be used with -o at the same time.
+      carries one call path. Every call path of the graph is written, so the sum of the weights is the
+      whole matched time of the graph. -fs can only be used with -ef, and it can not be used with -o
+      at the same time.
 
   -mvc, --max_view_count <count>
       How many of the longest stack trees should be saved and reported with -ed, and aggregated
@@ -274,12 +283,13 @@ Options:
       matches.
 
   -mnc, --max_node_count <count>
-      How many nodes of one stack tree should be printed with -ed, 0 for no limit, default is 100.
-      The nodes over the count are not printed, and their place is marked with '...'. The count is
-      the count of the nodes of one reported stack tree, so every stack tree is limited separately.
+      How many nodes of one reported tree should be printed with -ed, 0 for no limit, default is
+      100. The nodes over the count are not printed, and their place is marked with '...'. The count
+      is the count of the nodes of one reported tree, so every captured call of a stack tree is
+      limited separately.
 
   -md, --max_depth <depth>
-      How many levels of one stack tree should be printed with -ed, 0 for no limit, default is 8.
+      How many levels of one reported tree should be printed with -ed, 0 for no limit, default is 8.
       The nodes which are deeper than the depth are not printed, and their place is marked with
       '...', once per node of the deepest printed level. The first level of the tree is 1.
 

@@ -312,6 +312,206 @@ namespace UEBabyPram::InsightFilter
 		return is_chain_matched;
 	}
 
+	bool EventQueryMapping::ForEachMatchedCapture(ThreadCPUEventView event_scope, CaptureVisitorT visitor) const
+	{
+		if (!visitor || queries.empty())
+		{
+			return false;
+		}
+
+		// The whole stack tree is the range which the time conditions are checked against first, a query
+		// whose time ranges do not overlap the tree can not capture any occurrence of it.
+		auto tree_time_range = event_scope.GetTimeRange();
+		if (!tree_time_range)
+		{
+			return false;
+		}
+
+		// Whether the whole call chain of a query is matched inside the tree, the chain of a query which only
+		// carries query elements captures no node, so the visitor alone can not tell whether it is matched.
+		bool is_chain_matched = false;
+
+		struct FindedNodeStack
+		{
+			ThreadCPUEventView::EventView event_view;
+			std::size_t node_index = 0;
+			EventQuery::ChainElement::Kind kind = EventQuery::ChainElement::Kind::QueryOnly;
+		};
+
+		// The chain which is being matched, every entry is one matched element of the chain, and the
+		// entries of a query are contiguous from the first element of the chain.
+		std::vector<FindedNodeStack> finded_stack;
+
+		// The captured nodes of the completion which is being reported, and the node ranges of the
+		// completions which have already been reported. Two completions which capture the same events
+		// produce the same report, so only the first one of them is reported.
+		std::vector<CaptureMatch> captured;
+		std::vector<std::vector<std::size_t>> captured_ranges;
+
+		for (std::size_t query_index = 0; query_index < queries.size(); ++query_index)
+		{
+			auto const& query = queries[query_index];
+			assert(!query.nodes.empty());
+
+			// A query which carries no thread condition counts every thread, and a query which carries no
+			// time range counts every occurrence, so the two conditions only filter the queries which
+			// carry them.
+			if (!IsThreadMatched(query, event_scope.thread_id))
+			{
+				continue;
+			}
+
+			// The tree can only carry an occurrence which the time conditions of the query accept when one of the
+			// ranges overlaps it, which is checked for the Time and for the ITime condition at once.
+			if (!IsTreeTimeMatched(query, *tree_time_range))
+			{
+				continue;
+			}
+
+			// An element whose regular expression matched no event never completes the chain, so the chain
+			// of the query can not be matched in this tree at all. The element which matches any event
+			// never carries an id, it is always resolvable.
+			bool chain_resolvable = true;
+			for (auto const& node : query.nodes)
+			{
+				if (node.kind != EventQuery::ChainElement::Kind::Any && node.event_ids.empty())
+				{
+					chain_resolvable = false;
+					break;
+				}
+			}
+
+			if (!chain_resolvable)
+			{
+				continue;
+			}
+
+			finded_stack.clear();
+
+			// The first candidate of the first element of the chain, its next candidate is searched after
+			// the whole subtree of this one, which is done by the backtrack below.
+			auto first_candidate = event_scope.FindChildEvent(query.nodes[0].GetEventIDs());
+			if (first_candidate)
+			{
+				finded_stack.emplace_back(FindedNodeStack{ first_candidate, 0, query.nodes[0].kind });
+			}
+
+			// The walk is the same as the walk of ForEachMatchedEvent(), but every completion is reported
+			// together with every captured node which it matched, instead of exporting the nodes one by one.
+			// The captured nodes of a completion are the ones which the elements whose timing is collected
+			// matched, and they are collected in the order of the call.
+			while (!finded_stack.empty())
+			{
+				auto& top = finded_stack.back();
+				assert(top.event_view);
+
+				if (top.node_index + 1 < query.nodes.size())
+				{
+					// The candidate of the next element is searched inside the subtree of the element before
+					// it, so the events which are not a part of the chain may be between them.
+					auto const& next_node = query.nodes[top.node_index + 1];
+					auto child_candidate = event_scope.FindChildEvent(next_node.GetEventIDs(), top.event_view);
+					if (child_candidate)
+					{
+						finded_stack.emplace_back(FindedNodeStack{
+							child_candidate,
+							top.node_index + 1,
+							next_node.kind
+							}
+						);
+						continue;
+					}
+				}
+				else {
+					// The whole chain is matched, so the captured nodes of the completion are reported once. The
+					// captured node is an event of every element whose timing is collected, and a chain which
+					// collects nothing only selects the tree.
+					is_chain_matched = true;
+
+					captured.clear();
+					for (auto& stack_ite : finded_stack)
+					{
+						if (IsStatisticKind(stack_ite.kind))
+						{
+							captured.push_back(CaptureMatch{ stack_ite.event_view, stack_ite.node_index });
+						}
+					}
+
+					if (!captured.empty())
+					{
+						// The query is a part of the key, because the same events may be captured by two
+						// queries, and the completions of two queries are not the same report.
+						std::vector<std::size_t> captured_range;
+						captured_range.reserve(captured.size() + 1);
+						captured_range.push_back(query_index);
+						for (auto& capture : captured)
+						{
+							captured_range.push_back(capture.event_view.index_range.Begin());
+						}
+
+						if (std::find(captured_ranges.begin(), captured_ranges.end(), captured_range) == captured_ranges.end())
+						{
+							captured_ranges.push_back(std::move(captured_range));
+							visitor(std::span<CaptureMatch const>{ captured });
+						}
+					}
+				}
+
+				// Backtrack: the chain is enumerated again with the next candidate of the deepest element,
+				// and the elements below it are searched again from that candidate, so every combination of
+				// the chain is visited. The next candidate is searched after the whole subtree of the
+				// element which is left, inside the subtree of the element which holds it, or in the whole
+				// stack tree for the first element of the chain, so the candidates of one element are
+				// pairwise disjoint and an event is never a candidate of an element twice.
+				while (!finded_stack.empty())
+				{
+					auto left_element = finded_stack.back();
+					finded_stack.pop_back();
+
+					std::size_t search_end = finded_stack.empty()
+						? event_scope.view.size()
+						: finded_stack.back().event_view.index_range.End();
+
+					auto next_candidate = event_scope.FindNextEvent(
+						query.nodes[left_element.node_index].GetEventIDs(),
+						{ left_element.event_view.index_range.End(), search_end }
+					);
+
+					if (next_candidate)
+					{
+						finded_stack.emplace_back(FindedNodeStack{
+							next_candidate,
+							left_element.node_index,
+							query.nodes[left_element.node_index].kind
+							}
+						);
+						break;
+					}
+				}
+			}
+		}
+
+		return is_chain_matched;
+	}
+
+	bool EventQueryMapping::HasCapture(std::size_t query_index) const
+	{
+		if (query_index >= queries.size())
+		{
+			return false;
+		}
+
+		for (auto const& node : queries[query_index].nodes)
+		{
+			if (IsStatisticKind(node.kind))
+			{
+				return true;
+			}
+		}
+
+		return false;
+	}
+
 	bool EventQueryMapping::IsChainMatched(ThreadCPUEventView event_scope, Query const& query)
 	{
 		assert(!query.nodes.empty());

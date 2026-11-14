@@ -217,64 +217,102 @@ namespace UEBabyPram::InsightFilter
 
 	void EventFlameGraphParser::AggregateStackTree(ThreadCPUEventView event_scope, std::size_t query_index)
 	{
-		// The time condition of the query only decides which stack trees are aggregated, not which events of an
-		// aggregated stack tree are counted: a stack tree which the condition selects is aggregated whole, so every
-		// event which it carries is counted, and the time of an event is never cut to the slices. Only the events
-		// which the time condition selects are printed later, see PrintToLog().
-		EventQuery::TimeConditionKind query_time_condition = EventQuery::TimeConditionKind::None;
-		std::span<Potato::Misc::IndexSpan<DurationSec> const> query_time_ranges;
-		if (auto queries = query_mapping.GetQueries(); query_index < queries.size())
+		// The events which the graph is built from, in the order of the call: the whole stack tree of a query
+		// which captures no event, or the events which the elements whose timing is collected captured and
+		// the whole subtree of the last captured event of every completion of a query which captures. The
+		// depth of an event is its level in the graph, which is compressed when the ancestors which the query
+		// did not capture are left out.
+		std::vector<ThreadCPUEventView::EventView> reported_events;
+
+		if (!query_mapping.HasCapture(query_index))
 		{
-			query_time_condition = queries[query_index].time_condition;
-			query_time_ranges = queries[query_index].time_ranges;
-		}
-
-		auto is_in_query_time_range = [query_time_condition, query_time_ranges](Potato::Misc::IndexSpan<DurationSec> time_range) {
-			switch (query_time_condition)
+			// The query only selects the stack trees, so the whole tree of the view is aggregated.
+			std::size_t offset = 0;
+			while (true)
 			{
-			case EventQuery::TimeConditionKind::None:
-				// A query which carries no time condition selects every occurrence.
-				return true;
-			case EventQuery::TimeConditionKind::Overlap:
-				// The occurrence is selected when its time range overlaps one of the slices.
-				for (auto& query_time_range : query_time_ranges)
+				auto current = event_scope.FindNextEvent({}, offset);
+				if (!current)
 				{
-					if (query_time_range.IsOverlap(time_range))
-					{
-						return true;
-					}
+					break;
 				}
-				return false;
-			case EventQuery::TimeConditionKind::Contained:
-				// The occurrence is selected when one of the slices contains it or is equal to it.
-				for (auto& query_time_range : query_time_ranges)
-				{
-					if (query_time_range.IsContainsOrEqual(time_range))
-					{
-						return true;
-					}
-				}
-				return false;
-			}
 
-			return true;
-		};
+				reported_events.push_back(current);
+				offset = current.index_range.Begin() + 1;
+			}
+		}
+		else {
+			// Every completion of the call chain captures the events of the elements whose timing is
+			// collected, and the whole subtree of the last of them is aggregated under it. An event which is
+			// already a part of another completion is only counted once, so the time of a captured event
+			// which holds several completions is never counted twice.
+			struct CapturedGroup
+			{
+				std::vector<ThreadCPUEventView::EventView> captured;
+			};
+
+			std::vector<CapturedGroup> groups;
+			query_mapping.ForEachMatchedCapture(event_scope, [&groups](std::span<EventQueryMapping::CaptureMatch const> matches)
+			{
+				auto& group = groups.emplace_back();
+				group.captured.reserve(matches.size());
+				for (auto const& match : matches)
+				{
+					group.captured.push_back(match.event_view);
+				}
+			});
+
+			// Whether the event at the index of the stack tree is already a part of the graph. A captured
+			// event which several completions share is reported by the first of them, and the subtree of the
+			// last captured event is reported by the completion which captured it first.
+			std::vector<bool> is_added(event_scope.view.size(), false);
+
+			auto append_event = [&reported_events, &is_added](ThreadCPUEventView::EventView view, std::size_t depth)
+			{
+				std::size_t begin = view.index_range.Begin();
+				if (begin >= is_added.size() || is_added[begin])
+				{
+					return;
+				}
+
+				is_added[begin] = true;
+				view.depth = depth;
+				reported_events.push_back(view);
+			};
+
+			for (auto const& group : groups)
+			{
+				assert(!group.captured.empty());
+
+				for (std::size_t capture_index = 0; capture_index < group.captured.size(); ++capture_index)
+				{
+					append_event(group.captured[capture_index], capture_index + 1);
+				}
+
+				// The whole subtree of the last captured event is aggregated under it, the depth of an event
+				// is shifted so that the child of the last captured event is the next level of the graph.
+				auto const& last_captured = group.captured.back();
+				std::size_t last_captured_depth = group.captured.size();
+				std::size_t offset = last_captured.index_range.Begin() + 1;
+				while (offset < last_captured.index_range.End())
+				{
+					auto descendant = event_scope.FindNextEvent({}, { offset, last_captured.index_range.End() });
+					if (!descendant)
+					{
+						break;
+					}
+
+					append_event(descendant, last_captured_depth + (descendant.depth - last_captured.depth));
+					offset = descendant.index_range.Begin() + 1;
+				}
+			}
+		}
 
 		// The current call path: the depth of every level and the index of its node. The events are
 		// stored in the call order, so an event is a child of the event which is above it.
 		std::vector<std::pair<std::size_t, std::size_t>> path;
 
-		std::size_t offset = 0;
-		while (true)
+		for (auto const& current : reported_events)
 		{
-			auto current = event_scope.FindNextEvent({}, offset);
-			if (!current)
-			{
-				break;
-			}
-
-			offset = current.index_range.Begin() + 1;
-
 			while (!path.empty() && path.back().first >= current.depth)
 			{
 				path.pop_back();
@@ -303,12 +341,6 @@ namespace UEBabyPram::InsightFilter
 			// The inclusive time of the call path is the duration of the event, which is the time from
 			// its beginning to the end of its subtree.
 			nodes[child_index].total_duration += current.time_range.Size();
-
-			// The occurrence is counted whether it is in the time ranges of the query or not, it only decides
-			// whether the node is printed: a node is printed when at least one of its occurrences is in the
-			// ranges, then the whole time of the node is printed.
-			nodes[child_index].has_occurrence_in_query_time_range =
-				nodes[child_index].has_occurrence_in_query_time_range || is_in_query_time_range(current.time_range);
 
 			path.emplace_back(current.depth, child_index);
 		}
@@ -348,20 +380,15 @@ namespace UEBabyPram::InsightFilter
 			AppendFoldedFrameName(path, events_manager.GetEventSpec(node.event_id).name_view);
 
 			// The time which the call path took on its own is the inclusive time of the node without the inclusive time
-			// of its children, so the weight of a line is never counted again by another line. The children which the
-			// time ranges of the query left out are counted as the time of this path, the same as the text report,
-			// which leaves them out of the report as well.
+			// of its children, so the weight of a line is never counted again by another line.
 			DurationSec children_duration = DurationSec::zero();
 
 			std::vector<std::size_t> printed_children;
 			printed_children.reserve(node.children.size());
 			for (auto child_index : node.children)
 			{
-				if (nodes[child_index].has_occurrence_in_query_time_range)
-				{
-					printed_children.push_back(child_index);
-					children_duration += nodes[child_index].total_duration;
-				}
+				printed_children.push_back(child_index);
+				children_duration += nodes[child_index].total_duration;
 			}
 
 			// A call path which took no time on its own, because all of its time is in its children, carries no line:
@@ -386,17 +413,8 @@ namespace UEBabyPram::InsightFilter
 			}
 		};
 
-		// The roots of the flame graph are the roots of the kept stack trees, which overlap the time ranges of the
-		// query, the same rule as the text report.
-		std::vector<std::size_t> printed_roots;
-		printed_roots.reserve(nodes[0].children.size());
-		for (auto child_index : nodes[0].children)
-		{
-			if (nodes[child_index].has_occurrence_in_query_time_range)
-			{
-				printed_roots.push_back(child_index);
-			}
-		}
+		// The roots of the flame graph are the roots of the aggregated call paths, every one of them is printed.
+		std::vector<std::size_t> printed_roots{ nodes[0].children.begin(), nodes[0].children.end() };
 
 		std::sort(printed_roots.begin(), printed_roots.end(), [&](std::size_t left, std::size_t right) {
 			return nodes[left].total_duration > nodes[right].total_duration;
@@ -449,10 +467,9 @@ namespace UEBabyPram::InsightFilter
 
 		// The flame graph is printed with box drawing characters, the children of a node are sorted by
 		// the time which they take, so the widest call is the first one, the same as a flame graph.
-		// The report is narrower than the aggregation: a node is printed only when one of its occurrences is in the
-		// time ranges of the query, the node which only carries the occurrences out of the ranges is left out with
-		// its children, while its time is already a part of the inclusive time of the node which holds it. So the
-		// time of a printed node is the whole time of its call path, it is never cut to the ranges.
+		// Every node of the graph is printed: the events of the graph are the whole stack tree of a query
+		// which captures nothing, or the captured call path of a query which captures, so the time of a
+		// node is the whole time of its call path and it is never cut to the time ranges of the query.
 		std::function<void(std::size_t, std::wstring const&, bool, bool)> print_node =
 			[&](std::size_t node_index, std::wstring const& prefix, bool is_last, bool is_root)
 		{
@@ -474,16 +491,13 @@ namespace UEBabyPram::InsightFilter
 				percent
 			);
 
-			// The children which are out of the time ranges of the query are not printed, so the children which are
-			// printed are collected first: the last one of them carries the corner connector.
+			// The children are collected first and sorted by their time, so the last one of them carries the
+			// corner connector of the printed tree.
 			std::vector<std::size_t> printed_children;
 			printed_children.reserve(node.children.size());
 			for (auto child_index : node.children)
 			{
-				if (nodes[child_index].has_occurrence_in_query_time_range)
-				{
-					printed_children.push_back(child_index);
-				}
+				printed_children.push_back(child_index);
 			}
 
 			std::sort(printed_children.begin(), printed_children.end(), [&](std::size_t left, std::size_t right) {
@@ -503,17 +517,8 @@ namespace UEBabyPram::InsightFilter
 			}
 		};
 
-		// The roots of the flame graph are the roots of the kept stack trees, which overlap the time ranges of the
-		// query, so they are printed, the same rule is applied to them as well.
-		std::vector<std::size_t> printed_roots;
-		printed_roots.reserve(nodes[0].children.size());
-		for (auto child_index : nodes[0].children)
-		{
-			if (nodes[child_index].has_occurrence_in_query_time_range)
-			{
-				printed_roots.push_back(child_index);
-			}
-		}
+		// The roots of the flame graph are the roots of the aggregated call paths, every one of them is printed.
+		std::vector<std::size_t> printed_roots{ nodes[0].children.begin(), nodes[0].children.end() };
 
 		std::sort(printed_roots.begin(), printed_roots.end(), [&](std::size_t left, std::size_t right) {
 			return nodes[left].total_duration > nodes[right].total_duration;

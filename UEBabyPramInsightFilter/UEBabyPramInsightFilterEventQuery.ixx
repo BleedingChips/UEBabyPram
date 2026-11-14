@@ -200,6 +200,41 @@ export namespace UEBabyPram::InsightFilter
 		// element), because such a chain never reports a match to the visitor.
 		bool ForEachMatchedEvent(ThreadCPUEventView event_scope, MatchVisitorT visitor) const;
 
+		// One captured node of a completed chain: the event which a chain element whose timing is collected
+		// ([^Regex^] or %[^Regex^]) matched, and the index of that element in the chain.
+		struct CaptureMatch
+		{
+			// The matched event, the view carries its whole subtree and its time range.
+			ThreadCPUEventView::EventView event_view;
+			// The index of the chain element of the query which captures the event.
+			std::size_t node_index = 0;
+		};
+
+		// The visitor of the captured nodes of one completed chain, the matches are only valid while the
+		// visitor is running, so they must not be stored by the visitor.
+		using CaptureVisitorT = Potato::TMP::FunctionRef<void(std::span<CaptureMatch const>)>;
+
+		// Visit the captured nodes of every completed chain of every query, one call per completion, in the
+		// order of the call. The captured nodes are the events which the elements whose timing is collected
+		// matched, so a chain which carries no such element never calls the visitor, and a query which carries
+		// no such element only selects the stack trees (see HasCapture()).
+		//
+		// The visitor receives every captured node of one completion, even when a previous completion
+		// captured the same node as a part of another completion: the caller is the one which decides
+		// whether one captured node is reported once per tree or once per completion. Two completions
+		// which capture exactly the same events are only reported once, so the same report is never
+		// produced twice.
+		//
+		// True is returned when the whole call chain of a query is matched in the stack tree, the same as
+		// ForEachMatchedEvent(). The thread condition and the time ranges of the query decide which stack
+		// trees are visited, the same as ForEachMatchedEvent().
+		bool ForEachMatchedCapture(ThreadCPUEventView event_scope, CaptureVisitorT visitor) const;
+
+		// Whether the query carries an element whose timing is collected, i.e. an element of the
+		// QueryAndStatistic or the QueryAndStatisticMerged kind. A query which carries none of them only
+		// selects the stack trees, and the report of -ed/-ef prints the whole tree of such a query.
+		bool HasCapture(std::size_t query_index) const;
+
 		// Whether the stack tree satisfies the queries, which is the question of whether a tree is kept by a query: the
 		// thread condition and the time ranges of a query are matched, and its whole call chain is completed at least
 		// once inside the tree.

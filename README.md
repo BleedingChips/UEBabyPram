@@ -112,7 +112,8 @@ TimePoint := Integer 'm' Decimal 's' | Decimal 's' | Integer 's' | Integer 'm' I
 - **时间片可连写合并**：同一条件的多个时间片直接连写、无分隔符，例如 `&Time=[0s,10s][20s,30s]`；
 - `Time` 条件按**相交**过滤被统计的 occurrence，例如 `&Time=[0s,10s]`；
 - `ITime` 条件按**包含或相等**过滤：事件的时间范围必须整段落在某个时间片内（完全相等也算），跨边界或只有部分交集都不通过，例如 `&ITime=[0s,10s][20s,30s]`；`Time` 与 `ITime` 只能二选一；
-- `-es` 的 `Time`/`ITime` 过滤的是被统计的 occurrence；`-ed`/`-ef` 报告整棵树，因此时间片选择的是整棵树（`ITime` 只选整棵树都在时间片内的树）；
+- `-es` 的 `Time`/`ITime` 过滤的是被统计的 occurrence；`-ed`/`-ef` 里时间片只决定保留哪些 stack tree（`Time` 选与时间片相交的树，`ITime` 只选整棵树都在时间片内的树），不裁剪被保留树的报告内容；
+- `-ed`/`-ef` 的 query 若不含 `[^...^]`/`%[^...^]`（没有需要捕捉的事件），query 只作为筛选条件，打印/聚合并打印匹配的整棵调用树；若含捕捉元素，则每次匹配只报告被捕捉的节点，并在最后一个被捕捉节点下打印它的整棵子树，被捕捉节点之上的补全链节点与祖先会被省略；
 - `Thread` 条件匹配完整线程名，例如 `&Thread=(^.*GameThread.*^)`。
 
 示例：
@@ -128,17 +129,17 @@ TimePoint := Integer 'm' Decimal 's' | Decimal 's' | Integer 's' | Integer 'm' I
 
 | 选项 | 说明 |
 |------|------|
-| `-f, --file <path>` | 必填，`.utrace` 文件路径 |
-| `-o, --output <path>` | 报告写入的文件（存在则清空重建），不给则写标准输出；写文件时每条消息的字节数与累计字节数会直接打印到终端 |
+| `-f, --file <path>` | 必填，`.utrace` 文件路径；每累计读取超过 1 GB 在终端打印一次 `Input <本段字节数> byte(s), Total <累计字节数> byte(s)`，读取结束时打印 `Input Read Complete, Total <累计字节数> byte(s)` |
+| `-o, --output <path>` | 报告写入的文件（存在则清空重建），不给则写标准输出 |
 | `-a, --append <path>` | 报告追加到该文件末尾（不存在则创建、原有内容保留，仅纯文本）；不能与 `-o` 同时使用 |
-| `-v, --version` | 输出工具的版本并退出（输出形如 `UEBabyPramInsightFilter <1.0>`） |
+| `-v, --version` | 输出工具的版本并退出（输出形如 `UEBabyPramInsightFilter <1.1>`） |
 | `-tx, --top_count <count>` | `-es` 每个事件名保留的 Top N 最长 occurrence，默认 5 |
 | `-dbc, --duration_bucket_count <count>` | `-es` 耗时分布直方图的分组数，默认 5 |
 | `-csv, --csv <path>` | 把报告写成 CSV 文件（UTF-8，RFC 4180）而不是文本报告：`-es` 时每行一个事件统计；**默认模式**时每行一帧（`FrameIndex, Begin_s, End_s, Duration_ms, ENCS_ms, FPS`，覆盖采样区间内全部帧并按时间排序）。不能与 `-o`/`-a` 同时使用 |
 | `-fs, --folded_stack <path>` | `-ef` 把火焰图写成 folded stacks 文件（`帧;帧 <微秒>`）而不是文本报告；不能与 `-o`/`-a` 同时使用，只能与 `-ef` 一起用 |
 | `-mvc, --max_view_count <count>` | `-ed` 最多保存多少个 stack tree，默认 10 |
-| `-mnc, --max_node_count <count>` | `-ed` 单棵 stack tree 最多打印多少个节点，超出不打印并以 `...` 标记，0 表示不限，默认 100 |
-| `-md, --max_depth <depth>` | `-ed` 单棵 stack tree 最多打印多少层，超出不打印并以 `...` 标记，0 表示不限，默认 8（根节点为第 1 层） |
+| `-mnc, --max_node_count <count>` | `-ed` 单棵报告树最多打印多少个节点，超出不打印并以 `...` 标记，0 表示不限，默认 100 |
+| `-md, --max_depth <depth>` | `-ed` 单棵报告树最多打印多少层，超出不打印并以 `...` 标记，0 表示不限，默认 8（根节点为第 1 层） |
 | `-mlc, --max_location_count <count>` | `-r` 最多报告多少个事件位置，默认 256 |
 | `-mrf, --max_record_frame <count>` | 默认模式记录的最长帧数量，默认 10 |
 | `-metc, --max_exclude_time_count <count>` | 每个 Top 列表保留的最长 Exclude Time 事件数量，默认 30 |
@@ -188,8 +189,8 @@ UEBabyPramInsightFilter -f .\Capture.utrace -ts ".*GameThread.*"
 - 上下文切换：若 trace 未采集 context switch 通道（没有任何 context switch 事件），默认模式 / `-es` / `-ed` 会在报告标题下打印 `No Context Switch event is recorded in the trace ...`，此时 `CS` 恒为 0、`ENCS` 等于 `E`（耗时是线程被调度的时间，不是真正占用 CPU 的时间）。
 - `-r`：文件路径是产生 utrace 的包体打包时的源文件路径，指向打包机器；需要用户自行转换为本地工作目录/源码树路径。
 - `-es`：`Count`、`Total D/Mean D/Median D/Std D`、`Total E/Mean E`；Top occurrence 行的 `D`（耗时）、`E`（Exclude Time）、`ENCS`（去除离核时间后的 Exclude Time）、`CS`（Context Switch Time）、`TR`（时间范围）、`TName`（线程名）；Call Context 以 box-drawing 打印父链与子树。加 `-csv <path>` 时改为写 CSV 文件，列顺序为 `QueryIndex, Event, Kind, EventIdCount, OccurrenceCount, TotalD_ms, MeanD_ms, MedianD_ms, StdD_ms, TotalE_ms, MeanE_ms, Query`（`Kind` 为 `Name` 或 `Regex`，耗时单位 ms、6 位小数），按查询与总耗时从大到小排序，UTF-8 无 BOM、字段符合 RFC 4180；CSV 只含事件汇总，Top occurrence／GameFrame／直方图仍只在文本报告里。
-- `-ed`：`View` 行的 `E` 为整棵 stack tree 总耗时；节点行的 `TR` 为时间范围、`D` 为耗时、`E` 为 Exclude Time、`CS` 为 Exclude Time 中线程不在 CPU 上的时间（为 0 时不打印）。打印的是**完整**调用树：查询的 `Time` 条件只决定保留哪些树，时间片外的事件照样打印；单棵树规模由 `-mnc`（节点数，默认 100）与 `-md`（层数，默认 8）限制，超出的节点不打印并以 `...` 标记，两个限制对每棵树分别生效（`0` 表示不限）。
-- `-ef`：`D` 为调用路径的 inclusive 耗时，`Percent` 为占全部匹配时间的百分比。时间片只决定聚合哪些树：与时间片相交的 stack tree 会**整棵**参与统计（树下所有事件都计入、时间不被裁剪），但报告只打印"至少有一个 occurrence 落在时间片内"的调用路径，完全在时间片外的调用路径不打印，其时间仍属于父节点的 inclusive 耗时。加 `-fs <path>` 时改为写 folded stacks 文件（每行 `帧1;帧2;...;帧N <微秒>`，权重为该路径的自身耗时，各行之和等于报告 `Total`；只导出报告会打印的路径，帧名里的 `;`/换行/制表符会被替换），可直接用 `flamegraph.pl result.folded > result.svg` 出图。
+- `-ed`：`View` 行的 `E` 为整棵 stack tree 总耗时；节点行的 `TR` 为时间范围、`D` 为耗时、`E` 为 Exclude Time、`CS` 为 Exclude Time 中线程不在 CPU 上的时间（为 0 时不打印）。报告内容由 query 决定：query 不含 `[^...^]`/`%[^...^]` 时打印**完整**调用树（`Time` 条件只决定保留哪些树，时间片外的事件照样打印）；query 含捕捉元素时，每次匹配输出一组，以 `Match <n>: <A -> B>` 开头，只打印被 `[^...^]`/`%[^...^]` 命中的节点（按调用顺序），并在最后一个被捕捉节点下打印它的整棵子树，被捕捉节点之上的补全链节点与祖先省略。单组规模由 `-mnc`（节点数，默认 100）与 `-md`（层数，默认 8）限制，超出的节点不打印并以 `...` 标记，两个限制对每组分别生效（`0` 表示不限）。
+- `-ef`：`D` 为调用路径的 inclusive 耗时，`Percent` 为占全部匹配时间的百分比。聚合范围由 query 决定：query 不含 `[^...^]`/`%[^...^]` 时整棵树参与聚合并打印全部调用路径；query 含捕捉元素时只聚合被捕捉节点与最后一个被捕捉节点的整棵子树（按调用顺序压缩未捕获的祖先），每次匹配都会并入图中。时间片只决定聚合哪些树，不裁剪事件时间，聚合出的所有调用路径都会打印。加 `-fs <path>` 时改为写 folded stacks 文件（每行 `帧1;帧2;...;帧N <微秒>`，权重为该路径的自身耗时，各行之和等于报告 `Total`；导出全部打印路径，帧名里的 `;`/换行/制表符会被替换），可直接用 `flamegraph.pl result.folded > result.svg` 出图。
 
 #### 构建 SKILL
 

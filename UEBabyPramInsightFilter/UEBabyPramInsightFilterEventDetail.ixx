@@ -27,6 +27,12 @@ export namespace UEBabyPram::InsightFilter
 	// condition and the time ranges of the query are matched as well, so a stack tree which the query
 	// does not count is not kept.
 	//
+	// The report of a kept stack tree depends on the query: a query which carries no element whose timing
+	// is collected ([^Regex^] or %[^Regex^]) only selects the trees, so the whole tree is reported. A query
+	// which captures reports every completion of the chain separately: the captured events are reported in
+	// the order of the call, the ancestors which the query did not capture are left out, and the whole
+	// subtree of the last captured event is reported under it.
+	//
 	// One kept stack tree is one copy (the Config::max_view_count longest ones are kept at most, a
 	// shorter stack tree is only kept while there is room for it, or when it is longer than the
 	// shortest of the kept ones, which is dropped for it). The events of the stack tree are copied into
@@ -46,11 +52,12 @@ export namespace UEBabyPram::InsightFilter
 			// How many of the longest stack trees are kept at most, every stack tree is one copy, and the shortest
 			// one is dropped for a longer one when the count is reached, 0 for none.
 			std::size_t max_view_count = 10;
-			// How many nodes of one saved stack tree are printed at most, the nodes over the count are not printed and
-			// their place is marked with '...', 0 for no limit.
+			// How many nodes of one reported tree are printed at most, the nodes over the count are not printed and
+			// their place is marked with '...', 0 for no limit. The limit is applied to every reported tree, so a
+			// query which captures several calls limits every one of them separately.
 			std::size_t max_node_count = 100;
-			// How many levels of one saved stack tree are printed at most, the nodes which are deeper than the count are
-			// not printed and their place is marked with '...', 0 for no limit. The root of a stack tree is level 1,
+			// How many levels of one reported tree are printed at most, the nodes which are deeper than the count are
+			// not printed and their place is marked with '...', 0 for no limit. The root of a reported tree is level 1,
 			// so the first count levels are printed, and the mark of a cut off subtree is printed once per node of the
 			// deepest printed level.
 			std::size_t max_depth = 8;
