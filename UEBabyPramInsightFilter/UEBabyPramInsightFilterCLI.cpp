@@ -13,6 +13,7 @@ import UEBabyPramInsightFilterEventStatistic;
 import UEBabyPramInsightFilterEventDetail;
 import UEBabyPramInsightFilterFlameGraph;
 import UEBabyPramInsightFilterThreadSearch;
+import UEBabyPramInsightFilterMemoryStatistic;
 import UEBabyPramInsightParser;
 import Potato;
 import std;
@@ -25,7 +26,7 @@ namespace UEBabyPram::InsightFilter
 	{
 		// The version of the tool, which -v --version reports. It is kept in the command line of this tool only, so the
 		// log filter carries its own version and a new version of one tool never rebuilds the other one.
-		constexpr std::string_view version = "1.1";
+		constexpr std::string_view version = "1.2";
 
 		void PrintGeneralHelp()
 		{
@@ -35,8 +36,9 @@ namespace UEBabyPram::InsightFilter
 			Log::Log<CommandLineLogCategory, Log::LogLevel::Display, LR"HELP(
 UEBabyPramInsightFilter, report the GameThread timing of an unreal insight .utrace file,
 search the events of the trace by a regular expression of the event name, report the
-timing statistic of every event whose name is matched by a regular expression, or search
-the threads of the trace by a regular expression of the thread name.
+timing statistic of every event whose name is matched by a regular expression, search
+the threads of the trace by a regular expression of the thread name, or report the
+memory tags, trackers and tag sets which the trace declares.
 
 Usage:
   UEBabyPramInsightFilter -f <path of the .utrace file> [options]
@@ -45,6 +47,7 @@ Usage:
   UEBabyPramInsightFilter -f <path of the .utrace file> -ed <query> [options]
   UEBabyPramInsightFilter -f <path of the .utrace file> -ef <query> [options]
   UEBabyPramInsightFilter -f <path of the .utrace file> -ts <regex> [options]
+  UEBabyPramInsightFilter -f <path of the .utrace file> -ms [options]
 
 Options:
   -f, --file <path>
@@ -85,7 +88,7 @@ Options:
       .*Tick.* or (^.*^), makes the whole analysis slow and its report large. Keep the expressions as
       specific as possible and prefer the fixed parts of the names; in a query the '%' element carries
       no expression at all, so it costs nothing when any event is acceptable.
-      -r, -es, -ed, -ef and -ts can not be used at the same time.
+      -r, -es, -ed, -ef, -ts and -ms can not be used at the same time.
 )HELP">();
 
 			Log::LogTo<Log::DefaultLogFormatter, LR"HELP(  -es, --event_stat <query>
@@ -164,7 +167,7 @@ Options:
       .*Tick.* or (^.*^), makes the whole analysis slow and its report large. Keep the expressions as
       specific as possible and prefer the fixed parts of the names; in a query the '%' element carries
       no expression at all, so it costs nothing when any event is acceptable.
-      -r, -es, -ed, -ef and -ts can not be used at the same time.
+      -r, -es, -ed, -ef, -ts and -ms can not be used at the same time.
 )HELP">(*Log::GetSTDOutPrinter());
 
 			Log::LogTo<Log::DefaultLogFormatter, LR"HELP(  -ed, --event_detail <query>
@@ -194,7 +197,7 @@ Options:
       .*Tick.* or (^.*^), makes the whole analysis slow and its report large. Keep the expressions as
       specific as possible and prefer the fixed parts of the names; in a query the '%' element carries
       no expression at all, so it costs nothing when any event is acceptable.
-      -r, -es, -ed, -ef and -ts can not be used at the same time.
+      -r, -es, -ed, -ef, -ts and -ms can not be used at the same time.
 
   -ef, --event_flame_graph <query>
       Query of the stack trees which should be aggregated into a flame graph, the grammar is the same
@@ -225,7 +228,7 @@ Options:
       .*Tick.* or (^.*^), makes the whole analysis slow and its report large. Keep the expressions as
       specific as possible and prefer the fixed parts of the names; in a query the '%' element carries
       no expression at all, so it costs nothing when any event is acceptable.
-      -r, -es, -ed, -ef and -ts can not be used at the same time.
+      -r, -es, -ed, -ef, -ts and -ms can not be used at the same time.
 
   -ts, --thread_search <regex>
       Regular expression of the thread name, in the re2 (RE2) syntax, the same syntax as -r.
@@ -233,7 +236,17 @@ Options:
       When it is set, every thread whose name is matched is reported with the thread id and
       the system thread id.
       An empty regex (ex: -ts "") matches every thread of the trace.
-      -r, -es, -ed, -ef and -ts can not be used at the same time.
+      -r, -es, -ed, -ef, -ts and -ms can not be used at the same time.
+)HELP">(*Log::GetSTDOutPrinter());
+
+			Log::LogTo<Log::DefaultLogFormatter, LR"HELP(  -ms, --memory_stat
+      Report the memory tags, trackers and tag sets which the trace declares. Every spec
+      is reported with its id and its name, and every tag is reported with the id and the
+      name of its parent tag and of its tag set, so the id which a memory sample carries is
+      resolved to a name. The trace has to carry the LLM channel (the memory tracing of
+      Unreal Insights); a trace which was captured without it declares no memory spec.
+      The tag snapshots are not collected yet, only the specs of the trace are reported.
+      -r, -es, -ed, -ef, -ts and -ms can not be used at the same time.
 )HELP">(*Log::GetSTDOutPrinter());
 
 			Log::LogTo<Log::DefaultLogFormatter, LR"HELP(  -mlc, --max_location_count <count>
@@ -257,7 +270,7 @@ Options:
         Kind is Name for a statistic of one event name and Regex for a merged element, and EventIdCount
         is the count of the event ids which the statistic of the row carries. The rows are ordered by the
         query and by the total duration of the statistic, the longest one first.
-      The default mode, i.e. when neither -r, -es, -ed, -ef nor -ts is given: every analyzed frame is one
+      The default mode, i.e. when neither -r, -es, -ed, -ef, -ts nor -ms is given: every analyzed frame is one
         row, ordered by the time, and the columns are FrameIndex, Begin_s, End_s, Duration_ms, ENCS_ms and
         FPS. The rows cover every analyzed frame, not only the longest ones which the text report carries,
         so the file is the whole timeline of the frames of the sampled range, and ENCS_ms is the time of
@@ -328,6 +341,7 @@ Options:
 		EventDetailParser::Config detail_config;
 		EventFlameGraphParser::Config flame_config;
 		ThreadSearchParser::Config thread_config;
+		MemoryStatisticParser::Config memory_config;
 		bool search_event = false;
 		bool statistic_event = false;
 		// The CSV file is the format of two reports: the statistics of -es and the frames of the default mode. It names
@@ -339,6 +353,7 @@ Options:
 		bool detail_event = false;
 		bool flame_event = false;
 		bool search_thread = false;
+		bool statistic_memory = false;
 		// Whether the report file is named by -o or by -a, the two can not be given at the same time.
 		bool output_given = false;
 		bool append_given = false;
@@ -585,6 +600,12 @@ Options:
 					return -1;
 				}
 			}
+			else if (argv_string == "-ms" || argv_string == "--memory_stat")
+			{
+				// The memory report has no argument of its own: the parser reports every memory spec which
+				// the trace declares, so the option only selects the mode.
+				statistic_memory = true;
+			}
 			else if (argv_string == "-tx" || argv_string == "--top_count")
 			{
 				if (i + 1 < argc)
@@ -813,7 +834,7 @@ Options:
 				statistic_config.csv_path = std::move(*csv_path);
 				csv_path.reset();
 			}
-			else if (!search_event && !detail_event && !flame_event && !search_thread)
+			else if (!search_event && !detail_event && !flame_event && !search_thread && !statistic_memory)
 			{
 				config.csv_path = std::move(*csv_path);
 				csv_path.reset();
@@ -869,6 +890,12 @@ Options:
 			return -1;
 		}
 
+		if (statistic_memory && (search_event || statistic_event || detail_event || flame_event || search_thread))
+		{
+			Log::Log<CommandLineLogCategory, Log::LogLevel::Error, L"-ms --memory_stat can not be used with -r --regex, -es --event_stat, -ed --event_detail, -ef --event_flame_graph or -ts --thread_search, use -h for detailed help">();
+			return -1;
+		}
+
 		if (search_thread)
 		{
 			setting.parser = std::make_unique<ThreadSearchParser>(std::move(thread_config));
@@ -880,6 +907,10 @@ Options:
 		else if (detail_event)
 		{
 			setting.parser = std::make_unique<EventDetailParser>(std::move(detail_config));
+		}
+		else if (statistic_memory)
+		{
+			setting.parser = std::make_unique<MemoryStatisticParser>(std::move(memory_config));
 		}
 		else if (statistic_event)
 		{

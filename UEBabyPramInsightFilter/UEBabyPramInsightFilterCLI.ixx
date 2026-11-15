@@ -29,9 +29,9 @@ export namespace UEBabyPram::InsightFilter
 	};
 
 	// Analyze the command line and fill the setting,
-	// the parser is built with the GameThreadParser::Config, or with the EventSearchParser::Config
-	// when an event name regex is given by -r --regex, which is collected from the command line,
-	// and it is stored in the setting.
+	// the parser is built with the Config of the mode which the command line selects: the GameThreadParser
+	// when no mode is given, the EventSearchParser with -r --regex, or the parser of -es, -ed, -ef, -ts and
+	// -ms, and it is stored in the setting.
 	// Return 0 when the program should keep going,
 	// return a positive value when the command line has been fully handled and the program should exit with success,
 	// return a negative value when the command line is invalid and the program should exit with that code.

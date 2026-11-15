@@ -33,26 +33,30 @@ export namespace UEBabyPram::InsightParser
 		bool operator==(ThreadSystemID const&) const = default;
 	};
 
+	// The id of a memory tag, 0 is the invalid id and also the parent id of a tag which has no parent,
+	// which is what the memory model of the trace services uses.
 	struct MemoryTagId
 	{
-		int64 id = std::numeric_limits<int64>::max();
-		operator bool() const { return id != std::numeric_limits<int64>::max(); }
+		int64 id = 0;
+		operator bool() const { return id != 0; }
 		std::strong_ordering operator<=>(MemoryTagId const&) const = default;
 		bool operator==(MemoryTagId const&) const = default;
 	};
 
+	// The id of a memory tracker, -1 is the invalid id.
 	struct MemoryTrackerId
 	{
-		int32 id = std::numeric_limits<int32>::max();
-		operator bool() const { return id != std::numeric_limits<int32>::max(); }
+		int32 id = -1;
+		operator bool() const { return id != -1; }
 		std::strong_ordering operator<=>(MemoryTrackerId const&) const = default;
 		bool operator==(MemoryTrackerId const&) const = default;
 	};
 
+	// The id of a memory tag set, -1 is the invalid id.
 	struct MemoryTagSetId
 	{
-		int32 id = std::numeric_limits<int32>::max();
-		operator bool() const { return id != std::numeric_limits<int32>::max(); }
+		int32 id = -1;
+		operator bool() const { return id != -1; }
 		std::strong_ordering operator<=>(MemoryTagSetId const&) const = default;
 		bool operator==(MemoryTagSetId const&) const = default;
 	};

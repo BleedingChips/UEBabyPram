@@ -1,6 +1,6 @@
 ---
 name: uebabypram-insight-filter
-description: 分析 Unreal Engine .utrace（Unreal Insights）文件中的 CPU 事件、调用堆栈与耗时。支持事件位置搜索、事件耗时统计、保存指定调用堆栈、生成火焰图以及线程搜索。仅在用户需要分析 UE .utrace 文件时使用。
+description: 分析 Unreal Engine .utrace（Unreal Insights）文件中的 CPU 事件、调用堆栈、耗时与内存 spec。支持事件位置搜索、事件耗时统计、保存指定调用堆栈、生成火焰图、线程搜索以及内存 tag/tracker/tag set 统计。仅在用户需要分析 UE .utrace 文件时使用。
 ---
 
 # UEBabyPramInsightFilter 分析工具
@@ -12,7 +12,8 @@ UEBabyPramInsightFilter 是一个用于分析 Unreal Engine（UE4/UE5）`.utrace
 - 事件耗时统计（`-es`），含 Top N 最长 occurrence，可用 `-csv <path>` 直接导出 CSV 文件；
 - 保存并打印指定调用堆栈（`-ed`）：query 不含捕捉元素时打印**完整**调用树（含时间片外的事件）；含捕捉元素时每次匹配只打印被捕捉节点，并附带最后一个被捕捉节点的整棵子树。含每个事件的耗时与 Exclude Time，并按节点数/层数上限截断；
 - 生成火焰图（`-ef`），聚合匹配的调用路径（query 含捕捉元素时只聚合被捕捉节点与最后一个被捕捉节点的子树），可用 `-fs <path>` 直接导出 folded stacks 文件；
-- 线程搜索（`-ts`）。
+- 线程搜索（`-ts`）；
+- 内存统计（`-ms`）：报告 trace 声明的 memory tag、tracker 与 tag set 的 id 与名字。
 
 ## 工具路径
 
@@ -38,8 +39,9 @@ UEBabyPramInsightFilter 是一个用于分析 Unreal Engine（UE4/UE5）`.utrace
 | 调用堆栈 | `-ed, --event_detail <query>` | 保存匹配的 stack tree 并打印详细堆栈 |
 | 火焰图 | `-ef, --event_flame_graph <query>` | 聚合匹配的调用路径为火焰图 |
 | 线程搜索 | `-ts, --thread_search <regex>` | 按线程名正则搜索线程 |
+| 内存统计 | `-ms, --memory_stat` | 报告 trace 声明的 memory tag、tracker 与 tag set |
 
-`-r`、`-es`、`-ed`、`-ef`、`-ts` **不能同时使用**。
+`-r`、`-es`、`-ed`、`-ef`、`-ts`、`-ms` **不能同时使用**。
 
 ---
 
@@ -51,7 +53,7 @@ UEBabyPramInsightFilter 是一个用于分析 Unreal Engine（UE4/UE5）`.utrace
 | `-o, --output <path>` | 报告写入的文件（存在则清空重建），不给则写标准输出 |
 | `-a, --append <path>` | 报告**追加**到该文件末尾（不存在则创建、原有内容保留，仅支持纯文本）；不能与 `-o` 同时使用 |
 | `-h, --help` | 打印帮助 |
-| `-v, --version` | 输出工具的版本并退出，输出形如 `UEBabyPramInsightFilter <1.1>` |
+| `-v, --version` | 输出工具的版本并退出，输出形如 `UEBabyPramInsightFilter <1.2>` |
 | `-mlc, --max_location_count <count>` | `-r` 最多报告多少个事件位置，0 表示不限，默认 256 |
 | `-tx, --top_count <count>` | `-es` 每个事件名保留的 Top N 最长 occurrence，默认 5 |
 | `-dbc, --duration_bucket_count <count>` | `-es` 耗时分布直方图的分组数，默认 5 |
@@ -188,7 +190,7 @@ EventStatisticParser Output:
 
 #### 默认模式导出帧 CSV（`-csv <path>`）
 
-在默认模式（不给 `-r`/`-es`/`-ed`/`-ef`/`-ts`）下给 `-csv <path>`，同样**不打印文本报告**，而是把**每一帧**写成一行：
+在默认模式（不给 `-r`/`-es`/`-ed`/`-ef`/`-ts`/`-ms`）下给 `-csv <path>`，同样**不打印文本报告**，而是把**每一帧**写成一行：
 
 ```powershell
 & ".\scripts\UEBabyPramInsightFilter.exe" -f "Capture.utrace" -csv "frames.csv"
@@ -305,6 +307,29 @@ FEngineLoop::Tick;Frame;Tick_Engine 4364
 
 报告匹配线程的线程 id 与 system thread id；空正则 `-ts ""` 匹配所有线程。
 
+### -ms 内存统计
+
+报告 trace 的 LLM（memory tracing）通道声明的内存 spec，输出形如：
+
+```text
+MemoryStatisticParser Output:
+    (Memory Tag: ...; Memory Tracker: ...; Memory Tag Set: ...)
+    (FullName: ...; Name: ...; Parent: ...; Tag Set: ...)
+    Memory Tag <265>, Memory Tracker <2>, Memory Tag Set <1>
+    Tag Set <0>: <System>
+    Tracker <1>: <Default>
+    Tracker <0>: <Platform>
+    Tag <1513393553920>: <Total>, Name:<Total>, Parent:<None>, Tag Set:<0:System>
+    Tag <1513391326976>: <Animation/IKRig>, Name:<IKRig>, Parent:<1513393688064:Animation>, Tag Set:<0:System>
+```
+
+- 每个 tag / tracker / tag set 都按 **id 与名字** 成对保存并报告，因此 memory 采样里带的 id 可以解析成名字；
+- tag 同时报告 **FullName** 与 **Name**：FullName 是 trace 声明的完整名字；无父节点时 Name 与 FullName 相同，有父节点时 Name 是 FullName 中最后一个 `/` 之后的段（例如 `Animation/IKRig` 的 Name 是 `IKRig`）。Name 是 FullName 的视图，不额外存储；
+- tag 还报告父 tag 与所属 tag set 的 **id 与名字**（无父节点/无 tag set 显示为 `None`，trace 未声明的非零 id 显示为 `Unknown`）；
+- 输出按 trace 中 spec 的声明顺序排列，同一份 trace 的结果稳定；同名 tag 可能有多个不同 id（例如按 tracker 区分的 `Total`），它们会分别报告，不会合并；
+- 当前只报告 spec：`OnMemoryTagSnap` 预留为空，采样值尚未统计；
+- trace 未采集 memory 通道时输出 `No memory spec is recorded in the trace.`。
+
 ---
 
 ## 典型示例
@@ -370,11 +395,17 @@ flamegraph.pl result.folded > result.svg
 & ".\scripts\UEBabyPramInsightFilter.exe" -f "Capture.utrace" -ts ".*GameThread.*"
 ```
 
+### 11. 报告内存 spec
+
+```powershell
+& ".\scripts\UEBabyPramInsightFilter.exe" -f "Capture.utrace" -ms
+```
+
 ---
 
 ## 注意事项
 
-1. `-r`、`-es`、`-ed`、`-ef`、`-ts` 互斥，只能选一个。
+1. `-r`、`-es`、`-ed`、`-ef`、`-ts`、`-ms` 互斥，只能选一个。
 2. 事件名与线程名正则必须匹配完整名称。
 3. `-es` 中只有 `[^...^]`/`%[^...^]` 元素会被统计，`(^...^)` 与 `%` 仅补全调用链；`%[^...^]` 会把该元素命中的所有事件合并为一个统计口径。
 4. `-es` 的 `Time` 条件按被统计事件**占用的时间范围**与查询时间范围是否相交过滤（只贴边不算相交），不影响补全调用链的事件。
