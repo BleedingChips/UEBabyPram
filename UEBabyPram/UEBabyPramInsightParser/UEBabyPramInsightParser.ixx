@@ -33,6 +33,30 @@ export namespace UEBabyPram::InsightParser
 		bool operator==(ThreadSystemID const&) const = default;
 	};
 
+	struct MemoryTagId
+	{
+		int64 id = std::numeric_limits<int64>::max();
+		operator bool() const { return id != std::numeric_limits<int64>::max(); }
+		std::strong_ordering operator<=>(MemoryTagId const&) const = default;
+		bool operator==(MemoryTagId const&) const = default;
+	};
+
+	struct MemoryTrackerId
+	{
+		int32 id = std::numeric_limits<int32>::max();
+		operator bool() const { return id != std::numeric_limits<int32>::max(); }
+		std::strong_ordering operator<=>(MemoryTrackerId const&) const = default;
+		bool operator==(MemoryTrackerId const&) const = default;
+	};
+
+	struct MemoryTagSetId
+	{
+		int32 id = std::numeric_limits<int32>::max();
+		operator bool() const { return id != std::numeric_limits<int32>::max(); }
+		std::strong_ordering operator<=>(MemoryTagSetId const&) const = default;
+		bool operator==(MemoryTagSetId const&) const = default;
+	};
+
 	using DurationSec = std::chrono::duration<double, std::ratio<1, 1>>;
 
 	// A time point (or duration) which is displayed as "<minutes>m<seconds>s",
@@ -624,9 +648,20 @@ export namespace UEBabyPram::InsightParser
 		~ParserThreadTimeLine();
 	};
 
+	struct MemoryTagSnapView
+	{
+		MemoryTrackerId tracker_id;
+		DurationSec time;
+		std::variant<
+			std::span<int64 const>,
+			std::span<uint32 const>
+		> tag_span;
+		std::span<int64 const> values;
+	};
+
 	struct ParserInterface : private BaseParser
 	{
-		virtual bool IsParserRequired(ParserRequireFlag flag) const override { return true; }
+		virtual bool IsParserRequired(ParserRequireFlag flag) const override { return false; }
 		virtual void ContextSwitchEvent(ThreadSystemID thread_id, std::size_t core_name, Potato::Misc::IndexSpan<DurationSec> duration) {}
 		virtual void OnThreadDiscovered(ThreadID thread_id, ThreadSystemID thread_system_id, std::string_view thread_name) {}
 		virtual void OnCPUStackTree(ThreadCPUEventView event_scope) {}
@@ -643,6 +678,10 @@ export namespace UEBabyPram::InsightParser
 		virtual	void AllAnalyzeDone() override;
 		virtual bool IsThreadRequired(ThreadID thread_id) const { return true; }
 		virtual bool IsThreadRequired(ThreadSystemID thread_system_id) const { return true; }
+		virtual void OnMemoryTagSpecId(MemoryTagId tag_id, MemoryTagId parent_id, MemoryTagSetId tag_set_id, std::u8string_view tag_name) {}
+		virtual void OnMemoryTrackerSpec(MemoryTrackerId tracker_id, std::u8string_view tracker_name) {}
+		virtual void OnMemoryTagSetSpec(MemoryTagSetId tag_set_id, std::u8string_view tag_set_name) {}
+		virtual void OnMemoryTagSnap(MemoryTagSnapView snap_view) {}
 		static std::wstring_view CoverStringView(wchar_t const* ScopeName, std::size_t ScopeNameLen);
 
 		struct CPUEventInfo
@@ -694,6 +733,38 @@ export namespace UEBabyPram::InsightParser
 		}
 
 		virtual void OnThreadDiscovered(uint32 thread_id, uint32 thread_system_id, char const* thread_name, std::size_t thread_name_len) override;
+		virtual void OnMemoryTagsSpecId(int64 tag_id, int64 parent_id, int32 tag_set_id, char const* name, std::size_t name_count) override
+		{
+			return OnMemoryTagSpecId(MemoryTagId{ tag_id }, MemoryTagId{ parent_id }, MemoryTagSetId{tag_set_id}, std::u8string_view{ reinterpret_cast<char8_t const*>(name), name_count });
+		}
+		virtual void OnMemoryTrackerSpec(int32 tracker_id, char const* name, std::size_t name_count) override 
+		{
+			return OnMemoryTrackerSpec(MemoryTrackerId{tracker_id}, std::u8string_view{ reinterpret_cast<char8_t const*>(name), name_count });
+		};
+		virtual void OnMemoryTagSetSpec(int32 tag_set_id, char const* name, std::size_t name_count) override 
+		{
+			return OnMemoryTagSetSpec(MemoryTagSetId{tag_set_id}, std::u8string_view{ reinterpret_cast<char8_t const*>(name), name_count });
+		};
+		virtual void OnMemoryTagSnap(int32 tracker_id, double time, int64 const* tags, std::size_t tag_count, int64 const* sampled_value, std::size_t sampled_value_count)
+		{
+			MemoryTagSnapView view{
+				MemoryTrackerId{tracker_id},
+				DurationSec{time},
+				std::span<std::int64_t const>{tags, tag_count},
+				std::span<int64 const>{sampled_value, sampled_value_count}
+			};
+			return OnMemoryTagSnap(view);
+		};
+		virtual void OnMemoryTagSnap(int32 tracker_id, double time, uint32 const* tags, std::size_t tag_count, int64 const* sampled_value, std::size_t sampled_value_count)
+		{
+			MemoryTagSnapView view{
+				MemoryTrackerId{tracker_id},
+				DurationSec{time},
+				std::span<std::uint32_t const>{tags, tag_count},
+				std::span<int64 const>{sampled_value, sampled_value_count}
+			};
+			return OnMemoryTagSnap(view);
+		};
 		
 		struct TimeLineTuple
 		{

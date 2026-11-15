@@ -28,7 +28,8 @@ namespace UEBabyPram::InsightParser
 		CPU_EVENT = 1 << 1,
 		EVENT_SPEC = 1 << 2,
 		CONTEXT_SWITCH = 1 << 3,
-		META_DATA,
+		META_DATA = 1 << 4,
+		MEMORY = 1 << 5
 	};
 
 	struct BaseParser
@@ -44,6 +45,11 @@ namespace UEBabyPram::InsightParser
 		virtual void OnCPUScopeEventDiscovered(uint32 space_id, char const* event_name, std::size_t event_name_len) { }
 		virtual void OverrideCPUEventLocation(uint32 event_id, wchar_t const* file_name, std::size_t file_name_len) {}
 		virtual void OverrideCPUEventName(uint32 event_id, wchar_t const* event_name, std::size_t event_name_len) {}
+		virtual void OnMemoryTagsSpecId(int64 tag_id, int64 parent_id, int32 tag_set_id, char const* name, std::size_t name_count) {};
+		virtual void OnMemoryTrackerSpec(int32 tracker_id, char const* name, std::size_t name_count) {};
+		virtual void OnMemoryTagSetSpec(int32 tag_set_id, char const* name, std::size_t name_count) {};
+		virtual void OnMemoryTagSnap(int32 tracker_id, double time, int64 const* tags, std::size_t tag_count, int64 const* sampled_value, std::size_t sampled_value_count) {}
+		virtual void OnMemoryTagSnap(int32 tracker_id, double time, uint32 const* tags, std::size_t tag_count, int64 const* sampled_value, std::size_t sampled_value_count) {}
 		virtual ThreadTimeLineInterface* GetThreadTimeLine(uint32 thread_id) = 0;
 		//virtual void AddThread(uint32 thread_id, uint32 thread_system_id, char const* thread_name) = 0;
 		virtual uint32 AddMetaData(uint32 SpecId, uint32 MetaDataId, MetaDataFormat format, uint8 const* meta_data, std::size_t meta_data_len, uint32 thread_id) { return 0; }

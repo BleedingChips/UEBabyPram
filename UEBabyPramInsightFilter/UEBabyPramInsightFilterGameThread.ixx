@@ -44,7 +44,7 @@ export namespace UEBabyPram::InsightFilter
 		virtual bool IsThreadRequired(ThreadID thread_id) const override;
 		// The thread is only required when it is the game thread, which is the thread which the frames are recorded on.
 		virtual bool IsThreadRequired(ThreadSystemID thread_system_id) const override;
-		virtual bool IsParserRequired(ParserRequireFlag flag) const override { return true; }
+		virtual bool IsParserRequired(ParserRequireFlag flag) const override;
 		virtual void AllAnalyzeDone() override;
 		bool PrintToLog(Potato::Log::LogPrinter& printer) override;
 		GameThreadParser(Config config = {});

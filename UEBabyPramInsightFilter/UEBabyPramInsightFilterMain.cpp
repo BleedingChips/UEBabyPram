@@ -63,8 +63,9 @@ namespace
 
 	// The printer which writes every message of the parsers into the report file, so the report of a parser is
 	// stored in the file which -o or -a names instead of the standard output. The message is a wide string, so its
-	// characters are decoded into a fixed buffer as they are written, and the buffer is flushed to the file
-	// whenever it is full, so a long message does not need a copy of its whole UTF-8 text.
+	// characters are decoded into a fixed 512 byte buffer, the buffer is flushed to the file, and the rest of the
+	// message is decoded into the buffer again, until the whole message is written. A long message therefore
+	// never needs a copy of its whole UTF-8 text.
 	struct DocumentLogPrinter : public Potato::Log::LogPrinter
 	{
 		DocumentLogPrinter(Potato::Document::DocumentWriter& writer)
@@ -72,8 +73,7 @@ namespace
 
 		virtual void Print(Potato::Log::FormatedSystemTime time, Potato::Log::LogLevel level, std::pmr::wstring const& message) override
 		{
-			std::array<char8_t, 1024> encoded_message;
-			std::size_t encoded_size = 0;
+			std::array<char8_t, 512> encoded_message;
 
 			auto flush = [&](std::size_t size)
 			{
@@ -86,22 +86,30 @@ namespace
 				}
 			};
 
-			// The iterator keeps a reference to this callable, so the callable has to outlive the encoding.
-			auto append_character = [&](char8_t character)
+			// Encode into the fixed buffer, flush it, and go on with the rest of the message, until every
+			// character of the message is consumed.
+			if (!message.empty())
 			{
-				encoded_message[encoded_size] = character;
-				++encoded_size;
-				if (encoded_size == encoded_message.size())
+				std::span<wchar_t const> remaining_message{ message.data(), message.size() };
+				while (!remaining_message.empty())
 				{
-					flush(encoded_size);
-					encoded_size = 0;
+					auto encode_info = Potato::Encode::UnicodeEncoder<wchar_t, char8_t>::EncodeTo(
+						remaining_message,
+						std::span<char8_t>{ encoded_message }
+					);
+
+					flush(encode_info.target_space);
+
+					// The rest of the message can not be encoded (ex: it carries an invalid character), so the
+					// loop stops instead of spinning on the same character.
+					if (encode_info.source_space == 0)
+					{
+						break;
+					}
+
+					remaining_message = remaining_message.subspan(encode_info.source_space);
 				}
-			};
-
-			auto output_iterator = Potato::Misc::FunctionOutputIterator<char8_t>{ append_character };
-
-			Potato::Encode::UnicodeEncoder<wchar_t, char8_t>::EncodeTo(message, output_iterator);
-			flush(encoded_size);
+			}
 		}
 
 		// The printer is owned by the caller of PrintToLog(), so the reference count of it is never used.

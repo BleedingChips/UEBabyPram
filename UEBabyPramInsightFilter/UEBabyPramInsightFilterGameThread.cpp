@@ -36,6 +36,14 @@ namespace UEBabyPram::InsightFilter
 		}
 	}
 
+	bool GameThreadParser::IsParserRequired(ParserRequireFlag flag) const
+	{
+		return flag == ParserRequireFlag::CPU_EVENT
+			|| flag == ParserRequireFlag::EVENT_SPEC
+			|| flag == ParserRequireFlag::CONTEXT_SWITCH
+			|| flag == ParserRequireFlag::META_DATA;
+	}
+
 	void GameThreadParser::OnCPUEventDiscovered(EventID id, std::wstring_view event_name, std::wstring_view file_name, std::size_t file_line)
 	{
 		if (event_name == L"FEngineLoop::Tick")
