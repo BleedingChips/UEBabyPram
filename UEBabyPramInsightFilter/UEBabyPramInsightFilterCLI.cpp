@@ -14,6 +14,8 @@ import UEBabyPramInsightFilterEventDetail;
 import UEBabyPramInsightFilterFlameGraph;
 import UEBabyPramInsightFilterThreadSearch;
 import UEBabyPramInsightFilterMemoryStatistic;
+import UEBabyPramInsightFilterMemoryTagSearch;
+import UEBabyPramInsightFilterMemoryValue;
 import UEBabyPramInsightParser;
 import Potato;
 import std;
@@ -37,8 +39,9 @@ namespace UEBabyPram::InsightFilter
 UEBabyPramInsightFilter, report the GameThread timing of an unreal insight .utrace file,
 search the events of the trace by a regular expression of the event name, report the
 timing statistic of every event whose name is matched by a regular expression, search
-the threads of the trace by a regular expression of the thread name, or report the
-memory tags, trackers and tag sets which the trace declares.
+the threads of the trace by a regular expression of the thread name, report the value
+statistic or the time line of the memory tags which a query selects, or search the memory
+tags, the memory trackers and the memory tag sets which the trace declares.
 
 Usage:
   UEBabyPramInsightFilter -f <path of the .utrace file> [options]
@@ -47,7 +50,9 @@ Usage:
   UEBabyPramInsightFilter -f <path of the .utrace file> -ed <query> [options]
   UEBabyPramInsightFilter -f <path of the .utrace file> -ef <query> [options]
   UEBabyPramInsightFilter -f <path of the .utrace file> -ts <regex> [options]
-  UEBabyPramInsightFilter -f <path of the .utrace file> -ms [options]
+  UEBabyPramInsightFilter -f <path of the .utrace file> -ms <query> [options]
+  UEBabyPramInsightFilter -f <path of the .utrace file> -mv <query> [options]
+  UEBabyPramInsightFilter -f <path of the .utrace file> -mt <regex> [options]
 
 Options:
   -f, --file <path>
@@ -239,14 +244,54 @@ Options:
       -r, -es, -ed, -ef, -ts and -ms can not be used at the same time.
 )HELP">(*Log::GetSTDOutPrinter());
 
-			Log::LogTo<Log::DefaultLogFormatter, LR"HELP(  -ms, --memory_stat
-      Report the memory tags, trackers and tag sets which the trace declares. Every spec
-      is reported with its id and its name, and every tag is reported with the id and the
-      name of its parent tag and of its tag set, so the id which a memory sample carries is
-      resolved to a name. The trace has to carry the LLM channel (the memory tracing of
-      Unreal Insights); a trace which was captured without it declares no memory spec.
-      The tag snapshots are not collected yet, only the specs of the trace are reported.
-      -r, -es, -ed, -ef, -ts and -ms can not be used at the same time.
+			Log::LogTo<Log::DefaultLogFormatter, LR"HELP(  -ms, --memory_stat <query>
+      Collect the memory tag snapshots which the query selects and report the value statistics of
+      every memory tag per tracker: the first snapshot which carries the tag and its value, the last
+      one and its value, the snapshot of the largest value, the snapshot of the smallest value, and
+      the mean of the values of every snapshot which carries the tag. Every value is written with its
+      unit, which is B, KB, MB or GB, with 2 decimals. The order of the rows is the order of the data,
+      use -msr to order them by the mean or by the largest value.
+      The query is the query of -es/-ed/-ef, and it reads the memory data as follows:
+        Thread=(^Regex^)  matches the name of the memory tracker which produces the snapshots, and a
+                          query which carries no Thread condition selects every tracker;
+        (^A^)->(^B^)      the chain is matched against the parent chain of the memory tag: the
+                          segments of the name are matched from the root, and the tags which are
+                          selected are the tag of the last element of the chain and every tag below
+                          it, ex: A/B, A/B/C and A/B/C/D for the chain (^A^)->(^B^). The element
+                          which matches any event, %, matches any segment;
+        Time=[a,b]        selects the snapshots whose time point is inside a slice or on the
+                          boundary of one;
+        ITime=[a,b]       selects the snapshots whose time point is strictly inside a slice, so a
+                          slice may select no snapshot at all.
+      The statistics are written into a CSV file instead of the text report by -csv <path>.
+      The trace has to carry the LLM channel (the memory tracing of Unreal Insights); a trace which
+      was captured without it declares no memory spec and carries no snapshot.
+      -r, -es, -ed, -ef, -ts, -ms, -mv and -mt can not be used at the same time.
+)HELP">(*Log::GetSTDOutPrinter());
+
+			Log::LogTo<Log::DefaultLogFormatter, LR"HELP(  -mv, --memory_value <query>
+      Collect the memory tag snapshots which the query selects and report the time line of every memory
+      tag per tracker: the time and the value of every snapshot which carries the tag, in the order of
+      the time. The query is read the same way as the query of -ms, see it for the conditions.
+      A tag may be sampled thousands of times, so only -mvn samples of it are printed by default: the
+      samples are picked by an even time interval from the first sample of the tag to its last one, and
+      the sample which is nearest to every point of the interval is the one which is printed, so the
+      printed time line keeps the shape of the values. The report tells how many samples of how many
+      are printed, and it warns when the count is large. The time lines are written into a CSV file
+      instead of the text report by -csv <path>.
+      -r, -es, -ed, -ef, -ts, -ms, -mv and -mt can not be used at the same time.
+)HELP">(*Log::GetSTDOutPrinter());
+
+			Log::LogTo<Log::DefaultLogFormatter, LR"HELP(  -mt, --memory_tag <regex>
+      Search the memory tags, the memory trackers and the memory tag sets which the trace declares by
+      the regular expression of their name, and report every spec whose name is matched with its id,
+      its full name and its name, and every tag with the id and the name of its parent tag and of its
+      tag set. The whole name has to be matched, and the regex .* matches every spec, which is the way
+      to dump the whole memory tag tree of a trace (an empty regex matches every spec as well, but a
+      shell may drop an empty argument before it reaches the tool).
+      Only the specs of the memory channel are read, so the events of the snapshots are skipped instead
+      of being decoded, while the trace file itself is still read end to end.
+      -r, -es, -ed, -ef, -ts, -ms, -mv and -mt can not be used at the same time.
 )HELP">(*Log::GetSTDOutPrinter());
 
 			Log::LogTo<Log::DefaultLogFormatter, LR"HELP(  -mlc, --max_location_count <count>
@@ -261,20 +306,40 @@ Options:
       top count (-tx), and the range from the shortest duration of the single occurrence to the longest
       one is split into this count of buckets.
 
+  -mvn, --max_value_count <count>
+      How many samples of one memory tag should be printed with -mv, default is 100, and 0 prints every
+      sample. The samples are picked by an even time interval from the first sample of the tag to its
+      last one, and the sample which is nearest to every point of the interval is the one which is
+      printed. A tag which the trace samples a thousand times is printed with 100 of its samples, and
+      the report warns when the count of all of the printed samples is large.
+
+  -msr, --memory_sort <name|mean|max>
+      The order of the rows of -ms: name is the order of the data, the query, the tracker and the tag,
+      which is the default; mean puts the largest mean value first, and max puts the largest value
+      which a tag was sampled with first. The order by name decides between two rows of the same value,
+      so the report of the same trace is always the same.
+
   -csv, --csv <path>
       Write the report into <path> as a CSV file instead of printing it, the file is created and its
       previous content is emptied. The content is UTF-8 without a BOM and the fields follow RFC 4180, so
-      a field which carries ',', '"' or a line break is quoted. The option is accepted by two modes:
+      a field which carries ',', '"' or a line break is quoted. The option is accepted by four modes:
       -es: every statistic is one row, the columns are QueryIndex, Event, Kind, EventIdCount,
         OccurrenceCount, TotalD_ms, MeanD_ms, MedianD_ms, StdD_ms, TotalE_ms, MeanE_ms and Query, where
         Kind is Name for a statistic of one event name and Regex for a merged element, and EventIdCount
         is the count of the event ids which the statistic of the row carries. The rows are ordered by the
         query and by the total duration of the statistic, the longest one first.
-      The default mode, i.e. when neither -r, -es, -ed, -ef, -ts nor -ms is given: every analyzed frame is one
-        row, ordered by the time, and the columns are FrameIndex, Begin_s, End_s, Duration_ms, ENCS_ms and
-        FPS. The rows cover every analyzed frame, not only the longest ones which the text report carries,
-        so the file is the whole timeline of the frames of the sampled range, and ENCS_ms is the time of
-        the frame without the time which the thread spent out of the CPU in it.
+      -ms: every memory tag statistic is one row, in the order which -msr asks for, and the columns are
+        QueryIndex, Tracker, MemoryTag, Count, FirstTime_s, FirstValue_B, LastTime_s, LastValue_B,
+        MaxTime_s, MaxValue_B, MinTime_s, MinValue_B and Mean_B. The values are bytes without a unit, so
+        the file is computable and the unit is the name of the column.
+      -mv: every printed sample of a memory tag is one row, and the columns are QueryIndex, Tracker,
+        MemoryTag, SampleIndex, Time_s and Value_B, with the value in bytes like the columns of -ms.
+      The default mode, i.e. when neither -r, -es, -ed, -ef, -ts, -ms, -mv nor -mt is given: every
+        analyzed frame is one row, ordered by the time, and the columns are FrameIndex, Begin_s, End_s,
+        Duration_ms, ENCS_ms and FPS. The rows cover every analyzed frame, not only the longest ones
+        which the text report carries, so the file is the whole timeline of the frames of the sampled
+        range, and ENCS_ms is the time of the frame without the time which the thread spent out of the
+        CPU in it.
       -csv can not be used with -o or -a at the same time.
 
   -fs, --folded_stack <path>
@@ -342,6 +407,8 @@ Options:
 		EventFlameGraphParser::Config flame_config;
 		ThreadSearchParser::Config thread_config;
 		MemoryStatisticParser::Config memory_config;
+		MemoryValueParser::Config memory_value_config;
+		MemoryTagSearchParser::Config memory_tag_search_config;
 		bool search_event = false;
 		bool statistic_event = false;
 		// The CSV file is the format of two reports: the statistics of -es and the frames of the default mode. It names
@@ -354,6 +421,8 @@ Options:
 		bool flame_event = false;
 		bool search_thread = false;
 		bool statistic_memory = false;
+		bool statistic_memory_value = false;
+		bool search_memory_tag = false;
 		// Whether the report file is named by -o or by -a, the two can not be given at the same time.
 		bool output_given = false;
 		bool append_given = false;
@@ -602,9 +671,140 @@ Options:
 			}
 			else if (argv_string == "-ms" || argv_string == "--memory_stat")
 			{
-				// The memory report has no argument of its own: the parser reports every memory spec which
-				// the trace declares, so the option only selects the mode.
-				statistic_memory = true;
+				if (i + 1 < argc)
+				{
+					// The query is built from the argument, and the error of an unacceptable query is reported here, so the
+					// parser only receives the queries which are ready to be analyzed.
+					std::u8string query_text;
+					Encode::STDInputEncoder<char8_t>::EncodeTo(argv[i + 1], std::back_insert_iterator{ query_text });
+					auto query_result = ParseEventQuery(query_text);
+					if (auto error = std::get_if<std::u8string>(&query_result); error != nullptr)
+					{
+						std::wstring message;
+						Encode::UnicodeEncoder<char8_t, wchar_t>::EncodeTo(*error, std::back_inserter(message));
+						Log::Log<CommandLineLogCategory, Log::LogLevel::Error, L"-ms --memory_stat <query> : <{}>, use -h for detailed help">(
+							message
+						);
+						return -1;
+					}
+
+					// The queries are accumulated, every one of them keeps its own statistics.
+					memory_config.queries.push_back(std::move(std::get<EventQuery>(query_result)));
+					statistic_memory = true;
+					++i;
+				}
+				else {
+					Log::Log<CommandLineLogCategory, Log::LogLevel::Error, L"Unsupport command -ms --memory_stat, use -h for detailed help">();
+					return -1;
+				}
+			}
+			else if (argv_string == "-mv" || argv_string == "--memory_value")
+			{
+				if (i + 1 < argc)
+				{
+					// The query is read the same way as the query of -ms, and the error of an unacceptable one is reported
+					// here as well.
+					std::u8string query_text;
+					Encode::STDInputEncoder<char8_t>::EncodeTo(argv[i + 1], std::back_insert_iterator{ query_text });
+					auto query_result = ParseEventQuery(query_text);
+					if (auto error = std::get_if<std::u8string>(&query_result); error != nullptr)
+					{
+						std::wstring message;
+						Encode::UnicodeEncoder<char8_t, wchar_t>::EncodeTo(*error, std::back_inserter(message));
+						Log::Log<CommandLineLogCategory, Log::LogLevel::Error, L"-mv --memory_value <query> : <{}>, use -h for detailed help">(
+							message
+						);
+						return -1;
+					}
+
+					// The queries are accumulated, every one of them keeps its own time lines.
+					memory_value_config.queries.push_back(std::move(std::get<EventQuery>(query_result)));
+					statistic_memory_value = true;
+					++i;
+				}
+				else {
+					Log::Log<CommandLineLogCategory, Log::LogLevel::Error, L"Unsupport command -mv --memory_value, use -h for detailed help">();
+					return -1;
+				}
+			}
+			else if (argv_string == "-mvn" || argv_string == "--max_value_count")
+			{
+				if (i + 1 < argc)
+				{
+					std::size_t value = 0;
+					std::string_view sub_argv = argv[i + 1];
+					if (Format::DirectDeformat(sub_argv, value))
+					{
+						memory_value_config.max_value_count = value;
+						++i;
+					}
+					else {
+						Log::Log<CommandLineLogCategory, Log::LogLevel::Error, L"-mvn --max_value_count <count> : <{}> is not a valid count, use -h for detailed help">(sub_argv);
+						return -1;
+					}
+				}
+				else {
+					Log::Log<CommandLineLogCategory, Log::LogLevel::Error, L"Unsupport command -mvn --max_value_count, use -h for detailed help">();
+					return -1;
+				}
+			}
+			else if (argv_string == "-msr" || argv_string == "--memory_sort")
+			{
+				if (i + 1 < argc)
+				{
+					std::string_view order = argv[i + 1];
+					if (order == "name")
+					{
+						memory_config.sort = MemoryStatisticParser::SortKind::Name;
+						++i;
+					}
+					else if (order == "mean")
+					{
+						memory_config.sort = MemoryStatisticParser::SortKind::Mean;
+						++i;
+					}
+					else if (order == "max")
+					{
+						memory_config.sort = MemoryStatisticParser::SortKind::Max;
+						++i;
+					}
+					else {
+						Log::Log<CommandLineLogCategory, Log::LogLevel::Error, L"-msr --memory_sort <name|mean|max> : <{}> is not an acceptable order, use -h for detailed help">(order);
+						return -1;
+					}
+				}
+				else {
+					Log::Log<CommandLineLogCategory, Log::LogLevel::Error, L"Unsupport command -msr --memory_sort, use -h for detailed help">();
+					return -1;
+				}
+			}
+			else if (argv_string == "-mt" || argv_string == "--memory_tag")
+			{
+				if (i + 1 < argc)
+				{
+					std::string_view pattern = argv[i + 1];
+					re2::RE2::Options options;
+					// The error is reported below, re2 should not print it a second time.
+					options.set_log_errors(false);
+					auto matcher = std::make_shared<re2::RE2>(pattern, options);
+					if (matcher->ok())
+					{
+						memory_tag_search_config.matcher = std::move(matcher);
+						search_memory_tag = true;
+						++i;
+					}
+					else {
+						Log::Log<CommandLineLogCategory, Log::LogLevel::Error, L"-mt --memory_tag <regex> : <{}> is not an acceptable regex : <{}>, use -h for detailed help">(
+							pattern,
+							std::string_view{ matcher->error() }
+						);
+						return -1;
+					}
+				}
+				else {
+					Log::Log<CommandLineLogCategory, Log::LogLevel::Error, L"Unsupport command -mt --memory_tag, use -h for detailed help">();
+					return -1;
+				}
 			}
 			else if (argv_string == "-tx" || argv_string == "--top_count")
 			{
@@ -825,8 +1025,9 @@ Options:
 			return -1;
 		}
 
-		// The CSV file is the format of two reports: the statistics of -es and the frames of the default mode, which is
-		// the mode of no other option. The file names itself, so it is not mixed with -o or -a.
+		// The CSV file is the format of four reports: the statistics of -es, the statistics and the time lines of the memory
+		// tags of -ms and -mv, and the frames of the default mode, which is the mode of no other option. The file names
+		// itself, so it is not mixed with -o or -a.
 		if (csv_path)
 		{
 			if (statistic_event)
@@ -834,14 +1035,24 @@ Options:
 				statistic_config.csv_path = std::move(*csv_path);
 				csv_path.reset();
 			}
-			else if (!search_event && !detail_event && !flame_event && !search_thread && !statistic_memory)
+			else if (statistic_memory)
+			{
+				memory_config.csv_path = std::move(*csv_path);
+				csv_path.reset();
+			}
+			else if (statistic_memory_value)
+			{
+				memory_value_config.csv_path = std::move(*csv_path);
+				csv_path.reset();
+			}
+			else if (!search_event && !detail_event && !flame_event && !search_thread && !search_memory_tag && !statistic_memory && !statistic_memory_value)
 			{
 				config.csv_path = std::move(*csv_path);
 				csv_path.reset();
 			}
 			else
 			{
-				Log::Log<CommandLineLogCategory, Log::LogLevel::Error, L"-csv --csv can only be used with -es --event_stat or the default mode, use -h for detailed help">();
+				Log::Log<CommandLineLogCategory, Log::LogLevel::Error, L"-csv --csv can only be used with -es --event_stat, -ms --memory_stat, -mv --memory_value or the default mode, use -h for detailed help">();
 				return -1;
 			}
 
@@ -878,21 +1089,33 @@ Options:
 			return -1;
 		}
 
-		if (flame_event && (search_event || statistic_event || detail_event))
+		if (flame_event && (search_event || statistic_event || detail_event || statistic_memory || statistic_memory_value || search_memory_tag))
 		{
-			Log::Log<CommandLineLogCategory, Log::LogLevel::Error, L"-ef --event_flame_graph can not be used with -r --regex, -es --event_stat or -ed --event_detail, use -h for detailed help">();
+			Log::Log<CommandLineLogCategory, Log::LogLevel::Error, L"-ef --event_flame_graph can not be used with -r --regex, -es --event_stat, -ed --event_detail, -ms --memory_stat, -mv --memory_value or -mt --memory_tag, use -h for detailed help">();
 			return -1;
 		}
 
-		if (search_thread && (search_event || statistic_event || detail_event || flame_event))
+		if (search_thread && (search_event || statistic_event || detail_event || flame_event || statistic_memory || statistic_memory_value || search_memory_tag))
 		{
-			Log::Log<CommandLineLogCategory, Log::LogLevel::Error, L"-ts --thread_search can not be used with -r --regex, -es --event_stat, -ed --event_detail or -ef --event_flame_graph, use -h for detailed help">();
+			Log::Log<CommandLineLogCategory, Log::LogLevel::Error, L"-ts --thread_search can not be used with -r --regex, -es --event_stat, -ed --event_detail, -ef --event_flame_graph, -ms --memory_stat, -mv --memory_value or -mt --memory_tag, use -h for detailed help">();
 			return -1;
 		}
 
-		if (statistic_memory && (search_event || statistic_event || detail_event || flame_event || search_thread))
+		if (statistic_memory && (search_event || statistic_event || detail_event || flame_event || search_thread || statistic_memory_value || search_memory_tag))
 		{
-			Log::Log<CommandLineLogCategory, Log::LogLevel::Error, L"-ms --memory_stat can not be used with -r --regex, -es --event_stat, -ed --event_detail, -ef --event_flame_graph or -ts --thread_search, use -h for detailed help">();
+			Log::Log<CommandLineLogCategory, Log::LogLevel::Error, L"-ms --memory_stat can not be used with -r --regex, -es --event_stat, -ed --event_detail, -ef --event_flame_graph, -ts --thread_search, -mv --memory_value or -mt --memory_tag, use -h for detailed help">();
+			return -1;
+		}
+
+		if (statistic_memory_value && (search_event || statistic_event || detail_event || flame_event || search_thread || statistic_memory || search_memory_tag))
+		{
+			Log::Log<CommandLineLogCategory, Log::LogLevel::Error, L"-mv --memory_value can not be used with -r --regex, -es --event_stat, -ed --event_detail, -ef --event_flame_graph, -ts --thread_search, -ms --memory_stat or -mt --memory_tag, use -h for detailed help">();
+			return -1;
+		}
+
+		if (search_memory_tag && (search_event || statistic_event || detail_event || flame_event || search_thread || statistic_memory || statistic_memory_value))
+		{
+			Log::Log<CommandLineLogCategory, Log::LogLevel::Error, L"-mt --memory_tag can not be used with -r --regex, -es --event_stat, -ed --event_detail, -ef --event_flame_graph, -ts --thread_search, -ms --memory_stat or -mv --memory_value, use -h for detailed help">();
 			return -1;
 		}
 
@@ -907,6 +1130,14 @@ Options:
 		else if (detail_event)
 		{
 			setting.parser = std::make_unique<EventDetailParser>(std::move(detail_config));
+		}
+		else if (search_memory_tag)
+		{
+			setting.parser = std::make_unique<MemoryTagSearchParser>(std::move(memory_tag_search_config));
+		}
+		else if (statistic_memory_value)
+		{
+			setting.parser = std::make_unique<MemoryValueParser>(std::move(memory_value_config));
 		}
 		else if (statistic_memory)
 		{

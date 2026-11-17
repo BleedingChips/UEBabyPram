@@ -50,6 +50,23 @@ if os.scriptdir() == os.projectdir() then
         target_end()
 
     end
+
+    -- The tests of the insight parser library need the library itself, and the dependencies of the tool which links it,
+    -- so they are defined apart from the tests which only need UEBabyPram: Test/InsightParser/*.cpp.
+    for _, file in ipairs(os.files("Test/InsightParser/*.cpp")) do
+
+        local name = path.basename(file)
+
+        target(name)
+            set_kind("binary")
+            add_files(file)
+            add_deps("Potato")
+            add_deps("UEBabyPramInsightParser")
+            add_packages("re2")
+            add_syslinks("advapi32", "dbghelp", "ole32", "oleaut32", "version", "crypt32", "wbemuuid", "shlwapi", "userenv")
+        target_end()
+
+    end
 end
 
 if os.scriptdir() == os.projectdir() then

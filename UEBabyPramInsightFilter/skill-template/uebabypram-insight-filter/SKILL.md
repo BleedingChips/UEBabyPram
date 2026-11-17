@@ -13,7 +13,7 @@ UEBabyPramInsightFilter 是一个用于分析 Unreal Engine（UE4/UE5）`.utrace
 - 保存并打印指定调用堆栈（`-ed`）：query 不含捕捉元素时打印**完整**调用树（含时间片外的事件）；含捕捉元素时每次匹配只打印被捕捉节点，并附带最后一个被捕捉节点的整棵子树。含每个事件的耗时与 Exclude Time，并按节点数/层数上限截断；
 - 生成火焰图（`-ef`），聚合匹配的调用路径（query 含捕捉元素时只聚合被捕捉节点与最后一个被捕捉节点的子树），可用 `-fs <path>` 直接导出 folded stacks 文件；
 - 线程搜索（`-ts`）；
-- 内存统计（`-ms`）：报告 trace 声明的 memory tag、tracker 与 tag set 的 id 与名字。
+- 内存统计（`-ms <query>`）：按 query 选择内存 tag，按 tracker × 内存 tag 聚合其全部快照，输出开始/结尾/最大/最小值及其时刻与平均值。
 
 ## 工具路径
 
@@ -39,9 +39,12 @@ UEBabyPramInsightFilter 是一个用于分析 Unreal Engine（UE4/UE5）`.utrace
 | 调用堆栈 | `-ed, --event_detail <query>` | 保存匹配的 stack tree 并打印详细堆栈 |
 | 火焰图 | `-ef, --event_flame_graph <query>` | 聚合匹配的调用路径为火焰图 |
 | 线程搜索 | `-ts, --thread_search <regex>` | 按线程名正则搜索线程 |
-| 内存统计 | `-ms, --memory_stat` | 报告 trace 声明的 memory tag、tracker 与 tag set |
+| 内存统计 | `-ms, --memory_stat <query>` | 按 EventQuery 选择内存 tag，按 tracker × tag 聚合快照的值统计（首/末/最大/最小/平均），值带 B/KB/MB/GB 单位 |
+| 内存查询 | `-mt, --memory_tag <regex>` | 按正则搜索内存 tag / tracker / tag set 的 spec（只读 spec，不解析快照） |
+| 内存时间线 | `-mv, --memory_value <query>` | 按 EventQuery 选择 tag，按 tracker × tag 打印每个快照的 time-value 对（默认每个 tag 最多 100 个采样点，可 `-csv` 导出） || `-mvn, --max_value_count <count>` | `-mv` 每个 tag 最多打印多少个采样点，默认 100，0 表示全部 |
+| `-msr, --memory_sort <name\|mean\|max>` | `-ms` 行排序：`name`（默认，query→tracker→tag）、`mean`（平均值从大到小）、`max`（最大值从大到小） |
 
-`-r`、`-es`、`-ed`、`-ef`、`-ts`、`-ms` **不能同时使用**。
+`-r`、`-es`、`-ed`、`-ef`、`-ts`、`-ms`、`-mv`、`-mt` **不能同时使用**。
 
 ---
 
@@ -65,6 +68,7 @@ UEBabyPramInsightFilter 是一个用于分析 Unreal Engine（UE4/UE5）`.utrace
 | `-mrf, --max_record_frame <count>` | 默认模式记录的最长帧数量，默认 10 |
 | `-metc, --max_exclude_time_count <count>` | 每个 Top 列表保留的最长 Exclude Time 事件数量，默认 30 |
 | `-sr, --sampling_ratio <ratio>` | 默认模式采样的时间比例，`[0.0, 1.0]`，默认 **0.9**（只分析中间 90% 的时间范围）；报告只统计与采样时间范围有交集的帧 |
+
 
 ---
 
@@ -190,7 +194,7 @@ EventStatisticParser Output:
 
 #### 默认模式导出帧 CSV（`-csv <path>`）
 
-在默认模式（不给 `-r`/`-es`/`-ed`/`-ef`/`-ts`/`-ms`）下给 `-csv <path>`，同样**不打印文本报告**，而是把**每一帧**写成一行：
+在默认模式（不给 `-r`/`-es`/`-ed`/`-ef`/`-ts`/`-ms`/`-mv`/`-mt`）下给 `-csv <path>`，同样**不打印文本报告**，而是把**每一帧**写成一行：
 
 ```powershell
 & ".\scripts\UEBabyPramInsightFilter.exe" -f "Capture.utrace" -csv "frames.csv"
@@ -309,26 +313,101 @@ FEngineLoop::Tick;Frame;Tick_Engine 4364
 
 ### -ms 内存统计
 
-报告 trace 的 LLM（memory tracing）通道声明的内存 spec，输出形如：
+按 **EventQuery** 选择内存 tag，并按“每个 tracker × 每个内存 tag”为单位聚合该 tag 的全部快照，输出值统计：
+
+```powershell
+& ".\scripts\UEBabyPramInsightFilter.exe" -f "Capture.utrace" -ms "(^Mass^)"
+& ".\scripts\UEBabyPramInsightFilter.exe" -f "Capture.utrace" -ms "%&Thread=(^Platform^)"
+```
+
+输出形如：
 
 ```text
 MemoryStatisticParser Output:
-    (Memory Tag: ...; Memory Tracker: ...; Memory Tag Set: ...)
-    (FullName: ...; Name: ...; Parent: ...; Tag Set: ...)
-    Memory Tag <265>, Memory Tracker <2>, Memory Tag Set <1>
-    Tag Set <0>: <System>
-    Tracker <1>: <Default>
-    Tracker <0>: <Platform>
-    Tag <1513393553920>: <Total>, Name:<Total>, Parent:<None>, Tag Set:<0:System>
-    Tag <1513391326976>: <Animation/IKRig>, Name:<IKRig>, Parent:<1513393688064:Animation>, Tag Set:<0:System>
+    (Memory Tag Statistic: the values which the snapshots of one tracker sampled for one memory tag which the query selects)
+    (First/Last: ...; Max/Min: ...; Mean: ...)
+    Memory Tag <265>, Memory Tracker <2>, Memory Tag Set <1>, Memory Tag Statistic <9>
+
+Query <0>:
+        Tracker:<Default>, MemoryTag:<Mass>
+            Count:<777>, First:[7m17.076858s]=<49.82 MB>, Last:[8m2.351220s]=<51.09 MB>, Max:[7m31.278041s]=<52.86 MB>, Min:[7m27.461665s]=<48.01 MB>, Mean:<50.63 MB>
+        Tracker:<Default>, MemoryTag:<Mass/ArchetypeChunk>
+            Count:<777>, First:[7m17.076858s]=<33.87 MB>, Last:[8m2.351220s]=<34.25 MB>, Max:[7m31.588344s]=<34.50 MB>, Min:[7m27.461665s]=<32.00 MB>, Mean:<34.14 MB>
 ```
 
-- 每个 tag / tracker / tag set 都按 **id 与名字** 成对保存并报告，因此 memory 采样里带的 id 可以解析成名字；
-- tag 同时报告 **FullName** 与 **Name**：FullName 是 trace 声明的完整名字；无父节点时 Name 与 FullName 相同，有父节点时 Name 是 FullName 中最后一个 `/` 之后的段（例如 `Animation/IKRig` 的 Name 是 `IKRig`）。Name 是 FullName 的视图，不额外存储；
-- tag 还报告父 tag 与所属 tag set 的 **id 与名字**（无父节点/无 tag set 显示为 `None`，trace 未声明的非零 id 显示为 `Unknown`）；
-- 输出按 trace 中 spec 的声明顺序排列，同一份 trace 的结果稳定；同名 tag 可能有多个不同 id（例如按 tracker 区分的 `Total`），它们会分别报告，不会合并；
-- 当前只报告 spec：`OnMemoryTagSnap` 预留为空，采样值尚未统计；
-- trace 未采集 memory 通道时输出 `No memory spec is recorded in the trace.`。
+query 的读法与 `-es`/`-ed`/`-ef` 相同，但内存数据的形状不同，因此有三处语义不同：
+
+- **`Thread` → tracker**：`&Thread=(^...^)` 匹配的是产生快照的 **memory tracker 名字**（如 `Default`、`Platform`），不带 `Thread` 条件则选择所有 tracker；
+- **`Chain` → 父级链**：内存 tag 的名字就是它的父级路径（`A/B/C`），链的每个元素从根开始依次匹配**一段**名字；被选中的 tag 是**最后一个元素所匹配的那一段及其下所有 tag**。例如 `(^A^)->(^B^)` 选中 `A/B`、`A/B/C`、`A/B/C/D`…；`%` 匹配任意一段；名字段数少于链长的 tag 不会被选中；
+- **时间条件是“时间点”而不是“时间段”**：快照的 `time` 是单个时间点，
+  - `Time=[a,b]`：选中 `a <= t <= b` 的快照（含边界）；
+  - `ITime=[a,b]`：选中 `a < t < b` 的快照（严格在内，可能为空）。
+
+其余规则：
+
+- 统计单位为 **per query × per tracker × per memory tag**，同一 tag 被多个 tracker 采样、或被多个 query 选中时会分别统计；
+- 每行含义：`Count`（携带该 tag 的快照数）、`First/Last`（时间+该时刻的值）、`Max/Min`（最大值/最小值及其所在时刻）、`Mean`（全部值的算术平均）；
+- **数值带单位**：按 1024 进制自动选 `B` / `KB` / `MB` / `GB`（≥1 GB 用 GB），保留 2 位小数，例如 `49.82 MB`、`9.42 GB`；
+- 行的顺序由 `-msr` 决定：默认 `name`（query 序号 → tracker 名 → tag 名，同一份 trace 输出稳定）、`mean`（平均值从大到小）、`max`（最大值从大到小）；同值时仍按 name 顺序，报告头会打印 `Sorted by: <name|mean|max>`；
+- 只累加快照里实际带 value 的 tag（快照两个数组长度不一致时，多出的 tag 跳过）；
+- 加 `-csv <path>` 时改为写 CSV（不打印文本报告），每行一个统计，列为
+  `QueryIndex, Tracker, MemoryTag, Count, FirstTime_s, FirstValue_B, LastTime_s, LastValue_B, MaxTime_s, MaxValue_B, MinTime_s, MinValue_B, Mean_B`；
+  CSV 里的值是**字节数**（不带单位），单位由列名 `_B` 表示，便于直接计算；
+- trace 未采集 memory 通道、或 query 未选中任何 tag 时，输出 `No memory tag is selected by the query, or the trace carries no memory tag snapshot.`。
+
+### -mv 内存 tag 时间线
+
+`-ms` 只给聚合后的首/末/最大/最小/平均，`-mv` 则按 **每个 tracker × 每个 tag** 打印**按时间顺序的 time-value 对**：
+
+```powershell
+& ".\scripts\UEBabyPramInsightFilter.exe" -f "Capture.utrace" -mv "(^Mass^)"
+& ".\scripts\UEBabyPramInsightFilter.exe" -f "Capture.utrace" -mv "%&Thread=(^Platform^)" -mvn 20
+& ".\scripts\UEBabyPramInsightFilter.exe" -f "Capture.utrace" -mv "(^Mass^)" -csv ".\timeline.csv"
+```
+
+```text
+MemoryValueParser Output:
+    Memory Tag <265>, Memory Tracker <2>, Memory Tag Set <1>, Memory Value Line <9>
+    Limit of the samples of one tag: <5>, Sample <45> of <6993>
+
+Query <0>:
+        Tracker:<Default>, MemoryTag:<Mass>, Sample <5> of <777>
+            [7m17.076858s]=<49.82 MB>
+            [7m28.302194s]=<52.55 MB>
+            [7m39.688918s]=<51.09 MB>
+            [7m51.038856s]=<51.09 MB>
+            [8m2.351220s]=<51.09 MB>
+```
+
+- query 语义与 `-ms` 完全相同（`Thread` → tracker 名，链 → tag 父级链，`Time`/`ITime` → 快照时间点）；
+- **采样点上限**由 `-mvn` 控制（默认 **100**，0 表示全部）：超过上限时按**时间间隔均分**取 `N` 个时间点（含首、末），并对每个时间点取**最近**的实际采样点；重复命中的点只保留一次，所以实际打印数 ≤ N；
+- 每个 tag 的标题行给出 `Sample <打印数> of <总数>`；报告头给出总打印量；
+- 打印量超过 1000 个采样点时，报告头会打印一行 `Warning: ... which is a large report ...` 提示输出量较大（建议调小 `-mvn` 或用 `-csv` 写文件）；
+- `-csv <path>` 时每行一个采样点，列为 `QueryIndex, Tracker, MemoryTag, SampleIndex, Time_s, Value_B`（值为字节）；
+- 值同样带 `B`/`KB`/`MB`/`GB` 单位（文本报告），CSV 里为字节数。
+### -mt 内存 spec 搜索
+
+用一条正则同时搜索 trace 里的 memory tag、memory tracker 与 memory tag set，命中的 spec 输出 id 与名字：
+
+```powershell
+& ".\scripts\UEBabyPramInsightFilter.exe" -f "Capture.utrace" -mv "(^Mass^)" -mvn 20
+& ".\scripts\UEBabyPramInsightFilter.exe" -f "Capture.utrace" -mt "^Mass"
+& ".\scripts\UEBabyPramInsightFilter.exe" -f "Capture.utrace" -mt ".*"     # 导出全部 spec
+```
+
+```text
+MemoryTagSearchParser Output:
+    Memory Tag <265>, Memory Tracker <2>, Memory Tag Set <1>
+    Tracker <1>: <Default>
+    Tracker <0>: <Platform>
+    Tag <1513665333504>: <Mass>, Name:<Mass>, Parent:<1513393817856:CustomName>, Tag Set:<0:System>
+    Matched <0> Tag Set(s), <2> Tracker(s), <1> Tag(s)
+```
+
+- 正则匹配**完整名字**（tag 用 FullName），`.*` 匹配全部 spec（空正则也匹配全部，但某些 shell 会把空参数丢掉）；
+- tag 行给出 `FullName`、`Name`（最后一段）、父 tag 与所属 tag set 的 `id:名字`；
+- 只读取 spec（`ParserRequireFlag::MEMORY_TAG`），快照事件不解析，但 trace 文件仍需从头读到尾，所以耗时主要由读文件决定；
+- 用途：把 `-ms` 报告里的 tag 名字反查成 id，或用 `-mt ".*"` 导出整棵内存 tag 树。
 
 ---
 
@@ -395,17 +474,20 @@ flamegraph.pl result.folded > result.svg
 & ".\scripts\UEBabyPramInsightFilter.exe" -f "Capture.utrace" -ts ".*GameThread.*"
 ```
 
-### 11. 报告内存 spec
+### 11. 内存 tag 的值统计 / spec 搜索
 
 ```powershell
-& ".\scripts\UEBabyPramInsightFilter.exe" -f "Capture.utrace" -ms
+& ".\scripts\UEBabyPramInsightFilter.exe" -f "Capture.utrace" -ms "(^Mass^)"
+& ".\scripts\UEBabyPramInsightFilter.exe" -f "Capture.utrace" -ms "%&Thread=(^Platform^)" -csv ".\memory.csv"
+& ".\scripts\UEBabyPramInsightFilter.exe" -f "Capture.utrace" -mv "(^Mass^)" -mvn 20
+& ".\scripts\UEBabyPramInsightFilter.exe" -f "Capture.utrace" -mt "^Mass"
 ```
 
 ---
 
 ## 注意事项
 
-1. `-r`、`-es`、`-ed`、`-ef`、`-ts`、`-ms` 互斥，只能选一个。
+1. `-r`、`-es`、`-ed`、`-ef`、`-ts`、`-ms`、`-mv`、`-mt` 互斥，只能选一个。
 2. 事件名与线程名正则必须匹配完整名称。
 3. `-es` 中只有 `[^...^]`/`%[^...^]` 元素会被统计，`(^...^)` 与 `%` 仅补全调用链；`%[^...^]` 会把该元素命中的所有事件合并为一个统计口径。
 4. `-es` 的 `Time` 条件按被统计事件**占用的时间范围**与查询时间范围是否相交过滤（只贴边不算相交），不影响补全调用链的事件。

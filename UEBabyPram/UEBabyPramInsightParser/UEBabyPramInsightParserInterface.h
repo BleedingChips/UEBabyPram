@@ -29,7 +29,14 @@ namespace UEBabyPram::InsightParser
 		EVENT_SPEC = 1 << 2,
 		CONTEXT_SWITCH = 1 << 3,
 		META_DATA = 1 << 4,
-		MEMORY = 1 << 5
+		// The specs of the memory tracing of the LLM channel: the memory tags (TagsSpec), the trackers (TrackerSpec) and
+		// the tag sets (TagSetSpec). A parser which only resolves the id of a memory tag to a name requires this one, and
+		// nothing else, so the snapshots of the tags are not read for it.
+		MEMORY_TAG = 1 << 5,
+		// The snapshots of the memory tags (TagValue): the time and the value which every tracker sampled for every tag
+		// which it tracks. A parser which reports a value requires this one as well as MEMORY_TAG, because an id is only
+		// resolvable to a name through the specs.
+		MEMORY_VALUE = 1 << 6
 	};
 
 	struct BaseParser

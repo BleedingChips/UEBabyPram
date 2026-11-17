@@ -114,6 +114,21 @@ export namespace UEBabyPram::InsightFilter
 			Text(std::u8string_view{ reinterpret_cast<char8_t const*>(text.data()), text.size() });
 		}
 
+		// Append a size field in bytes, the number is written without a unit so the column of a CSV file stays computable,
+		// and the unit is the name of the column instead.
+		void Bytes(int64 value)
+		{
+			std::string text = std::format("{}", value);
+			Text(std::u8string_view{ reinterpret_cast<char8_t const*>(text.data()), text.size() });
+		}
+
+		// Append a number with 2 decimals, which is what a mean is written with.
+		void Decimal(long double value)
+		{
+			std::string text = std::format("{:.2f}", static_cast<double>(value));
+			Text(std::u8string_view{ reinterpret_cast<char8_t const*>(text.data()), text.size() });
+		}
+
 		// Close the row, the next row starts with the same writer.
 		void EndLine()
 		{
@@ -136,6 +151,53 @@ export namespace UEBabyPram::InsightFilter
 		std::u8string& output;
 		bool has_field = false;
 	};
+
+	// The text of a size in bytes with the unit which keeps the number readable: a size of one gibibyte or more is written
+	// in GB, then MB, KB and B, and every unit is written with 2 decimals, ex: <9.42 GB>, <48.01 MB>, <512.00 KB>. The steps
+	// are 1024, which is what the memory of a process is measured by, and the sign of the size is kept, so a tag which
+	// reports a delta stays readable.
+	inline std::u8string FormatByteSize(long double size_in_byte)
+	{
+		constexpr long double Step = 1024.0L;
+		constexpr long double Kilobyte = Step;
+		constexpr long double Megabyte = Step * Step;
+		constexpr long double Gigabyte = Step * Step * Step;
+
+		long double value = size_in_byte;
+		long double magnitude = std::fabs(value);
+		std::string_view unit = "B";
+
+		if (magnitude >= Gigabyte)
+		{
+			value /= Gigabyte;
+			unit = "GB";
+		}
+		else if (magnitude >= Megabyte)
+		{
+			value /= Megabyte;
+			unit = "MB";
+		}
+		else if (magnitude >= Kilobyte)
+		{
+			value /= Kilobyte;
+			unit = "KB";
+		}
+
+		std::string text = std::format("{:.2f} {}", static_cast<double>(value), unit);
+		return std::u8string{ reinterpret_cast<char8_t const*>(text.data()), text.size() };
+	}
+
+	// Print one line of a report: the text is formatted by the caller with std::format and handed to the printer, which is
+	// what a report whose line carries many fields does, and the line break of the printer is appended here so the caller
+	// never has to append it. It is the same output as OutputLog<L"{}">(printer, text), without the pattern formatter of
+	// the log, which some translation units of this project resolve ambiguously for the string wrapper of a message.
+	inline void PrintReportLine(Potato::Log::LogPrinter& printer, std::wstring_view text)
+	{
+		std::pmr::wstring message{ printer.GetSynchronizedPoolResource() };
+		message.append(text);
+		message.append(printer.EndLineString());
+		printer.Print(Potato::Log::FormatedSystemTime{}, Potato::Log::LogLevel::Log, message);
+	}
 
 	// Check whether the event name is fully matched by the matcher, a partial match is not accepted.
 	// The matcher needs the event name in UTF-8, the utf8_buffer is a scratch storage of the caller

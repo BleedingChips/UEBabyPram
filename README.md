@@ -83,7 +83,7 @@ UEBabyPramLogFilter -v
 
 ### InsightFilter
 
-`UEBabyPramInsightFilter` 用于分析 Unreal Insights `.utrace` 文件，支持以下模式（`-r`、`-es`、`-ed`、`-ef`、`-ts`、`-ms` 互斥）：
+`UEBabyPramInsightFilter` 用于分析 Unreal Insights `.utrace` 文件，支持以下模式（`-r`、`-es`、`-ed`、`-ef`、`-ts`、`-ms`、`-mv`、`-mt` 互斥）：
 
 | 模式 | 选项 | 说明 |
 |------|------|------|
@@ -93,7 +93,8 @@ UEBabyPramLogFilter -v
 | 详细堆栈 | `-ed, --event_detail <query>` | 保存匹配的 stack tree，按 box-drawing 打印详细调用堆栈 |
 | 火焰图 | `-ef, --event_flame_graph <query>` | 聚合匹配的调用路径生成火焰图 |
 | 线程搜索 | `-ts, --thread_search <regex>` | 按线程名正则搜索线程 |
-| 内存统计 | `-ms, --memory_stat` | 报告 trace 声明的 memory tag、tracker 与 tag set 的 id 与名字 |
+| 内存统计 | `-ms, --memory_stat <query>` | 按 EventQuery 选择内存 tag，按 tracker × tag 聚合该 tag 全部快照的值统计（首/末/最大/最小/平均，值带 B/KB/MB/GB 单位），可 `-csv` 导出 |
+| 内存查询 | `-mt, --memory_tag <regex>` | 按正则搜索内存 tag / tracker / tag set 的 spec（只解码 spec，不解析快照） |
 
 #### 事件查询语法（`-es` / `-ed` / `-ef`）
 
@@ -136,7 +137,7 @@ TimePoint := Integer 'm' Decimal 's' | Decimal 's' | Integer 's' | Integer 'm' I
 | `-v, --version` | 输出工具的版本并退出（输出形如 `UEBabyPramInsightFilter <1.2>`） |
 | `-tx, --top_count <count>` | `-es` 每个事件名保留的 Top N 最长 occurrence，默认 5 |
 | `-dbc, --duration_bucket_count <count>` | `-es` 耗时分布直方图的分组数，默认 5 |
-| `-csv, --csv <path>` | 把报告写成 CSV 文件（UTF-8，RFC 4180）而不是文本报告：`-es` 时每行一个事件统计；**默认模式**时每行一帧（`FrameIndex, Begin_s, End_s, Duration_ms, ENCS_ms, FPS`，覆盖采样区间内全部帧并按时间排序）。不能与 `-o`/`-a` 同时使用 |
+| `-csv, --csv <path>` | 把报告写成 CSV 文件（UTF-8，RFC 4180）而不是文本报告：`-es` 时每行一个事件统计；`-ms` 时每行一个内存 tag 统计；`-mv` 时每行一个采样点（`QueryIndex, Tracker, MemoryTag, SampleIndex, Time_s, Value_B`）（`QueryIndex, Tracker, MemoryTag, Count, FirstTime_s, FirstValue_B, LastTime_s, LastValue_B, MaxTime_s, MaxValue_B, MinTime_s, MinValue_B, Mean_B`，值为字节）；**默认模式**时每行一帧（`FrameIndex, Begin_s, End_s, Duration_ms, ENCS_ms, FPS`，覆盖采样区间内全部帧）。不能与 `-o`/`-a` 同时使用 |
 | `-fs, --folded_stack <path>` | `-ef` 把火焰图写成 folded stacks 文件（`帧;帧 <微秒>`）而不是文本报告；不能与 `-o`/`-a` 同时使用，只能与 `-ef` 一起用 |
 | `-mvc, --max_view_count <count>` | `-ed` 最多保存多少个 stack tree，默认 10 |
 | `-mnc, --max_node_count <count>` | `-ed` 单棵报告树最多打印多少个节点，超出不打印并以 `...` 标记，0 表示不限，默认 100 |
@@ -144,7 +145,10 @@ TimePoint := Integer 'm' Decimal 's' | Decimal 's' | Integer 's' | Integer 'm' I
 | `-mlc, --max_location_count <count>` | `-r` 最多报告多少个事件位置，默认 256 |
 | `-mrf, --max_record_frame <count>` | 默认模式记录的最长帧数量，默认 10 |
 | `-metc, --max_exclude_time_count <count>` | 每个 Top 列表保留的最长 Exclude Time 事件数量，默认 30 |
+| `-mvn, --max_value_count <count>` | `-mv` 每个内存 tag 最多打印多少个采样点，默认 100，0 表示全部 |
+| `-msr, --memory_sort <name\|mean\|max>` | `-ms` 的行排序：`name`（默认）、`mean`（平均值从大到小）、`max`（最大值从大到小） |
 | `-sr, --sampling_ratio <ratio>` | 默认模式采样比例，`[0.0, 1.0]`，默认 **0.9**（只分析中间 90%）；报告只统计与采样时间范围有交集的帧 |
+
 
 #### 构建与运行
 
@@ -183,8 +187,16 @@ UEBabyPramInsightFilter -f .\Capture.utrace -ef "[^UWorld::Tick^]" -fs .\result.
 # 搜索 GameThread
 UEBabyPramInsightFilter -f .\Capture.utrace -ts ".*GameThread.*"
 
-# 报告 trace 声明的 memory tag / tracker / tag set
-UEBabyPramInsightFilter -f .\Capture.utrace -ms
+# 按 query 聚合内存 tag 的值统计（chain 匹配 tag 父级链，Thread 匹配 tracker 名），值带单位
+UEBabyPramInsightFilter -f .\Capture.utrace -ms "(^Mass^)"
+
+# 导出为 CSV（值为字节，不带单位，便于计算）
+UEBabyPramInsightFilter -f .\Capture.utrace -ms "%&Thread=(^Platform^)" -csv .\memory.csv
+UEBabyPramInsightFilter -f .\Capture.utrace -ms "%&Thread=(^Platform^)" -msr max
+
+# 打印内存 tag 的时间线（每个 tag 最多 20 个采样点），并导出 CSV
+UEBabyPramInsightFilter -f .\Capture.utrace -mv "(^Mass^)" -mvn 20
+UEBabyPramInsightFilter -f .\Capture.utrace -mv "(^Mass^)" -csv .\timeline.csv
 ```
 
 #### 输出字段说明
@@ -195,7 +207,8 @@ UEBabyPramInsightFilter -f .\Capture.utrace -ms
 - `-es`：`Count`、`Total D/Mean D/Median D/Std D`、`Total E/Mean E`；Top occurrence 行的 `D`（耗时）、`E`（Exclude Time）、`ENCS`（去除离核时间后的 Exclude Time）、`CS`（Context Switch Time）、`TR`（时间范围）、`TName`（线程名）；Call Context 以 box-drawing 打印父链与子树。加 `-csv <path>` 时改为写 CSV 文件，列顺序为 `QueryIndex, Event, Kind, EventIdCount, OccurrenceCount, TotalD_ms, MeanD_ms, MedianD_ms, StdD_ms, TotalE_ms, MeanE_ms, Query`（`Kind` 为 `Name` 或 `Regex`，耗时单位 ms、6 位小数），按查询与总耗时从大到小排序，UTF-8 无 BOM、字段符合 RFC 4180；CSV 只含事件汇总，Top occurrence／GameFrame／直方图仍只在文本报告里。
 - `-ed`：`View` 行的 `E` 为整棵 stack tree 总耗时；节点行的 `TR` 为时间范围、`D` 为耗时、`E` 为 Exclude Time、`CS` 为 Exclude Time 中线程不在 CPU 上的时间（为 0 时不打印）。报告内容由 query 决定：query 不含 `[^...^]`/`%[^...^]` 时打印**完整**调用树（`Time` 条件只决定保留哪些树，时间片外的事件照样打印）；query 含捕捉元素时，每次匹配输出一组，以 `Match <n>: <A -> B>` 开头，只打印被 `[^...^]`/`%[^...^]` 命中的节点（按调用顺序），并在最后一个被捕捉节点下打印它的整棵子树，被捕捉节点之上的补全链节点与祖先省略。单组规模由 `-mnc`（节点数，默认 100）与 `-md`（层数，默认 8）限制，超出的节点不打印并以 `...` 标记，两个限制对每组分别生效（`0` 表示不限）。
 - `-ef`：`D` 为调用路径的 inclusive 耗时，`Percent` 为占全部匹配时间的百分比。聚合范围由 query 决定：query 不含 `[^...^]`/`%[^...^]` 时整棵树参与聚合并打印全部调用路径；query 含捕捉元素时只聚合被捕捉节点与最后一个被捕捉节点的整棵子树（按调用顺序压缩未捕获的祖先），每次匹配都会并入图中。时间片只决定聚合哪些树，不裁剪事件时间，聚合出的所有调用路径都会打印。加 `-fs <path>` 时改为写 folded stacks 文件（每行 `帧1;帧2;...;帧N <微秒>`，权重为该路径的自身耗时，各行之和等于报告 `Total`；导出全部打印路径，帧名里的 `;`/换行/制表符会被替换），可直接用 `flamegraph.pl result.folded > result.svg` 出图。
-- `-ms`：报告 trace 声明（LLM / memory tracing 通道）的 memory tag、tracker 与 tag set。每个 spec 输出其 id 与名字；tag 同时输出 **FullName** 与 **Name**（无父节点时两者相同，有父节点时 Name 是 FullName 中最后一个 `/` 之后的段），以及父 tag 与所属 tag set 的 id 与名字（无父节点/无 tag set 显示为 `None`，trace 未声明的非零 id 显示为 `Unknown`），从而可以把 memory 采样里携带的 id 解析成名字；同名 tag 的不同 id 会分别报告，不会合并。输出按 trace 中 spec 的声明顺序排列。当前只报告 spec，`OnMemoryTagSnap` 预留为空，尚未统计采样值；trace 未采集 memory 通道时输出 `No memory spec is recorded in the trace.`。
+- `-ms`：按 **EventQuery** 选择内存 tag，并按「每个 tracker × 每个内存 tag」聚合该 tag 的全部快照值。query 语义随内存数据形状而变：`&Thread=(^...^)` 匹配产生快照的 **tracker 名**（如 `Default`/`Platform`，不带则选全部）；链的每个元素从根开始依次匹配 tag 名字（父级路径 `A/B/C`）的**一段**，选中的是最后一个元素那一段及其下所有 tag（`(^A^)->(^B^)` → `A/B`、`A/B/C`…，`%` 匹配任意段）；时间条件是**时间点**语义：`Time=[a,b]` 取 `a <= t <= b`（含边界），`ITime=[a,b]` 取 `a < t < b`（严格在内，可能为空）。每行输出 `Count`（携带该 tag 的快照数）、`First`/`Last`（首/末快照时间与该时刻的值）、`Max`/`Min`（最大值/最小值及其所在时刻）、`Mean`（全部值的平均）；**值按 1024 进制带单位**（`B`/`KB`/`MB`/`GB`，≥1 GB 用 GB，保留 2 位小数）。行顺序为 query 序号 → tracker 名 → tag 名。加 `-csv <path>` 时写 CSV（值为字节，单位由列名 `_B` 表示）。只累加快照里实际带 value 的 tag；trace 未采集 memory 通道或 query 未选中任何 tag 时输出 `No memory tag is selected by the query, or the trace carries no memory tag snapshot.`。
+- `-mv`：按 **EventQuery** 选择内存 tag（语义与 `-ms` 相同），按「每个 tracker × 每个 tag」打印**按时间顺序**的 `time-value` 对。每个 tag 最多打印 `-mvn` 个采样点（默认 **100**，0 表示全部）：超过上限时按时间间隔均分取 N 个时间点（含首末），每个时间点取**最近**的实际采样点，重复只保留一次，因此实际打印数 ≤ N。每行标题给出 `Sample <打印数> of <总数>`，报告头给出总打印量；打印量超过 1000 时报告头打印 `Warning: ... which is a large report ...`。加 `-csv <path>` 时每行一个采样点，列为 `QueryIndex, Tracker, MemoryTag, SampleIndex, Time_s, Value_B`（值为字节）。- `-mt`：用一条正则同时搜索 memory tag、memory tracker 与 memory tag set，命中的 spec 输出 id 与名字：tag 给出 `FullName`、`Name`、父 tag 与所属 tag set 的 `id:名字`，末尾汇总命中数量。正则匹配完整名字，`-mt ".*"` 导出全部 spec。只解码 spec（`ParserRequireFlag::MEMORY_TAG`），快照事件跳过，但 trace 文件仍需完整读取，耗时主要由读文件决定。
 
 #### 构建 SKILL
 

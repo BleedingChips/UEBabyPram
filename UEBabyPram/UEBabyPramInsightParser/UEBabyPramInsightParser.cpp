@@ -736,6 +736,153 @@ namespace UEBabyPram::InsightParser
 		});
 	}
 
+
+	MemoryTagId MemoryTagSnapView::GetMemoryTagId(std::size_t index) const
+	{
+		if (std::holds_alternative<std::span<uint32 const>>(tag_span))
+		{
+			auto ref = std::get<std::span<uint32 const>>(tag_span);
+			if (index < ref.size())
+			{
+				return MemoryTagId{ref[index]};
+			}
+		}
+		else {
+			auto ref = std::get<std::span<int64 const>>(tag_span);
+			if (index < ref.size())
+			{
+				return MemoryTagId{ ref[index] };
+			}
+		}
+		return {};
+	}
+
+	std::optional<int64> MemoryTagSnapView::GetMemoryTagValue(std::size_t index) const
+	{
+		if (values.size() > index)
+		{
+			return values[index];
+		}
+		return std::nullopt;
+	}
+
+	std::size_t MemoryTagSnapView::GetMemoryTagValues(std::span<MemoryTagId const> requires_memory_tag_ids, std::span<int64> value_in_byte) const
+	{
+		// The output carries one value per requested tag, so a shorter output could not answer every tag of the request.
+		// The assertion is the contract of the caller, and a shorter output is still filled up to its own length instead
+		// of being overrun, so a caller which breaks the contract in a build without assertions corrupts no memory.
+		assert(value_in_byte.size() >= requires_memory_tag_ids.size());
+
+		std::size_t const require_count = std::min(requires_memory_tag_ids.size(), value_in_byte.size());
+		if (require_count == 0)
+		{
+			return 0;
+		}
+
+		// A value is read at the index of its tag, so the snapshot has to carry at least one value per tag: a snapshot
+		// whose values are fewer is not consistent, and it answers nothing instead of answering with the value of another
+		// tag. The output is left untouched in that case, and no tag of the request is answered.
+		std::size_t const tag_count = std::visit([](auto tags) { return tags.size(); }, tag_span);
+		if (values.size() < tag_count)
+		{
+			return 0;
+		}
+
+		// A slot starts as the marker of a tag which the snapshot does not carry, so a slot which the walk below never
+		// fills keeps the answer of a tag which the snapshot omits. No memory size ever reaches the marker.
+		constexpr int64 MissingValue = std::numeric_limits<int64>::max();
+		for (std::size_t require_index = 0; require_index < require_count; ++require_index)
+		{
+			value_in_byte[require_index] = MissingValue;
+		}
+
+		// The tags of the snapshot are walked first and every tag is looked up in the request, so the walk stops as soon as
+		// every requested tag is answered, instead of walking the tags of the snapshot once per requested tag. The tags of
+		// the snapshot are either 32 bit or 64 bit, which are the two interfaces of the trace parser, so the search reads
+		// the width of the view instead of converting the whole span into one width.
+		auto fill_output = [&](auto tags) {
+			// The count of the slots which carry an answer drives the end of the walk, the count of the tags which were
+			// found is the answer of the caller: a tag which the request carries more than once fills several slots but it
+			// is one tag which the snapshot carries.
+			std::size_t answered_count = 0;
+			std::size_t found_tag_count = 0;
+
+			for (std::size_t tag_index = 0; tag_index < tags.size() && answered_count < require_count; ++tag_index)
+			{
+				int64 tag_id = static_cast<int64>(tags[tag_index]);
+				bool is_tag_found = false;
+
+				for (std::size_t require_index = 0; require_index < require_count; ++require_index)
+				{
+					if (requires_memory_tag_ids[require_index].id != tag_id)
+					{
+						continue;
+					}
+
+					// A slot which an earlier tag of the snapshot answered is not written again, which is the case of a
+					// tag which the request carries more than once: every slot of it keeps the first value which the
+					// snapshot carries for it.
+					if (value_in_byte[require_index] != MissingValue)
+					{
+						continue;
+					}
+
+					value_in_byte[require_index] = values[tag_index];
+					answered_count += 1;
+					is_tag_found = true;
+				}
+
+				if (is_tag_found)
+				{
+					found_tag_count += 1;
+				}
+			}
+
+			return found_tag_count;
+		};
+
+		if (std::holds_alternative<std::span<uint32 const>>(tag_span))
+		{
+			return fill_output(std::get<std::span<uint32 const>>(tag_span));
+		}
+
+		return fill_output(std::get<std::span<int64 const>>(tag_span));
+	}
+
+	std::size_t MemoryTagSnapView::ForeachMemoryTagValue(Potato::TMP::FunctionRef<bool(MemoryTagId, int64)> func) const
+	{
+		std::size_t total_count = 0;
+		if (func)
+		{
+			if (std::holds_alternative<std::span<uint32 const>>(tag_span))
+			{
+				auto ref = std::get<std::span<uint32 const>>(tag_span);
+				auto min_index = std::min(ref.size(), values.size());
+				for (std::size_t ite = 0; ite < min_index; ++ite)
+				{
+					++total_count;
+					if (!func(MemoryTagId{ ref[ite] }, values[ite]))
+					{
+						break;
+					}
+				}
+			}
+			else {
+				auto ref = std::get<std::span<int64 const>>(tag_span);
+				auto min_index = std::min(ref.size(), values.size());
+				for (std::size_t ite = 0; ite < min_index; ++ite)
+				{
+					++total_count;
+					if (!func(MemoryTagId{ ref[ite] }, values[ite]))
+					{
+						break;
+					}
+				}
+			}
+		}
+		return total_count;
+	}
+
 	std::wstring_view ParserInterface::CoverStringView(wchar_t const* ScopeName, std::size_t ScopeNameLen)
 	{
 		if (ScopeName != nullptr && ScopeNameLen > 0)

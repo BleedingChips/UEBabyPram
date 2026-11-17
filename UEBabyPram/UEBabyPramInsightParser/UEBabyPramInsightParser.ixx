@@ -661,6 +661,32 @@ export namespace UEBabyPram::InsightParser
 			std::span<uint32 const>
 		> tag_span;
 		std::span<int64 const> values;
+		MemoryTrackerId GetTracker() const { return tracker_id; }
+		DurationSec GetTimePoint() const { return time; }
+		std::size_t GetValueCount() const { return values.size(); }
+		MemoryTagId GetMemoryTagId(std::size_t index) const;
+		std::optional<int64> GetMemoryTagValue(std::size_t index) const;
+		std::size_t ForeachMemoryTagValue(Potato::TMP::FunctionRef<bool(MemoryTagId, int64)>) const;
+		// Answer the value in bytes of every requested tag: the i-th element of value_in_byte is the value which this
+		// snapshot sampled for the i-th tag of requires_memory_tag_ids, and std::numeric_limits<int64>::max() when the
+		// snapshot does not carry that tag. The order of the output follows the order of the request, and the slots after
+		// the last requested tag are left untouched.
+		//
+		// The return value is the count of the requested tags which the snapshot carries, i.e. the count of the tags which
+		// were found instead of the count of the slots which were written, so the caller knows whether the answer covers
+		// the request without walking the output again. A tag which the request carries more than once fills several slots
+		// but it is one tag which the snapshot carries, so it is counted once.
+		//
+		// The snapshot answers nothing when it carries fewer values than tags, because a value is read at the index of its
+		// tag: the output is left untouched in that case and 0 is returned, so a caller reads the marker of a tag which the
+		// snapshot omits only from a snapshot whose two spans are consistent.
+		//
+		// The walk is done the other way around compared to the request: the tags of the snapshot are visited first, every
+		// tag is looked up in requires_memory_tag_ids, and the walk stops as soon as every requested tag is answered. A tag
+		// which the request carries more than once is answered once, by the first tag of the snapshot which carries it, so
+		// the weight of the walk is the count of the tags of the snapshot which are needed instead of the count of the
+		// tags of the snapshot times the count of the requested tags.
+		std::size_t GetMemoryTagValues(std::span<MemoryTagId const> requires_memory_tag_ids, std::span<int64> value_in_byte) const;
 	};
 
 	struct ParserInterface : private BaseParser

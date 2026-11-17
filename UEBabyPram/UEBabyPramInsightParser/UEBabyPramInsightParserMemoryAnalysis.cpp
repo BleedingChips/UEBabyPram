@@ -33,11 +33,18 @@ namespace UEBabyPram::InsightParser
 	{
 		auto& Builder = Context.InterfaceBuilder;
 
-		if (Parser.IsParserRequired(ParserRequireFlag::MEMORY))
+		// The specs and the snapshots are two parts of the channel which a parser requires separately: a parser which only
+		// resolves the id of a tag to a name requires the specs, and a parser which reports the values of the tags requires
+		// the snapshots as well, so the routes of the snapshots are not registered for the former.
+		if (Parser.IsParserRequired(ParserRequireFlag::MEMORY_TAG))
 		{
 			Builder.RouteEvent(RouteId_TagsSpec, "LLM", "TagsSpec");
 			Builder.RouteEvent(RouteId_TrackerSpec, "LLM", "TrackerSpec");
 			Builder.RouteEvent(RouteId_TagSetSpec, "LLM", "TagSetSpec"); // added in UE 5.6
+		}
+
+		if (Parser.IsParserRequired(ParserRequireFlag::MEMORY_VALUE))
+		{
 			Builder.RouteEvent(RouteId_TagValue, "LLM", "TagValue");
 		}
 	}
