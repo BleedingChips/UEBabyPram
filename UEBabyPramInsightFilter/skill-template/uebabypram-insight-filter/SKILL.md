@@ -41,8 +41,11 @@ UEBabyPramInsightFilter 是一个用于分析 Unreal Engine（UE4/UE5）`.utrace
 | 线程搜索 | `-ts, --thread_search <regex>` | 按线程名正则搜索线程 |
 | 内存统计 | `-ms, --memory_stat <query>` | 按 EventQuery 选择内存 tag，按 tracker × tag 聚合快照的值统计（首/末/最大/最小/平均），值带 B/KB/MB/GB 单位 |
 | 内存查询 | `-mt, --memory_tag <regex>` | 按正则搜索内存 tag / tracker / tag set 的 spec（只读 spec，不解析快照） |
-| 内存时间线 | `-mv, --memory_value <query>` | 按 EventQuery 选择 tag，按 tracker × tag 打印每个快照的 time-value 对（默认每个 tag 最多 100 个采样点，可 `-csv` 导出） || `-mvn, --max_value_count <count>` | `-mv` 每个 tag 最多打印多少个采样点，默认 100，0 表示全部 |
+| 内存时间线 | `-mv, --memory_value <query>` | 按 EventQuery 选择 tag，按 tracker × tag 打印曲线形状：首点、峰值（斜率转向处）、末点，每点带时间/值/斜率 || `--all_samples` | `-mv` 打印**全部采样点**（首点、全部中间点、末点），不再只打峰值；`-mvp`/`-mvs` 不生效，输出很大，建议配 `-csv` |
+| `-mvp, --max_peak_count <count>` | `-mv` 每个 tag 最多打印多少个峰值（首点/末点除外），默认 20，0 表示不限 |
+| `-mvs, --min_peak_sample_count <count>` | `-mv` 两个打印峰值之间至少隔多少个采样点，默认 5，0 表示不限 |
 | `-msr, --memory_sort <name\|mean\|max>` | `-ms` 行排序：`name`（默认，query→tracker→tag）、`mean`（平均值从大到小）、`max`（最大值从大到小） |
+| `-mst, --max_tag_count <count>` | `-ms` 最多打印多少个统计，0 表示不限，默认 0；超出时报告末尾提示 |
 
 `-r`、`-es`、`-ed`、`-ef`、`-ts`、`-ms`、`-mv`、`-mt` **不能同时使用**。
 
@@ -326,65 +329,73 @@ FEngineLoop::Tick;Frame;Tick_Engine 4364
 MemoryStatisticParser Output:
     (Memory Tag Statistic: the values which the snapshots of one tracker sampled for one memory tag which the query selects)
     (First/Last: ...; Max/Min: ...; Mean: ...)
-    Memory Tag <265>, Memory Tracker <2>, Memory Tag Set <1>, Memory Tag Statistic <9>
+    Sorted by: <name>
+    Memory Tag <265>, Memory Tracker <2>, Memory Tag Set <1>, Memory Tag Statistic <1>
 
 Query <0>:
         Tracker:<Default>, MemoryTag:<Mass>
             Count:<777>, First:[7m17.076858s]=<49.82 MB>, Last:[8m2.351220s]=<51.09 MB>, Max:[7m31.278041s]=<52.86 MB>, Min:[7m27.461665s]=<48.01 MB>, Mean:<50.63 MB>
-        Tracker:<Default>, MemoryTag:<Mass/ArchetypeChunk>
-            Count:<777>, First:[7m17.076858s]=<33.87 MB>, Last:[8m2.351220s]=<34.25 MB>, Max:[7m31.588344s]=<34.50 MB>, Min:[7m27.461665s]=<32.00 MB>, Mean:<34.14 MB>
+            Trend: Interval:[7m27.461665s, 7m31.278041s], Sample <7>, Slope StdDev:<4.99 MB/s>
+                20%: [7m28.302194s]=<52.55 MB>, Slope:<5.40 MB/s>
+                40%: [7m28.568873s]=<50.28 MB>, Slope:<-8.53 MB/s>
+                60%: [7m30.114857s]=<50.53 MB>, Slope:<166.41 KB/s>
+                80%: [7m30.114857s]=<50.53 MB>, Slope:<0.00 B/s>
 ```
 
 query 的读法与 `-es`/`-ed`/`-ef` 相同，但内存数据的形状不同，因此有三处语义不同：
 
 - **`Thread` → tracker**：`&Thread=(^...^)` 匹配的是产生快照的 **memory tracker 名字**（如 `Default`、`Platform`），不带 `Thread` 条件则选择所有 tracker；
-- **`Chain` → 父级链**：内存 tag 的名字就是它的父级路径（`A/B/C`），链的每个元素从根开始依次匹配**一段**名字；被选中的 tag 是**最后一个元素所匹配的那一段及其下所有 tag**。例如 `(^A^)->(^B^)` 选中 `A/B`、`A/B/C`、`A/B/C/D`…；`%` 匹配任意一段；名字段数少于链长的 tag 不会被选中；
+- **`Chain` → tag 全名**：内存 tag 的名字就是它的父级路径（`A/B/C`），链的每个元素从根开始依次匹配**一段**名字，并且**必须覆盖整个名字**才选中：`(^A^)->(^B^)` 只选 `A/B`（不再默认包含其子节点）；用 `%`（不带括号的元素）多走一层，例如 `(^A^)->(^B^)->%` 选 `A/B` 下一层的 tag，`(^Mass^)->%` 选 Mass 的 8 个子 tag；名字段数与链长不一致的 tag 不会被选中；
 - **时间条件是“时间点”而不是“时间段”**：快照的 `time` 是单个时间点，
   - `Time=[a,b]`：选中 `a <= t <= b` 的快照（含边界）；
   - `ITime=[a,b]`：选中 `a < t < b` 的快照（严格在内，可能为空）。
 
 其余规则：
 
-- 统计单位为 **per query × per tracker × per memory tag**，同一 tag 被多个 tracker 采样、或被多个 query 选中时会分别统计；
+- 统计单位为 **per tracker × per memory tag**：**不再区分 QueryIndex**，同一个 tag 无论被多少个 query 命中都只出现一次（重复给相同 query 也不会翻倍）；不同 tracker 采样同一 tag 时仍分别统计；
 - 每行含义：`Count`（携带该 tag 的快照数）、`First/Last`（时间+该时刻的值）、`Max/Min`（最大值/最小值及其所在时刻）、`Mean`（全部值的算术平均）；
 - **数值带单位**：按 1024 进制自动选 `B` / `KB` / `MB` / `GB`（≥1 GB 用 GB），保留 2 位小数，例如 `49.82 MB`、`9.42 GB`；
-- 行的顺序由 `-msr` 决定：默认 `name`（query 序号 → tracker 名 → tag 名，同一份 trace 输出稳定）、`mean`（平均值从大到小）、`max`（最大值从大到小）；同值时仍按 name 顺序，报告头会打印 `Sorted by: <name|mean|max>`；
+- 行的顺序：**先按 Tracker 名，再按 MemoryTag 名**；`-msr` 可把排序改成 `mean`（平均值从大到小）或 `max`（最大值从大到小），同值时仍按 tracker → tag 顺序，报告头会打印 `Sorted by: <...>`；文本报告按 tracker 分块（`Tracker:<名字>:`）；
+- **趋势统计**：每个 tag 还输出 `Trend`，区间取「第一次达到最大值的快照」到「第一次达到最小值的快照」，在该区间上按时间等分取 **20%/40%/60%/80%** 四个点（取最近的实际采样点），给出每点的时间、值，以及**每段斜率**——即「上一个节点 → 当前节点」的插值 `(v_i − v_{i−1}) / (t_i − t_{i−1})`，**带单位**（`B/s`、`KB/s`、`MB/s`、`GB/s`，可负）；最后给出四个斜率的**标准差** `Slope StdDev`（同样带单位）；
+- **打印数量上限**：`-mst <count>` 限制打印的统计条数（按 `-msr` 排序后取前 N 条，0 = 不限，默认 0）；被截断时报告末尾提示 `The report carries the first <N> statistic(s) of <M>`；
 - 只累加快照里实际带 value 的 tag（快照两个数组长度不一致时，多出的 tag 跳过）；
-- 加 `-csv <path>` 时改为写 CSV（不打印文本报告），每行一个统计，列为
-  `QueryIndex, Tracker, MemoryTag, Count, FirstTime_s, FirstValue_B, LastTime_s, LastValue_B, MaxTime_s, MaxValue_B, MinTime_s, MinValue_B, Mean_B`；
+- 加 `-csv <path>` 时改为写 CSV（不打印文本报告）：**CSV 固定按 tracker → MemoryTag 排序**（与文本报告的 `-msr` 排序无关），每行一个统计，列为
+  `Tracker, MemoryTag, Count, FirstTime_s, FirstValue_B, LastTime_s, LastValue_B, MaxTime_s, MaxValue_B, MinTime_s, MinValue_B, Mean_B, TrendStart_s, Trend20_s, Trend20_B, Trend40_s, Trend40_B, Trend60_s, Trend60_B, Trend80_s, Trend80_B, TrendEnd_s, Slope20_Bps, Slope40_Bps, Slope60_Bps, Slope80_Bps, SlopeStdDev_Bps`；
   CSV 里的值是**字节数**（不带单位），单位由列名 `_B` 表示，便于直接计算；
 - trace 未采集 memory 通道、或 query 未选中任何 tag 时，输出 `No memory tag is selected by the query, or the trace carries no memory tag snapshot.`。
 
 ### -mv 内存 tag 时间线
 
-`-ms` 只给聚合后的首/末/最大/最小/平均，`-mv` 则按 **每个 tracker × 每个 tag** 打印**按时间顺序的 time-value 对**：
+`-ms` 只给聚合值，`-mv` 则输出每个 tag 的**曲线形状**：**第一个采样点**、**最后一个采样点**，以及中间的**峰值**——即斜率由正变负、由负变正、或变为 0 的采样点，每个点打印时间、值和该点斜率（字节/秒，带单位）。
 
 ```powershell
 & ".\scripts\UEBabyPramInsightFilter.exe" -f "Capture.utrace" -mv "(^Mass^)"
-& ".\scripts\UEBabyPramInsightFilter.exe" -f "Capture.utrace" -mv "%&Thread=(^Platform^)" -mvn 20
-& ".\scripts\UEBabyPramInsightFilter.exe" -f "Capture.utrace" -mv "(^Mass^)" -csv ".\timeline.csv"
+& ".\scripts\UEBabyPramInsightFilter.exe" -f "Capture.utrace" -mv "(^Mass^)" -mvp 5 -mvs 50
+& ".\scripts\UEBabyPramInsightFilter.exe" -f "Capture.utrace" -mv "(^Mass^)" -csv ".\line.csv"
 ```
 
 ```text
-MemoryValueParser Output:
-    Memory Tag <265>, Memory Tracker <2>, Memory Tag Set <1>, Memory Value Line <9>
-    Limit of the samples of one tag: <5>, Sample <45> of <6993>
+    Memory Tag <265>, Memory Tracker <2>, Memory Tag Set <1>, Memory Value Line <1>
+    Limit of the peaks of one tag: <20>, Sample between the peaks: <5>, Point <3> of <777>
 
-Query <0>:
-        Tracker:<Default>, MemoryTag:<Mass>, Sample <5> of <777>
-            [7m17.076858s]=<49.82 MB>
-            [7m28.302194s]=<52.55 MB>
-            [7m39.688918s]=<51.09 MB>
-            [7m51.038856s]=<51.09 MB>
-            [8m2.351220s]=<51.09 MB>
+Tracker:<Default>:
+        Tracker:<Default>, MemoryTag:<Mass>, Point <3> of <777>
+            First: [7m17.076858s]=<49.82 MB>, Slope:<0.00 B/s>
+            Peak : [7m28.302194s]=<52.55 MB>, Slope:<-10.66 MB/s>
+            Last : [8m2.351220s]=<51.09 MB>, Slope:<0.00 B/s>
 ```
 
-- query 语义与 `-ms` 完全相同（`Thread` → tracker 名，链 → tag 父级链，`Time`/`ITime` → 快照时间点）；
-- **采样点上限**由 `-mvn` 控制（默认 **100**，0 表示全部）：超过上限时按**时间间隔均分**取 `N` 个时间点（含首、末），并对每个时间点取**最近**的实际采样点；重复命中的点只保留一次，所以实际打印数 ≤ N；
-- 每个 tag 的标题行给出 `Sample <打印数> of <总数>`；报告头给出总打印量；
-- 打印量超过 1000 个采样点时，报告头会打印一行 `Warning: ... which is a large report ...` 提示输出量较大（建议调小 `-mvn` 或用 `-csv` 写文件）；
-- `-csv <path>` 时每行一个采样点，列为 `QueryIndex, Tracker, MemoryTag, SampleIndex, Time_s, Value_B`（值为字节）；
-- 值同样带 `B`/`KB`/`MB`/`GB` 单位（文本报告），CSV 里为字节数。
+规则：
+
+- query 语义与 `-ms` 完全相同（`Thread` → tracker 名，链 → tag 全名，`Time`/`ITime` → 快照时间点），同样**不区分 QueryIndex**、不再包含子节点；
+- **首点与末点必然打印**；首点斜率取其向后的段，末点取其向前的段；
+- **小波过滤**：某峰值与上一个被保留峰值的差 < 两者最大值的 **5%** 时丢弃（首末点不受此限），避免分配器噪声淹没形状；
+- **峰值间距**：`-mvs`（默认 **5**）——距上一个保留峰值不足该采样点数的峰值丢弃；
+- **峰值数量上限**：`-mvp`（默认 **20**）——超过时在保留的峰值中**等距抽取**，保证覆盖整段时间线；
+- **导出全部采样点**：`--all_samples` 时跳过上述峰值流程，逐点打印每个采样（`Kind` 为 `First`/`Sample`/`Last`），用于画完整曲线或交给外部工具聚合；此时 `-mvp`/`-mvs` 不生效，报告头会显示 `All samples, Point <N> of <N>`；
+- **选中所有层级的 tag**：链必须覆盖全名，所以「全部 tag」用多条 query 组合——`-mv "%" -mv "%->%" -mv "%->%->%" -mv "%->%->%->%"`（同一 tag 只保留一条，实测 264 个 tag × 777 快照 = 205128 行），`-ms` 同理；
+- 报告头给出 `Point <打印点数> of <总采样点数>`，打印量超过 1000 点时提示输出较大；
+- `-csv <path>` 时每行一个打印点，列为 `Tracker, MemoryTag, PointIndex, Kind, Time_s, Value_B, Slope_Bps`（`Kind` 为 `First`/`Peak`/`Last`，`--all_samples` 时为 `First`/`Sample`/`Last`；值单位为字节、斜率为字节/秒）。
 ### -mt 内存 spec 搜索
 
 用一条正则同时搜索 trace 里的 memory tag、memory tracker 与 memory tag set，命中的 spec 输出 id 与名字：

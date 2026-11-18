@@ -4,6 +4,7 @@ export module UEBabyPramInsightFilterMemoryStatistic;
 
 import UEBabyPramInsightFilterParser;
 import UEBabyPramInsightFilterEventFilter;
+import UEBabyPramInsightFilterMemoryQuery;
 import UEBabyPramInsightParser;
 import UEBabyPramInsightParserMemoryTagsManager;
 import Potato;
@@ -43,8 +44,9 @@ export namespace UEBabyPram::InsightFilter
 	//     boundary of one, and ITime selects the snapshots which are strictly inside one of its slices, which is a part of
 	//     the slices and may select no snapshot at all.
 	//
-	// The statistics of one memory tag are kept per tracker and per query, because every tracker samples the tag and the
-	// same tracker may be selected by more than one query. Every unit is reported with the first and the last snapshot
+	// The statistics of one memory tag are kept per tracker, and a tag which more than one query selects is still one
+	// statistic: the queries only decide which tags are selected, not how many rows they produce. Every unit is reported
+	// with the first and the last snapshot
 	// which carries it, the snapshots of its largest and of its smallest value, and the mean of the values of all of its
 	// snapshots in the selected range.
 	struct MemoryStatisticParser : public Parser
@@ -74,14 +76,23 @@ export namespace UEBabyPram::InsightFilter
 			std::optional<std::filesystem::path> csv_path;
 			// The order of the report, see SortKind.
 			SortKind sort = SortKind::Name;
+			// How many statistics the report prints, in the order which sort asks for. 0 prints every statistic.
+			std::size_t max_tag_count = 0;
 			std::pmr::memory_resource* resource = std::pmr::get_default_resource();
 		};
+
+		// The sample of a memory tag, which the time line of the statistics is kept by.
+		using ValueSample = MemoryValueSample;
 
 		// The statistics of one memory tag of one tracker which one query selects, they are accumulated from the snapshots
 		// in the order of their time.
 		struct TagStatistic
 		{
-			std::size_t query_index = 0;
+			explicit TagStatistic(std::pmr::memory_resource* resource) : samples(resource) {}
+			TagStatistic(TagStatistic const&) = default;
+			TagStatistic(TagStatistic&&) = default;
+			TagStatistic& operator=(TagStatistic&&) = default;
+
 			MemoryTrackerId tracker_id;
 			MemoryTagId tag_id;
 
@@ -101,6 +112,32 @@ export namespace UEBabyPram::InsightFilter
 			// from. The sum is wider than the value, so a long trace does not overflow it.
 			std::size_t count = 0;
 			long double sum = 0.0L;
+
+			// Every sample of the tag, which the trend of the statistic is computed from: the samples between the first
+			// snapshot of the largest value and the first snapshot of the smallest one are the ones which the trend
+			// reports, so they are kept while the trace is read.
+			std::pmr::vector<ValueSample> samples;
+		};
+
+		// The trend of a statistic: the interval between the first snapshot of the largest value and the first snapshot of
+		// the smallest one, the value at 20%, 40%, 60% and 80% of that interval, and the slope of the values in it.
+		struct TagTrend
+		{
+			// The ends of the interval, and the count of the samples which it carries.
+			DurationSec begin_time = DurationSec::zero();
+			int64 begin_value = 0;
+			DurationSec end_time = DurationSec::zero();
+			int64 end_value = 0;
+			std::size_t sample_count = 0;
+
+			// The four points of the interval, and the slope of the values from the previous point to every one of them,
+			// which is a size in bytes per second. The first slope is the one from the beginning of the interval.
+			std::array<DurationSec, 4> time_points = {};
+			std::array<int64, 4> values = {};
+			std::array<double, 4> slopes = {};
+
+			// The standard deviation of the four slopes, which tells whether the values grow at a steady speed.
+			double slope_std_dev = 0.0;
 		};
 
 		MemoryStatisticParser(Config config = {});
@@ -133,9 +170,14 @@ export namespace UEBabyPram::InsightFilter
 		// computable and the unit is the name of the column.
 		bool WriteCSV();
 
-		// Find the statistics of the tag of the tracker for the query, and create them when the snapshot is the first one
-		// which carries the tag.
-		TagStatistic& FindTagStatistic(std::size_t query_index, MemoryTrackerId tracker_id, MemoryTagId tag_id);
+		// Find the statistics of the tag of the tracker, and create them when the snapshot is the first one which carries the
+		// tag. The queries only decide whether a tag is selected: a tag which more than one query selects is one statistic,
+		// not one per query, so the same tag of the same tracker is reported once.
+		TagStatistic& FindTagStatistic(MemoryTrackerId tracker_id, MemoryTagId tag_id);
+
+		// Compute the trend of the statistics: the interval between the first snapshot of the largest value and the first
+		// snapshot of the smallest one, the value at 20%, 40%, 60% and 80% of the interval, and the slope of the values.
+		TagTrend ComputeTrend(TagStatistic const& statistic);
 
 		// The resource of the specs and of the statistics, it is Config::resource and the storages below are allocated
 		// from it.
@@ -148,9 +190,10 @@ export namespace UEBabyPram::InsightFilter
 		std::optional<std::filesystem::path> csv_path;
 		// The order of the report, it is Config::sort.
 		SortKind sort = SortKind::Name;
-		// The queries which select the tracker and the time point of the snapshot which is being read, so the walk of the
-		// tags of one snapshot only asks the question of the chain. It is reused by every snapshot, so reading a trace with
-		// millions of snapshots does not allocate once per snapshot.
-		std::pmr::vector<std::size_t> snapshot_query_indices;
+		// How many statistics the report prints, it is Config::max_tag_count and 0 prints every statistic.
+		std::size_t max_tag_count = 0;
+		// Whether the tracker and the time point of the snapshot which is being read are selected by any query, which decides
+		// whether the walk of the tags of that snapshot asks the question of the chain at all.
+		bool is_snapshot_selected = false;
 	};
 }

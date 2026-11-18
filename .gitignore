@@ -444,6 +444,11 @@ vsxmake*/
 # generated skill
 Skills/*
 
+# local analysis artifacts: the reports, the folded stacks and the CSVs which an
+# analysis writes, they live under build/ (which is already ignored) or in a top
+# level analysis/ directory when the build directory is cleaned
+/analysis/
+
 # UE
 !UEBabyPram/MiniUESource/Runtime/OodleDataCompression/Sdks/2.9.14/lib/Win64/*.lib
 *.txt

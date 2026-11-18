@@ -1,4 +1,4 @@
-module;
+﻿module;
 
 #include <cassert>
 #include <re2/re2.h>
@@ -249,20 +249,25 @@ Options:
       every memory tag per tracker: the first snapshot which carries the tag and its value, the last
       one and its value, the snapshot of the largest value, the snapshot of the smallest value, and
       the mean of the values of every snapshot which carries the tag. Every value is written with its
-      unit, which is B, KB, MB or GB, with 2 decimals. The order of the rows is the order of the data,
-      use -msr to order them by the mean or by the largest value.
+      unit, which is B, KB, MB or GB, with 2 decimals. The rows are ordered by the tracker and then by the
+      tag, use -msr to put the largest mean or the largest value first.
       The query is the query of -es/-ed/-ef, and it reads the memory data as follows:
         Thread=(^Regex^)  matches the name of the memory tracker which produces the snapshots, and a
                           query which carries no Thread condition selects every tracker;
-        (^A^)->(^B^)      the chain is matched against the parent chain of the memory tag: the
-                          segments of the name are matched from the root, and the tags which are
-                          selected are the tag of the last element of the chain and every tag below
-                          it, ex: A/B, A/B/C and A/B/C/D for the chain (^A^)->(^B^). The element
-                          which matches any event, %, matches any segment;
+        (^A^)->(^B^)      the chain names one memory tag by its parent chain: the segments of the
+                          name are matched from the root, and a tag is selected only when the chain
+                          covers its whole name, ex: (^A^)->(^B^) selects A/B and nothing below it.
+                          The element which matches any event, %, matches any segment, so a chain
+                          which ends with % walks one level deeper, ex: (^A^)->(^B^)->% selects the
+                          tags of the level below A/B, and (^A^) selects A alone;
         Time=[a,b]        selects the snapshots whose time point is inside a slice or on the
                           boundary of one;
         ITime=[a,b]       selects the snapshots whose time point is strictly inside a slice, so a
                           slice may select no snapshot at all.
+      Every statistic also carries its trend: the interval from the first snapshot of the largest value to
+      the first snapshot of the smallest one, the value at 20%, 40%, 60% and 80% of that interval, the slope
+      of the part of the interval which ends at every one of those points, which is a size in bytes per
+      second, and the standard deviation of the four slopes.
       The statistics are written into a CSV file instead of the text report by -csv <path>.
       The trace has to carry the LLM channel (the memory tracing of Unreal Insights); a trace which
       was captured without it declares no memory spec and carries no snapshot.
@@ -270,15 +275,17 @@ Options:
 )HELP">(*Log::GetSTDOutPrinter());
 
 			Log::LogTo<Log::DefaultLogFormatter, LR"HELP(  -mv, --memory_value <query>
-      Collect the memory tag snapshots which the query selects and report the time line of every memory
-      tag per tracker: the time and the value of every snapshot which carries the tag, in the order of
-      the time. The query is read the same way as the query of -ms, see it for the conditions.
-      A tag may be sampled thousands of times, so only -mvn samples of it are printed by default: the
-      samples are picked by an even time interval from the first sample of the tag to its last one, and
-      the sample which is nearest to every point of the interval is the one which is printed, so the
-      printed time line keeps the shape of the values. The report tells how many samples of how many
-      are printed, and it warns when the count is large. The time lines are written into a CSV file
-      instead of the text report by -csv <path>.
+      Collect the memory tag snapshots which the query selects and report the shape of the time line of
+      every memory tag per tracker: the first sample of the tag, the samples where the slope of the
+      values turns, which are the peaks and the valleys of the time line, and the last sample. Every
+      point is printed with its time, its value and the slope of the values at it, which is a size in
+      bytes per second. The query is read the same way as the query of -ms, see it for the conditions.
+      A peak which is less than 5% away from the peak before it, measured against the larger of the two
+      values, is a small wave and is dropped, so the noise of the allocator does not hide the shape of
+      the tag; the first and the last sample are always printed. The count of the peaks of one tag is
+      limited by -mvp and two printed peaks are at least -mvs samples apart. The report tells how many
+      points of how many samples are printed, and it warns when the count is large. The time lines are
+      written into a CSV file instead of the text report by -csv <path>.
       -r, -es, -ed, -ef, -ts, -ms, -mv and -mt can not be used at the same time.
 )HELP">(*Log::GetSTDOutPrinter());
 
@@ -306,12 +313,26 @@ Options:
       top count (-tx), and the range from the shortest duration of the single occurrence to the longest
       one is split into this count of buckets.
 
-  -mvn, --max_value_count <count>
-      How many samples of one memory tag should be printed with -mv, default is 100, and 0 prints every
-      sample. The samples are picked by an even time interval from the first sample of the tag to its
-      last one, and the sample which is nearest to every point of the interval is the one which is
-      printed. A tag which the trace samples a thousand times is printed with 100 of its samples, and
-      the report warns when the count of all of the printed samples is large.
+  --all_samples
+      Print every sample of every memory tag which the query selects with -mv, instead of the first sample,
+      the peaks and the last one. It is the mode which exports the whole time line, ex: for a chart which is
+      drawn from every sample or for a tool which aggregates the samples itself, and -mvp and -mvs do not
+      apply to it. A trace which carries a memory snapshot per frame produces a very large report in this
+      mode, so the CSV file of -csv is the way to read it.
+
+  -mvp, --max_peak_count <count>
+      How many peaks of one memory tag should be printed with -mv, default is 20, and 0 prints every peak
+      which survives the filter of the small waves. A peak is a sample where the slope of the values
+      turns, i.e. where it goes from positive to negative, from negative to positive, or to zero, so the
+      report carries the shape of the time line of the tag instead of its samples. When the tag carries
+      more peaks than this count, the peaks are picked evenly from the ones which survive, so the report
+      still covers the whole time line.
+
+  -mvs, --min_peak_sample_count <count>
+      How many samples are between two printed peaks of a tag at least, default is 5, and 0 drops no peak
+      for the distance. A peak which is fewer samples after the previous printed peak is dropped, which
+      keeps a tag which oscillates around one value, ex: the allocator of the trace itself, from being
+      reported as thousands of peaks. The first and the last sample of a tag are always printed.
 
   -msr, --memory_sort <name|mean|max>
       The order of the rows of -ms: name is the order of the data, the query, the tracker and the tag,
@@ -319,7 +340,14 @@ Options:
       which a tag was sampled with first. The order by name decides between two rows of the same value,
       so the report of the same trace is always the same.
 
-  -csv, --csv <path>
+  -mst, --max_tag_count <count>
+      How many memory tag statistics should be printed with -ms, in the order which -msr asks for, 0
+      for no limit, default is 0. The report tells how many of the selected tags it carries when the
+      limit leaves the rest out. The CSV file of -ms carries the same rows.
+
+)HELP">(*Log::GetSTDOutPrinter());
+
+			Log::LogTo<Log::DefaultLogFormatter, LR"HELP(  -csv, --csv <path>
       Write the report into <path> as a CSV file instead of printing it, the file is created and its
       previous content is emptied. The content is UTF-8 without a BOM and the fields follow RFC 4180, so
       a field which carries ',', '"' or a line break is quoted. The option is accepted by four modes:
@@ -328,12 +356,17 @@ Options:
         Kind is Name for a statistic of one event name and Regex for a merged element, and EventIdCount
         is the count of the event ids which the statistic of the row carries. The rows are ordered by the
         query and by the total duration of the statistic, the longest one first.
-      -ms: every memory tag statistic is one row, in the order which -msr asks for, and the columns are
-        QueryIndex, Tracker, MemoryTag, Count, FirstTime_s, FirstValue_B, LastTime_s, LastValue_B,
-        MaxTime_s, MaxValue_B, MinTime_s, MinValue_B and Mean_B. The values are bytes without a unit, so
-        the file is computable and the unit is the name of the column.
-      -mv: every printed sample of a memory tag is one row, and the columns are QueryIndex, Tracker,
-        MemoryTag, SampleIndex, Time_s and Value_B, with the value in bytes like the columns of -ms.
+      -ms: every memory tag statistic is one row, ordered by the tracker and then by the tag (and by
+        the value first when -msr asks for it), and the columns are Tracker, MemoryTag, Count, FirstTime_s,
+        FirstValue_B, LastTime_s, LastValue_B, MaxTime_s, MaxValue_B, MinTime_s, MinValue_B, Mean_B and the
+        trend columns TrendStart_s, Trend20_s, Trend20_B, Trend40_s, Trend40_B, Trend60_s, Trend60_B,
+        Trend80_s, Trend80_B, TrendEnd_s, Slope20_Bps, Slope40_Bps, Slope60_Bps, Slope80_Bps and
+        SlopeStdDev_Bps. The values are bytes without a unit and the slopes are bytes per second, so the
+        file is computable and the unit is the name of the column.
+      -mv: every printed point of a memory tag is one row, ordered by the tracker and then by the tag,
+        and the columns are Tracker, MemoryTag, PointIndex, Kind, Time_s, Value_B and Slope_Bps, where
+        Kind is First, Peak or Last, the value is in bytes like the columns of -ms, and the slope is in
+        bytes per second.
       The default mode, i.e. when neither -r, -es, -ed, -ef, -ts, -ms, -mv nor -mt is given: every
         analyzed frame is one row, ordered by the time, and the columns are FrameIndex, Begin_s, End_s,
         Duration_ms, ENCS_ms and FPS. The rows cover every analyzed frame, not only the longest ones
@@ -727,7 +760,12 @@ Options:
 					return -1;
 				}
 			}
-			else if (argv_string == "-mvn" || argv_string == "--max_value_count")
+			else if (argv_string == "--all_samples")
+			{
+				// The mode which prints the whole time line of every selected tag instead of its peaks.
+				memory_value_config.all_samples = true;
+			}
+			else if (argv_string == "-mvp" || argv_string == "--max_peak_count")
 			{
 				if (i + 1 < argc)
 				{
@@ -735,16 +773,37 @@ Options:
 					std::string_view sub_argv = argv[i + 1];
 					if (Format::DirectDeformat(sub_argv, value))
 					{
-						memory_value_config.max_value_count = value;
+						memory_value_config.max_peak_count = value;
 						++i;
 					}
 					else {
-						Log::Log<CommandLineLogCategory, Log::LogLevel::Error, L"-mvn --max_value_count <count> : <{}> is not a valid count, use -h for detailed help">(sub_argv);
+						Log::Log<CommandLineLogCategory, Log::LogLevel::Error, L"-mvp --max_peak_count <count> : <{}> is not a valid count, use -h for detailed help">(sub_argv);
 						return -1;
 					}
 				}
 				else {
-					Log::Log<CommandLineLogCategory, Log::LogLevel::Error, L"Unsupport command -mvn --max_value_count, use -h for detailed help">();
+					Log::Log<CommandLineLogCategory, Log::LogLevel::Error, L"Unsupport command -mvp --max_peak_count, use -h for detailed help">();
+					return -1;
+				}
+			}
+			else if (argv_string == "-mvs" || argv_string == "--min_peak_sample_count")
+			{
+				if (i + 1 < argc)
+				{
+					std::size_t value = 0;
+					std::string_view sub_argv = argv[i + 1];
+					if (Format::DirectDeformat(sub_argv, value))
+					{
+						memory_value_config.min_peak_sample_count = value;
+						++i;
+					}
+					else {
+						Log::Log<CommandLineLogCategory, Log::LogLevel::Error, L"-mvs --min_peak_sample_count <count> : <{}> is not a valid count, use -h for detailed help">(sub_argv);
+						return -1;
+					}
+				}
+				else {
+					Log::Log<CommandLineLogCategory, Log::LogLevel::Error, L"Unsupport command -mvs --min_peak_sample_count, use -h for detailed help">();
 					return -1;
 				}
 			}
@@ -775,6 +834,27 @@ Options:
 				}
 				else {
 					Log::Log<CommandLineLogCategory, Log::LogLevel::Error, L"Unsupport command -msr --memory_sort, use -h for detailed help">();
+					return -1;
+				}
+			}
+			else if (argv_string == "-mst" || argv_string == "--max_tag_count")
+			{
+				if (i + 1 < argc)
+				{
+					std::size_t value = 0;
+					std::string_view sub_argv = argv[i + 1];
+					if (Format::DirectDeformat(sub_argv, value))
+					{
+						memory_config.max_tag_count = value;
+						++i;
+					}
+					else {
+						Log::Log<CommandLineLogCategory, Log::LogLevel::Error, L"-mst --max_tag_count <count> : <{}> is not a valid count, use -h for detailed help">(sub_argv);
+						return -1;
+					}
+				}
+				else {
+					Log::Log<CommandLineLogCategory, Log::LogLevel::Error, L"Unsupport command -mst --max_tag_count, use -h for detailed help">();
 					return -1;
 				}
 			}

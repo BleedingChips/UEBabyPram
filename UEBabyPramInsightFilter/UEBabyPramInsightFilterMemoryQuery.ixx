@@ -20,11 +20,11 @@ export namespace UEBabyPram::InsightFilter
 	//
 	//   - The Thread condition selects the memory trackers: a snapshot is produced by one tracker, so the condition is
 	//     matched against the name of the tracker, and a query which carries no Thread condition selects every tracker.
-	//   - The call chain is matched against the parent chain of the memory tag: a tag is named by the segments of its
-	//     ancestors, ex: A/B/C, so every element of the chain is matched against one segment from the root, and the tags
-	//     which the query selects are the tag of the last element of the chain and every tag below it, ex: the chain
-	//     (^A^) -> (^B^) selects A/B, A/B/C, A/B/C/D and so on. The element which matches any event, %, matches any segment,
-	//     and a tag whose name carries fewer segments than the chain is never selected.
+	//   - The call chain names one memory tag by its parent chain: a tag is named by the segments of its ancestors, ex:
+	//     A/B/C, so every element of the chain is matched against one segment from the root, and a tag is selected only when
+	//     the chain covers its whole name, ex: the chain (^A^) -> (^B^) selects A/B and nothing below it. The element which
+	//     matches any event, % , matches any segment, so a chain which carries % at its end walks one level deeper, and a
+	//     tag whose name carries a different count of segments than the chain is never selected.
 	//   - The time condition is applied to the time point of a snapshot instead of the time range of an occurrence: the time
 	//     of a snapshot is a single point, so Time selects the snapshots which are inside one of its slices or on the
 	//     boundary of one, and ITime selects the snapshots which are strictly inside one of its slices, which is a part of
@@ -38,4 +38,16 @@ export namespace UEBabyPram::InsightFilter
 
 	// Whether the name of a memory tag is selected by the chain of the query.
 	bool IsMemoryTagNameMatched(EventQuery const& query, std::u8string_view tag_full_name);
+
+	// The width of the value of a memory tag, taken from the id of a tag instead of the int64 of the platform types, which
+	// this module does not include: the value of a tag is the int64 of the trace, so the two are the same type.
+	using MemoryValue = decltype(MemoryTagId{}.id);
+
+	// One sample of a memory tag: the time point of a snapshot and the value which the snapshot sampled for the tag. It is
+	// the unit which the parsers of the memory channel keep, so they share it instead of declaring one each.
+	struct MemoryValueSample
+	{
+		DurationSec time = DurationSec::zero();
+		MemoryValue value = 0;
+	};
 }

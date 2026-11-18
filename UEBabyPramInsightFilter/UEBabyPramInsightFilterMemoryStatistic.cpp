@@ -36,6 +36,32 @@ namespace UEBabyPram::InsightFilter
 				? std::u8string_view{ u8"<Unknown>" }
 				: name;
 		}
+		// The square root of a value, by the Newton method, instead of std::sqrt: the C++ header which carries std::sqrt
+		// cannot be included in the global module fragment of this translation unit, because its specializations of
+		// std::formatter would be ambiguous with the ones which the std module carries.
+		double SqrtValue(double value)
+		{
+			if (!(value > 0.0))
+			{
+				return 0.0;
+			}
+
+			double estimate = value > 1.0 ? value : 1.0;
+
+			for (int iteration = 0; iteration < 32; ++iteration)
+			{
+				double next = 0.5 * (estimate + value / estimate);
+				if (next == estimate)
+				{
+					break;
+				}
+				estimate = next;
+			}
+
+			return estimate;
+		}
+
+
 		// The name of the order of the report, which the report carries so the reader knows why the rows are where they are.
 		std::wstring_view SortKindName(MemoryStatisticParser::SortKind sort)
 		{
@@ -97,6 +123,11 @@ namespace UEBabyPram::InsightFilter
 				}
 			}
 
+			// The samples are kept as well, because the trend of the statistic is computed from the samples between the
+			// first snapshot of the largest value and the first snapshot of the smallest one, which is only known at the end
+			// of the trace.
+			statistic.samples.push_back(MemoryStatisticParser::ValueSample{ time, value });
+
 			statistic.count += 1;
 			statistic.sum += static_cast<long double>(value);
 		}
@@ -133,13 +164,8 @@ namespace UEBabyPram::InsightFilter
 			}
 
 			// The order by name is the fallback of every order, so two statistics which carry the same value are still
-			// ordered by the data and the report of the same trace never depends on the sort of the storage.
+			// ordered by the tracker and the tag, and the report of the same trace never depends on the sort of the storage.
 			auto is_name_less = [](ReportRow const& left, ReportRow const& right) {
-				if (left.statistic->query_index != right.statistic->query_index)
-				{
-					return left.statistic->query_index < right.statistic->query_index;
-				}
-
 				if (left.tracker_name != right.tracker_name)
 				{
 					return left.tracker_name < right.tracker_name;
@@ -195,7 +221,7 @@ namespace UEBabyPram::InsightFilter
 		, queries(&resource)
 		, csv_path(std::move(in_config.csv_path))
 		, sort(in_config.sort)
-		, snapshot_query_indices(&resource)
+		, max_tag_count(in_config.max_tag_count)
 	{
 		for (auto& query : in_config.queries)
 		{
@@ -236,25 +262,25 @@ namespace UEBabyPram::InsightFilter
 			tracker_name = tracker->name;
 		}
 
-		// The queries which select the tracker and the time point of the snapshot are decided once per snapshot, so the
-		// walk of the tags only asks the question of the chain for them.
-		snapshot_query_indices.clear();
-		for (std::size_t query_index = 0; query_index < queries.size(); ++query_index)
+		// Whether any query selects the tracker and the time point of the snapshot is decided once per snapshot, so the walk
+		// of the tags only asks the question of the chain.
+		is_snapshot_selected = false;
+		for (auto const& query : queries)
 		{
-			auto const& query = queries[query_index];
 			if (IsMemoryTrackerMatched(query, tracker_name) && IsMemoryTimePointMatched(query, time))
 			{
-				snapshot_query_indices.push_back(query_index);
+				is_snapshot_selected = true;
+				break;
 			}
 		}
 
-		if (snapshot_query_indices.empty())
+		if (!is_snapshot_selected)
 		{
 			return;
 		}
 
-		// Every tag of the snapshot is one unit per query which selects it: the name of the tag is the chain of its
-		// parents, so the chain of the query is matched against the segments of the name.
+		// Every tag of the snapshot is one unit, no matter how many queries select it: the name of the tag is the chain of its
+		// parents, so a tag is accumulated once as soon as any query matches its name.
 		snap_view.ForeachMemoryTagValue([&](MemoryTagId tag_id, int64 value) {
 			std::u8string_view tag_full_name;
 			if (auto tag = memory_tags_manager.FindTag(tag_id); tag != nullptr)
@@ -267,26 +293,29 @@ namespace UEBabyPram::InsightFilter
 				return true;
 			}
 
-			for (std::size_t query_index : snapshot_query_indices)
+			bool is_tag_selected = false;
+			for (auto const& query : queries)
 			{
-				if (!IsMemoryTagNameMatched(queries[query_index], tag_full_name))
+				if (IsMemoryTagNameMatched(query, tag_full_name))
 				{
-					continue;
+					is_tag_selected = true;
+					break;
 				}
+			}
 
-				auto& statistic = FindTagStatistic(query_index, tracker_id, tag_id);
-				AccumulateStatistic(statistic, time, value);
+			if (is_tag_selected)
+			{
+				AccumulateStatistic(FindTagStatistic(tracker_id, tag_id), time, value);
 			}
 
 			return true;
 		});
 	}
 
-	auto MemoryStatisticParser::FindTagStatistic(std::size_t query_index, MemoryTrackerId tracker_id, MemoryTagId tag_id) -> TagStatistic&
+	auto MemoryStatisticParser::FindTagStatistic(MemoryTrackerId tracker_id, MemoryTagId tag_id) -> TagStatistic&
 	{
-		auto found = std::find_if(tag_statistics.begin(), tag_statistics.end(), [query_index, tracker_id, tag_id](TagStatistic const& statistic) {
-			return statistic.query_index == query_index
-				&& statistic.tracker_id == tracker_id
+		auto found = std::find_if(tag_statistics.begin(), tag_statistics.end(), [tracker_id, tag_id](TagStatistic const& statistic) {
+			return statistic.tracker_id == tracker_id
 				&& statistic.tag_id == tag_id;
 		});
 
@@ -296,8 +325,12 @@ namespace UEBabyPram::InsightFilter
 		}
 
 		// The statistics of a tag which is sampled for the first time are created here, so the count of the entries is the
-		// count of the tags which the queries select.
-		return tag_statistics.emplace_back(TagStatistic{ query_index, tracker_id, tag_id });
+		// count of the tags which the queries select. The entry owns the samples of the tag, so it is created with the resource
+		// of the parser.
+		auto& statistic = tag_statistics.emplace_back(&resource);
+		statistic.tracker_id = tracker_id;
+		statistic.tag_id = tag_id;
+		return statistic;
 	}
 
 	bool MemoryStatisticParser::IsParserRequired(ParserRequireFlag flag) const
@@ -363,19 +396,29 @@ namespace UEBabyPram::InsightFilter
 			return true;
 		}
 
-		// The statistics are reported by the query which accumulated them, then by the name of the tracker and of the tag,
-		// so the report of the same trace is always the same instead of following the order in which the tags were sampled.
-		std::size_t current_query_index = std::numeric_limits<std::size_t>::max();
+		// The statistics are reported by the name of the tracker and then by the name of the tag, so the report of the same
+		// trace is always the same instead of following the order in which the tags were sampled.
+		std::u8string_view current_tracker_name;
+
+		// The report prints the first statistics of the order which -msr asks for, and the count of them is limited by -mst.
+		std::size_t printed_count = 0;
 
 		for (auto const& row : BuildReportRows(*this, sort, &resource))
 		{
+			if (max_tag_count != 0 && printed_count >= max_tag_count)
+			{
+				break;
+			}
+
+			++printed_count;
+
 			auto const& statistic = *row.statistic;
 
-			if (statistic.query_index != current_query_index)
+			// The rows are ordered by the tracker and then by the tag, so a tag of the next tracker starts its own block.
+			if (current_tracker_name != row.tracker_name)
 			{
-				current_query_index = statistic.query_index;
-				// The empty line before the queries separates the block of every query from the one above it.
-				print_line(std::format(L"\nQuery <{}>:", current_query_index));
+				current_tracker_name = row.tracker_name;
+				print_line(std::format(L"\nTracker:<{}>:", format_name(current_tracker_name)));
 			}
 
 			print_line(std::format(
@@ -389,20 +432,218 @@ namespace UEBabyPram::InsightFilter
 			print_line(std::format(
 				L"            Count:<{}>, First:[{}]=<{}>, Last:[{}]=<{}>, Max:[{}]=<{}>, Min:[{}]=<{}>, Mean:<{}>",
 				statistic.count,
-				DisplayTimePoint{ statistic.first_time },
+				FormatTimePoint(statistic.first_time),
 				format_size(static_cast<long double>(statistic.first_value)),
-				DisplayTimePoint{ statistic.last_time },
+				FormatTimePoint(statistic.last_time),
 				format_size(static_cast<long double>(statistic.last_value)),
-				DisplayTimePoint{ statistic.max_time },
+				FormatTimePoint(statistic.max_time),
 				format_size(static_cast<long double>(statistic.max_value)),
-				DisplayTimePoint{ statistic.min_time },
+				FormatTimePoint(statistic.min_time),
 				format_size(static_cast<long double>(statistic.min_value)),
 				format_size(statistic.sum / static_cast<long double>(statistic.count))
+			));
+
+			// The trend of the tag: the part of the time line between the first snapshot of the largest value and the first
+			// snapshot of the smallest one, with the value at 20%, 40%, 60% and 80% of it and the slope of every one of those
+			// parts, which is a size in bytes per second.
+			TagTrend trend = ComputeTrend(statistic);
+
+			if (trend.sample_count < 2)
+			{
+				print_line(std::format(
+					L"            Trend: Interval:[{}, {}], Sample <{}>, no slope",
+					FormatTimePoint(trend.begin_time),
+					FormatTimePoint(trend.end_time),
+					trend.sample_count
+				));
+			}
+			else {
+				print_line(std::format(
+					L"            Trend: Interval:[{}, {}], Sample <{}>, Slope StdDev:<{}>",
+					FormatTimePoint(trend.begin_time),
+					FormatTimePoint(trend.end_time),
+					trend.sample_count,
+					FormatSlope(trend.slope_std_dev)
+				));
+
+				for (std::size_t point_index = 0; point_index < trend.time_points.size(); ++point_index)
+				{
+					print_line(std::format(
+						L"                {}%: [{}]=<{}>, Slope:<{}>",
+						(point_index + 1) * 20,
+						FormatTimePoint(trend.time_points[point_index]),
+						format_size(static_cast<long double>(trend.values[point_index])),
+						FormatSlope(trend.slopes[point_index])
+					));
+				}
+			}
+		}
+
+		// The report tells which count of the statistics it printed when the limit left the rest out, so a reader does not
+		// mistake a limited report for a report of every selected tag.
+		if (max_tag_count != 0 && printed_count < tag_statistics.size())
+		{
+			print_line(std::format(
+				L"    The report carries the first <{}> statistic(s) of <{}>, use -mst to print more of them",
+				printed_count,
+				tag_statistics.size()
 			));
 		}
 
 		return true;
 	}
+
+	auto MemoryStatisticParser::ComputeTrend(TagStatistic const& statistic) -> TagTrend
+	{
+		TagTrend trend;
+
+		if (statistic.samples.empty())
+		{
+			return trend;
+		}
+
+		// The trend is the interval between the first snapshot of the largest value and the first snapshot of the smallest
+		// one, which is the part of the time line where the value crossed the whole range of the tag: the tag is reported
+		// from the first time it reached its peak to the first time it reached its bottom, whichever came first.
+		auto const first_max = std::find_if(statistic.samples.begin(), statistic.samples.end(), [&statistic](ValueSample const& sample) {
+			return sample.value == statistic.max_value;
+		});
+
+		auto const first_min = std::find_if(statistic.samples.begin(), statistic.samples.end(), [&statistic](ValueSample const& sample) {
+			return sample.value == statistic.min_value;
+		});
+
+		if (first_max == statistic.samples.end() || first_min == statistic.samples.end())
+		{
+			return trend;
+		}
+
+		ValueSample const& max_sample = *first_max;
+		ValueSample const& min_sample = *first_min;
+
+		// The interval is the one which begins earlier and ends later, so the direction of the values inside it is the
+		// direction which the tag really took between its two extremes.
+		bool is_max_first = max_sample.time <= min_sample.time;
+		trend.begin_time = is_max_first ? max_sample.time : min_sample.time;
+		trend.begin_value = is_max_first ? max_sample.value : min_sample.value;
+		trend.end_time = is_max_first ? min_sample.time : max_sample.time;
+		trend.end_value = is_max_first ? min_sample.value : max_sample.value;
+
+		// The samples of the interval, ordered by the time, are the ones which the four points are picked from.
+		std::pmr::vector<ValueSample> ordered(&resource);
+		ordered.reserve(statistic.samples.size());
+
+		for (auto const& sample : statistic.samples)
+		{
+			if (trend.begin_time <= sample.time && sample.time <= trend.end_time)
+			{
+				ordered.push_back(sample);
+			}
+		}
+
+		std::sort(ordered.begin(), ordered.end(), [](ValueSample const& left, ValueSample const& right) {
+			return left.time < right.time;
+		});
+
+		trend.sample_count = ordered.size();
+
+		if (ordered.size() < 2)
+		{
+			// An interval which carries a single sample has no slope at all, which is what a tag whose value never changed
+			// between its two extremes is: every point of the interval is that sample and the slopes stay zero. A tag which the
+			// tracker sampled once has the same shape, so the four points carry the value of the only snapshot.
+			if (!ordered.empty())
+			{
+				for (std::size_t point_index = 0; point_index < trend.time_points.size(); ++point_index)
+				{
+					trend.time_points[point_index] = ordered.front().time;
+					trend.values[point_index] = ordered.front().value;
+				}
+			}
+
+			return trend;
+		}
+
+		double span = (trend.end_time - trend.begin_time).count();
+		if (span <= 0.0)
+		{
+			// Every sample of the interval carries the same time, which a trace with one snapshot does, so the four points are
+			// the samples themselves and the slopes stay zero.
+			return trend;
+		}
+
+		// The value which the interval carries at a ratio of its length: the sample which is nearest to that time point, which
+		// is the same rule as the one of the time line of -mv, so a tag which is sampled densely is not reported with the
+		// samples of an even grid which the snapshot interval does not carry.
+		auto value_at_ratio = [&ordered, &trend, span](double ratio) {
+			DurationSec target = trend.begin_time + DurationSec{ span * ratio };
+
+			auto after = std::lower_bound(ordered.begin(), ordered.end(), target, [](ValueSample const& sample, DurationSec time) {
+				return sample.time < time;
+			});
+
+			if (after == ordered.end())
+			{
+				return ordered.back();
+			}
+
+			if (after == ordered.begin())
+			{
+				return ordered.front();
+			}
+
+			std::size_t next_index = static_cast<std::size_t>(after - ordered.begin());
+			std::size_t previous_index = next_index - 1;
+
+			DurationSec next_distance = ordered[next_index].time - target;
+			DurationSec previous_distance = target - ordered[previous_index].time;
+
+			return previous_distance <= next_distance ? ordered[previous_index] : ordered[next_index];
+		};
+
+		ValueSample previous_sample{ trend.begin_time, trend.begin_value };
+
+		for (std::size_t point_index = 0; point_index < trend.time_points.size(); ++point_index)
+		{
+			double ratio = 0.2 * static_cast<double>(point_index + 1);
+			ValueSample sample = value_at_ratio(ratio);
+
+			trend.time_points[point_index] = sample.time;
+			trend.values[point_index] = sample.value;
+
+			// The slope of the point is the one of the part of the interval which ends at it, in bytes per second: the value
+			// which the interval gained from the point before it, divided by the time which that part took.
+			double seconds = (sample.time - previous_sample.time).count();
+
+			trend.slopes[point_index] = seconds > 0.0
+				? static_cast<double>(sample.value - previous_sample.value) / seconds
+				: 0.0;
+
+			previous_sample = sample;
+		}
+
+		// The standard deviation of the four slopes tells whether the values of the tag grow at a steady speed: a tag which is
+		// filled by a steady stream has a small deviation, and a tag which jumps once has a large one.
+		double slope_sum = 0.0;
+		for (double slope : trend.slopes)
+		{
+			slope_sum += slope;
+		}
+
+		double slope_mean = slope_sum / static_cast<double>(trend.slopes.size());
+		double square_sum = 0.0;
+
+		for (double slope : trend.slopes)
+		{
+			double difference = slope - slope_mean;
+			square_sum += difference * difference;
+		}
+
+		trend.slope_std_dev = SqrtValue(square_sum / static_cast<double>(trend.slopes.size()));
+
+		return trend;
+	}
+
 
 	bool MemoryStatisticParser::WriteCSV()
 	{
@@ -420,7 +661,12 @@ namespace UEBabyPram::InsightFilter
 
 		if (!writer)
 		{
-			Potato::Log::Log<L"Cannot open the CSV file <{}>">(csv_path->generic_wstring());
+			// The error is printed through the report printer instead of the pattern log, whose formatter resolves the string
+			// wrapper of a message ambiguously in this translation unit: the message is formatted here and handed over as text.
+			PrintReportLine(
+				*Potato::Log::GetSTDOutPrinter(),
+				std::format(L"Cannot open the CSV file <{}>", csv_path->generic_wstring())
+			);
 			return false;
 		}
 
@@ -429,7 +675,6 @@ namespace UEBabyPram::InsightFilter
 
 		// The header names every column, and the names of the value columns carry the unit of the values, which is the byte:
 		// the rows are computed from the numbers, so the text report is the place where the unit is written in the cell.
-		row.Text(u8"QueryIndex");
 		row.Text(u8"Tracker");
 		row.Text(u8"MemoryTag");
 		row.Text(u8"Count");
@@ -442,13 +687,40 @@ namespace UEBabyPram::InsightFilter
 		row.Text(u8"MinTime_s");
 		row.Text(u8"MinValue_B");
 		row.Text(u8"Mean_B");
+		row.Text(u8"TrendStart_s");
+		row.Text(u8"Trend20_s");
+		row.Text(u8"Trend20_B");
+		row.Text(u8"Trend40_s");
+		row.Text(u8"Trend40_B");
+		row.Text(u8"Trend60_s");
+		row.Text(u8"Trend60_B");
+		row.Text(u8"Trend80_s");
+		row.Text(u8"Trend80_B");
+		row.Text(u8"TrendEnd_s");
+		row.Text(u8"Slope20_Bps");
+		row.Text(u8"Slope40_Bps");
+		row.Text(u8"Slope60_Bps");
+		row.Text(u8"Slope80_Bps");
+		row.Text(u8"SlopeStdDev_Bps");
 		row.EndLine();
 
-		for (auto const& report_row : BuildReportRows(*this, sort, &resource))
-		{
-			auto const& statistic = *report_row.statistic;
+		// The CSV file is ordered by the tracker and then by the tag, whatever order the text report uses: the file is read by
+		// a spreadsheet or a script which sorts the rows itself when it needs another order, and the order of the data keeps
+		// the rows of one tracker together.
+		std::size_t printed_count = 0;
 
-			row.Integer(statistic.query_index);
+		for (auto const& report_row : BuildReportRows(*this, SortKind::Name, &resource))
+		{
+			if (max_tag_count != 0 && printed_count >= max_tag_count)
+			{
+				break;
+			}
+
+			++printed_count;
+
+			auto const& statistic = *report_row.statistic;
+			TagTrend trend = ComputeTrend(statistic);
+
 			row.Text(report_row.tracker_name);
 			row.Text(report_row.tag_name);
 			row.Integer(statistic.count);
@@ -461,6 +733,23 @@ namespace UEBabyPram::InsightFilter
 			row.Seconds(statistic.min_time);
 			row.Bytes(statistic.min_value);
 			row.Decimal(statistic.sum / static_cast<long double>(statistic.count));
+
+			row.Seconds(trend.begin_time);
+
+			for (std::size_t point_index = 0; point_index < trend.time_points.size(); ++point_index)
+			{
+				row.Seconds(trend.time_points[point_index]);
+				row.Bytes(trend.values[point_index]);
+			}
+
+			row.Seconds(trend.end_time);
+
+			for (double slope : trend.slopes)
+			{
+				row.Decimal(static_cast<long double>(slope));
+			}
+
+			row.Decimal(static_cast<long double>(trend.slope_std_dev));
 			row.EndLine();
 		}
 

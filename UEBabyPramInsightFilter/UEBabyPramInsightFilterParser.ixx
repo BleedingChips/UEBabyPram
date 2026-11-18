@@ -1,4 +1,4 @@
-module;
+﻿module;
 
 #include <re2/re2.h>
 
@@ -152,6 +152,19 @@ export namespace UEBabyPram::InsightFilter
 		bool has_field = false;
 	};
 
+	// The text of a time point which the reports carry, in the format of the trace, "<minutes>m<seconds>s" with the seconds
+	// written with 6 decimals, ex: 1m30.500000s. It is the same text as the one of the formatter of DisplayTimePoint, and it
+	// is built here from the fundamental types, so a translation unit which resolves the formatter of that type ambiguously,
+	// ex: because it imports the module of the parser twice, still prints the time of its report.
+	inline std::wstring FormatTimePoint(DurationSec duration)
+	{
+		std::chrono::minutes minutes = std::chrono::duration_cast<std::chrono::minutes>(duration);
+		DurationSec seconds = duration - minutes;
+
+		return std::format(L"{}m{:.6f}s", minutes.count(), seconds.count());
+	}
+
+
 	// The text of a size in bytes with the unit which keeps the number readable: a size of one gibibyte or more is written
 	// in GB, then MB, KB and B, and every unit is written with 2 decimals, ex: <9.42 GB>, <48.01 MB>, <512.00 KB>. The steps
 	// are 1024, which is what the memory of a process is measured by, and the sign of the size is kept, so a tag which
@@ -185,6 +198,20 @@ export namespace UEBabyPram::InsightFilter
 
 		std::string text = std::format("{:.2f} {}", static_cast<double>(value), unit);
 		return std::u8string{ reinterpret_cast<char8_t const*>(text.data()), text.size() };
+	}
+
+	// The text of a slope, which is a size in bytes per second: the number is written with the unit of a size and the unit of
+	// the second, ex: <1.43 MB/s>, and the sign is kept, because a tag which shrinks, or a time line which falls, has a
+	// negative slope.
+	inline std::wstring FormatSlope(double size_in_byte_per_second)
+	{
+		std::wstring text;
+		Potato::Encode::UnicodeEncoder<char8_t, wchar_t>::EncodeTo(
+			FormatByteSize(static_cast<long double>(size_in_byte_per_second)),
+			std::back_inserter(text)
+		);
+		text += L"/s";
+		return text;
 	}
 
 	// Print one line of a report: the text is formatted by the caller with std::format and handed to the printer, which is

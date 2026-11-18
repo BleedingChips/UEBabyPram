@@ -84,17 +84,17 @@ namespace UEBabyPram::InsightFilter
 
 			if (separator == std::u8string_view::npos)
 			{
-				// The name is exhausted with this segment, so it only matches when this was the last element of the chain: the
-				// tags of a chain are the tag of its last element and the tags below it, not the tag of an earlier element
-				// which carries nothing below it.
+				// The name is exhausted with this segment, and the tag is only selected when this was the last element of the
+				// chain: the chain names the tag itself, it does not select the tags below it.
 				return chain_index + 1 == query.chain.size();
 			}
 
 			remaining = remaining.substr(separator + 1);
 		}
 
-		// Every element of the chain matched one segment, and the rest of the name is below the last segment, which is the tag
-		// which the query selects.
-		return true;
+		// Every element of the chain matched one segment and the name carries more segments than the chain, so the tag is a
+		// child of the tag which the chain names: a chain selects exactly the tag of its last element, and a tag below it is
+		// selected by a chain which names it, ex: the element which matches any segment, %, walks one level deeper.
+		return false;
 	}
 }

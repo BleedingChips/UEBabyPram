@@ -66,11 +66,6 @@ namespace UEBabyPram::InsightFilter
 			}
 
 			std::sort(rows.begin(), rows.end(), [](ReportRow const& left, ReportRow const& right) {
-				if (left.time_line->query_index != right.time_line->query_index)
-				{
-					return left.time_line->query_index < right.time_line->query_index;
-				}
-
 				if (left.tracker_name != right.tracker_name)
 				{
 					return left.tracker_name < right.tracker_name;
@@ -94,6 +89,40 @@ namespace UEBabyPram::InsightFilter
 			return text;
 		}
 
+		// The name of the place of a point in the time line, which the report prints in front of the time of the point.
+		std::wstring_view PointKindName(MemoryValueParser::PointKind kind)
+		{
+			switch (kind)
+			{
+			case MemoryValueParser::PointKind::First:
+				return L"First";
+			case MemoryValueParser::PointKind::Last:
+				return L"Last";
+			case MemoryValueParser::PointKind::Sample:
+				return L"Sample";
+			case MemoryValueParser::PointKind::Peak:
+			default:
+				return L"Peak";
+			}
+		}
+
+		// The same name as UTF-8, which the column of the CSV file carries.
+		std::u8string_view PointKindText(MemoryValueParser::PointKind kind)
+		{
+			switch (kind)
+			{
+			case MemoryValueParser::PointKind::First:
+				return u8"First";
+			case MemoryValueParser::PointKind::Last:
+				return u8"Last";
+			case MemoryValueParser::PointKind::Sample:
+				return u8"Sample";
+			case MemoryValueParser::PointKind::Peak:
+			default:
+				return u8"Peak";
+			}
+		}
+
 		std::wstring FormatSize(long double size_in_byte)
 		{
 			std::wstring text;
@@ -108,8 +137,9 @@ namespace UEBabyPram::InsightFilter
 		, tag_time_lines(&resource)
 		, queries(&resource)
 		, csv_path(std::move(in_config.csv_path))
-		, max_value_count(in_config.max_value_count)
-		, snapshot_query_indices(&resource)
+		, max_peak_count(in_config.max_peak_count)
+		, min_peak_sample_count(in_config.min_peak_sample_count)
+		, all_samples(in_config.all_samples)
 	{
 		for (auto& query : in_config.queries)
 		{
@@ -150,25 +180,25 @@ namespace UEBabyPram::InsightFilter
 			tracker_name = tracker->name;
 		}
 
-		// The queries which select the tracker and the time point of the snapshot are decided once per snapshot, so the walk
-		// of the tags only asks the question of the chain for them.
-		snapshot_query_indices.clear();
-		for (std::size_t query_index = 0; query_index < queries.size(); ++query_index)
+		// Whether any query selects the tracker and the time point of the snapshot is decided once per snapshot, so the walk of
+		// the tags only asks the question of the chain.
+		is_snapshot_selected = false;
+		for (auto const& query : queries)
 		{
-			auto const& query = queries[query_index];
 			if (IsMemoryTrackerMatched(query, tracker_name) && IsMemoryTimePointMatched(query, time))
 			{
-				snapshot_query_indices.push_back(query_index);
+				is_snapshot_selected = true;
+				break;
 			}
 		}
 
-		if (snapshot_query_indices.empty())
+		if (!is_snapshot_selected)
 		{
 			return;
 		}
 
-		// Every tag of the snapshot is one time line per query which selects it: the name of the tag is the chain of its
-		// parents, so the chain of the query is matched against the segments of the name.
+		// Every tag of the snapshot is one time line, no matter how many queries select it: the name of the tag is the chain of
+		// its parents, so the sample is added once as soon as any query matches the name.
 		snap_view.ForeachMemoryTagValue([&](MemoryTagId tag_id, int64 value) {
 			std::u8string_view tag_full_name;
 			if (auto tag = memory_tags_manager.FindTag(tag_id); tag != nullptr)
@@ -181,14 +211,19 @@ namespace UEBabyPram::InsightFilter
 				return true;
 			}
 
-			for (std::size_t query_index : snapshot_query_indices)
+			bool is_tag_selected = false;
+			for (auto const& query : queries)
 			{
-				if (!IsMemoryTagNameMatched(queries[query_index], tag_full_name))
+				if (IsMemoryTagNameMatched(query, tag_full_name))
 				{
-					continue;
+					is_tag_selected = true;
+					break;
 				}
+			}
 
-				auto& time_line = FindTagTimeLine(query_index, tracker_id, tag_id);
+			if (is_tag_selected)
+			{
+				auto& time_line = FindTagTimeLine(tracker_id, tag_id);
 				time_line.samples.push_back(ValueSample{ time, value });
 			}
 
@@ -196,11 +231,10 @@ namespace UEBabyPram::InsightFilter
 		});
 	}
 
-	auto MemoryValueParser::FindTagTimeLine(std::size_t query_index, MemoryTrackerId tracker_id, MemoryTagId tag_id) -> TagTimeLine&
+	auto MemoryValueParser::FindTagTimeLine(MemoryTrackerId tracker_id, MemoryTagId tag_id) -> TagTimeLine&
 	{
-		auto found = std::find_if(tag_time_lines.begin(), tag_time_lines.end(), [query_index, tracker_id, tag_id](TagTimeLine const& time_line) {
-			return time_line.query_index == query_index
-				&& time_line.tracker_id == tracker_id
+		auto found = std::find_if(tag_time_lines.begin(), tag_time_lines.end(), [tracker_id, tag_id](TagTimeLine const& time_line) {
+			return time_line.tracker_id == tracker_id
 				&& time_line.tag_id == tag_id;
 		});
 
@@ -210,96 +244,162 @@ namespace UEBabyPram::InsightFilter
 		}
 
 		auto& time_line = tag_time_lines.emplace_back(&resource);
-		time_line.query_index = query_index;
 		time_line.tracker_id = tracker_id;
 		time_line.tag_id = tag_id;
 		return time_line;
 	}
 
-	auto MemoryValueParser::PickSamples(std::span<ValueSample const> samples) -> std::pmr::vector<ValueSample>
+	auto MemoryValueParser::PickPeaks(std::span<ValueSample const> samples) -> std::pmr::vector<PeakPoint>
 	{
-		std::pmr::vector<ValueSample> picked(&resource);
+		std::pmr::vector<PeakPoint> points(&resource);
 
 		if (samples.empty())
 		{
-			return picked;
+			return points;
 		}
 
-		// Every sample is printed when the count is 0 or the time line is already short enough, and the samples are kept in
-		// the order of the time which they were collected in.
-		if (max_value_count == 0 || samples.size() <= max_value_count)
-		{
-			picked.assign(samples.begin(), samples.end());
-			return picked;
-		}
-
-		// The samples are picked by an even time interval from the first sample to the last one: the point of the interval
-		// is the time which the report would carry if the time line were sampled evenly, and the sample which is nearest to
-		// that point is the one which is printed. The first and the last sample are always printed, so the report always
-		// carries the ends of the time line.
-		DurationSec first_time = samples.front().time;
-		DurationSec last_time = samples.front().time;
-
-		for (auto const& sample : samples)
-		{
-			first_time = std::min(first_time, sample.time);
-			last_time = std::max(last_time, sample.time);
-		}
-
-		// The samples are ordered by the time first, so the sample which is nearest to a point of the interval is found by a
-		// walk which only moves forward, and a time line which was streamed out of the order is sorted here instead of being
-		// picked by a walk which would miss it.
+		// The samples are ordered by the time, so the slopes are the ones of the time line and a tag which was streamed out of
+		// the order is reported the same way as one which was not.
 		std::pmr::vector<ValueSample> ordered(&resource);
 		ordered.assign(samples.begin(), samples.end());
+
 		std::sort(ordered.begin(), ordered.end(), [](ValueSample const& left, ValueSample const& right) {
 			return left.time < right.time;
 		});
 
-		double span = (last_time - first_time).count();
-
-		for (std::size_t point_index = 0; point_index < max_value_count; ++point_index)
+		// A time line of one sample has no slope at all, and its only sample is both the first and the last point of it.
+		if (ordered.size() == 1)
 		{
-			// The points of the interval are its beginning, its end and the points which divide it into the same parts, so
-			// the first point is the first sample and the last point is the last sample.
-			double ratio = max_value_count <= 1
-				? 0.0
-				: static_cast<double>(point_index) / static_cast<double>(max_value_count - 1);
-
-			DurationSec target = first_time + DurationSec{ span * ratio };
-
-			// The sample which is nearest to the point: the walk of the ordered samples stops at the first one which is not
-			// before the point, and the nearer of it and of the one before it is the one which is printed.
-			auto after = std::lower_bound(ordered.begin(), ordered.end(), target, [](ValueSample const& sample, DurationSec time) {
-				return sample.time < time;
-			});
-
-			std::size_t nearest_index = 0;
-			if (after == ordered.end())
-			{
-				nearest_index = ordered.size() - 1;
-			}
-			else if (after == ordered.begin())
-			{
-				nearest_index = 0;
-			}
-			else {
-				std::size_t next_index = static_cast<std::size_t>(after - ordered.begin());
-				std::size_t previous_index = next_index - 1;
-
-				DurationSec next_distance = ordered[next_index].time - target;
-				DurationSec previous_distance = target - ordered[previous_index].time;
-				nearest_index = previous_distance <= next_distance ? previous_index : next_index;
-			}
-
-			// The same sample may be the nearest one to more than one point of a short time line, so it is only kept once.
-			if (picked.empty() || picked.back().time != ordered[nearest_index].time)
-			{
-				picked.push_back(ordered[nearest_index]);
-			}
+			PeakPoint point;
+			point.time = ordered.front().time;
+			point.value = ordered.front().value;
+			point.slope = 0.0;
+			point.kind = PointKind::First;
+			points.push_back(point);
+			return points;
 		}
 
-		return picked;
+		// The slope of every segment of the time line, in bytes per second, so slopes[index] is the slope from the sample at
+		// index to the sample after it.
+		std::pmr::vector<double> slopes(&resource);
+		slopes.resize(ordered.size() - 1);
+
+		for (std::size_t index = 0; index + 1 < ordered.size(); ++index)
+		{
+			double seconds = (ordered[index + 1].time - ordered[index].time).count();
+			slopes[index] = seconds > 0.0
+				? static_cast<double>(ordered[index + 1].value - ordered[index].value) / seconds
+				: 0.0;
+		}
+
+		// The mode of the whole time line prints every sample of the tag, and the limits of the peaks do not apply to it: every
+		// sample is a point, with the slope which leaves it, and the last sample carries the slope which enters it.
+		if (all_samples)
+		{
+			for (std::size_t index = 0; index < ordered.size(); ++index)
+			{
+				PeakPoint point;
+				point.time = ordered[index].time;
+				point.value = ordered[index].value;
+				point.kind = index == 0
+					? PointKind::First
+					: (index + 1 == ordered.size() ? PointKind::Last : PointKind::Sample);
+				point.slope = index + 1 < ordered.size() ? slopes[index] : slopes.back();
+				points.push_back(point);
+			}
+
+			return points;
+		}
+
+		auto slope_sign = [](double slope) {
+			return slope > 0.0 ? 1 : (slope < 0.0 ? -1 : 0);
+		};
+
+		// The first point is always printed, with the slope which leaves it.
+		PeakPoint first_point;
+		first_point.time = ordered.front().time;
+		first_point.value = ordered.front().value;
+		first_point.slope = slopes.front();
+		first_point.kind = PointKind::First;
+		points.push_back(first_point);
+
+		// The peaks are the samples where the slope turns: a slope which goes from positive to negative is a peak, one which
+		// goes from negative to positive is a valley, and a slope which becomes zero is a plateau, which is a peak as well
+		// because the values stopped moving there.
+		std::pmr::vector<std::size_t> peak_indices(&resource);
+
+		for (std::size_t index = 1; index + 1 < ordered.size(); ++index)
+		{
+			if (slope_sign(slopes[index - 1]) == slope_sign(slopes[index]))
+			{
+				continue;
+			}
+
+			// The peaks of one tag may be thousands, so two printed peaks are at least the configured count of samples apart,
+			// which drops the peaks of a tag which oscillates around one value.
+			if (min_peak_sample_count != 0 && !peak_indices.empty() && index - peak_indices.back() < min_peak_sample_count)
+			{
+				continue;
+			}
+
+			// A peak which is less than 5% away from the peak before it, measured against the larger of the two values, is a
+			// small wave which the shape of the tag does not need: it is dropped unless it is the first or the last point,
+			// which are kept by the loops of the ends.
+			int64 previous_value = peak_indices.empty() ? first_point.value : ordered[peak_indices.back()].value;
+			int64 current_value = ordered[index].value;
+			int64 difference = current_value > previous_value ? current_value - previous_value : previous_value - current_value;
+			int64 larger = current_value > previous_value ? current_value : previous_value;
+			larger = larger < 0 ? -larger : larger;
+
+			if (larger != 0 && static_cast<long double>(difference) < static_cast<long double>(larger) * 0.05L)
+			{
+				continue;
+			}
+
+			peak_indices.push_back(index);
+		}
+
+		// The count of the printed peaks is limited: when the tag carries more peaks than the limit, the peaks are picked
+		// evenly from the ones which survived, so the report still covers the whole time line instead of its beginning.
+		if (max_peak_count != 0 && peak_indices.size() > max_peak_count)
+		{
+			std::pmr::vector<std::size_t> picked(&resource);
+			picked.reserve(max_peak_count);
+
+			for (std::size_t pick = 0; pick < max_peak_count; ++pick)
+			{
+				std::size_t index = pick * peak_indices.size() / max_peak_count;
+				if (picked.empty() || picked.back() != index)
+				{
+					picked.push_back(index);
+				}
+			}
+
+			peak_indices = std::move(picked);
+		}
+
+		for (std::size_t index : peak_indices)
+		{
+			PeakPoint point;
+			point.time = ordered[index].time;
+			point.value = ordered[index].value;
+			// The slope of a peak is the one which leaves it, which is the direction which the values took after the turn.
+			point.slope = slopes[index];
+			point.kind = PointKind::Peak;
+			points.push_back(point);
+		}
+
+		// The last point is always printed, with the slope which enters it.
+		PeakPoint last_point;
+		last_point.time = ordered.back().time;
+		last_point.value = ordered.back().value;
+		last_point.slope = slopes.back();
+		last_point.kind = PointKind::Last;
+		points.push_back(last_point);
+
+		return points;
 	}
+
 
 	bool MemoryValueParser::IsParserRequired(ParserRequireFlag flag) const
 	{
@@ -329,8 +429,8 @@ namespace UEBabyPram::InsightFilter
 			PrintReportLine(printer, text);
 		};
 
-		// The report can be very long, so the count of the samples which will be printed is counted first and told before
-		// the time lines, and the reader is warned when the count is large.
+		// The report can be long, so the count of the points which will be printed is counted first and told before the time
+		// lines, and the reader is warned when the count is large.
 		auto rows = BuildReportRows(*this, &resource);
 
 		std::size_t total_sample_count = 0;
@@ -339,20 +439,44 @@ namespace UEBabyPram::InsightFilter
 		for (auto const& row : rows)
 		{
 			total_sample_count += row.time_line->samples.size();
-			total_printed_count += PickSamples(row.time_line->samples).size();
+			total_printed_count += PickPeaks(row.time_line->samples).size();
 		}
 
 		print_line(L"MemoryValueParser Output:");
 		print_line(L"    (Memory Value: the time and the value of every snapshot which carries a memory tag which the query selects, in the order of the time)");
-		print_line(L"    (The samples of a tag are picked by an even time interval when the tag carries more of them than the limit, and the sample which is nearest to every point of the interval is printed)");
+		if (all_samples)
+		{
+			print_line(L"    (Every sample of every tag is printed, with the slope of the values at it, which is a size in bytes per second)");
+		}
+		else {
+			print_line(L"    (The report prints the first sample of a tag, the last one, and the peaks between them, which are the samples where the slope of the values turns; a peak which is less than 5% away from the peak before it is a small wave and is dropped)");
+		}
 		print_line(std::format(L"    Memory Tag <{}>, Memory Tracker <{}>, Memory Tag Set <{}>, Memory Value Line <{}>", memory_tags_manager.GetTagCount(), memory_tags_manager.GetTrackerCount(), memory_tags_manager.GetTagSetCount(), tag_time_lines.size()));
-		print_line(std::format(L"    Limit of the samples of one tag: <{}>, Sample <{}> of <{}>", max_value_count == 0 ? L"unlimited" : std::format(L"{}", max_value_count), total_printed_count, total_sample_count));
+		if (all_samples)
+		{
+			print_line(std::format(L"    All samples, Point <{}> of <{}>", total_printed_count, total_sample_count));
+		}
+		else {
+			print_line(std::format(
+				L"    Limit of the peaks of one tag: <{}>, Sample between the peaks: <{}>, Point <{}> of <{}>",
+				max_peak_count == 0 ? L"unlimited" : std::format(L"{}", max_peak_count),
+				min_peak_sample_count,
+				total_printed_count,
+				total_sample_count
+			));
+		}
 
 		// The report is large, and a caller which did not expect it is better warned than left with a slow terminal: the
 		// warning is a part of the report, so a report which is written into a file carries it as well.
 		if (total_printed_count > 1000)
 		{
-			print_line(std::format(L"    Warning: <{}> sample(s) will be printed, which is a large report. Lower the limit of the samples of one tag, or write the report into a CSV file.", total_printed_count));
+			if (all_samples)
+			{
+				print_line(std::format(L"    Warning: <{}> point(s) will be printed, which is a large report. Write the report into a CSV file, or drop --all_samples to print only the peaks.", total_printed_count));
+			}
+			else {
+				print_line(std::format(L"    Warning: <{}> point(s) will be printed, which is a large report. Lower the limit of the peaks of one tag, or write the report into a CSV file.", total_printed_count));
+			}
 		}
 
 		if (tag_time_lines.empty())
@@ -361,34 +485,39 @@ namespace UEBabyPram::InsightFilter
 			return true;
 		}
 
-		std::size_t current_query_index = std::numeric_limits<std::size_t>::max();
+		std::u8string_view current_tracker_name;
 
 		for (auto const& row : rows)
 		{
 			auto const& time_line = *row.time_line;
 
-			if (time_line.query_index != current_query_index)
+			// The rows are ordered by the tracker and then by the tag, so a tag of the next tracker starts its own block.
+			if (current_tracker_name != row.tracker_name)
 			{
-				current_query_index = time_line.query_index;
-				print_line(std::format(L"\nQuery <{}>:", current_query_index));
+				current_tracker_name = row.tracker_name;
+				print_line(std::format(L"\nTracker:<{}>:", FormatName(current_tracker_name)));
 			}
 
-			auto picked = PickSamples(time_line.samples);
+			auto picked = PickPeaks(time_line.samples);
 
 			print_line(std::format(
-				L"        Tracker:<{}>, MemoryTag:<{}>, Sample <{}> of <{}>",
+				L"        Tracker:<{}>, MemoryTag:<{}>, Point <{}> of <{}>",
 				FormatName(row.tracker_name),
 				FormatName(row.tag_name),
 				picked.size(),
 				time_line.samples.size()
 			));
 
-			for (auto const& sample : picked)
+			for (auto const& point : picked)
 			{
+				// Every point carries the name of its place in the time line, the time, the value and the slope of the values,
+				// which is a size in bytes per second.
 				print_line(std::format(
-					L"            [{}]=<{}>",
-					DisplayTimePoint{ sample.time },
-					FormatSize(static_cast<long double>(sample.value))
+					L"            {:<5}: [{}]=<{}>, Slope:<{}>",
+					PointKindName(point.kind),
+					FormatTimePoint(point.time),
+					FormatSize(static_cast<long double>(point.value)),
+					FormatSlope(point.slope)
 				));
 			}
 		}
@@ -420,27 +549,29 @@ namespace UEBabyPram::InsightFilter
 		CSVRowWriter row{ content };
 
 		// The header names every column, and the name of the value column carries the unit of the value, which is the byte.
-		row.Text(u8"QueryIndex");
 		row.Text(u8"Tracker");
 		row.Text(u8"MemoryTag");
-		row.Text(u8"SampleIndex");
+		row.Text(u8"PointIndex");
+		row.Text(u8"Kind");
 		row.Text(u8"Time_s");
 		row.Text(u8"Value_B");
+		row.Text(u8"Slope_Bps");
 		row.EndLine();
 
 		for (auto const& report_row : BuildReportRows(*this, &resource))
 		{
 			auto const& time_line = *report_row.time_line;
-			auto picked = PickSamples(time_line.samples);
+			auto picked = PickPeaks(time_line.samples);
 
-			for (std::size_t sample_index = 0; sample_index < picked.size(); ++sample_index)
+			for (std::size_t point_index = 0; point_index < picked.size(); ++point_index)
 			{
-				row.Integer(time_line.query_index);
 				row.Text(report_row.tracker_name);
 				row.Text(report_row.tag_name);
-				row.Integer(sample_index + 1);
-				row.Seconds(picked[sample_index].time);
-				row.Bytes(picked[sample_index].value);
+				row.Integer(point_index + 1);
+				row.Text(PointKindText(picked[point_index].kind));
+				row.Seconds(picked[point_index].time);
+				row.Bytes(picked[point_index].value);
+				row.Decimal(static_cast<long double>(picked[point_index].slope));
 				row.EndLine();
 			}
 		}
