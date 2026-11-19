@@ -663,7 +663,8 @@ namespace UEBabyPram::InsightFilter
 			// A query which carries no time condition counts every occurrence.
 			return true;
 		case EventQuery::TimeConditionKind::Overlap:
-			// The occurrence is counted when its time range overlaps one of the slices.
+			// Time: the occurrence is counted when its time range overlaps one of the slices, so an occurrence which
+			// crosses the boundary of a slice is counted with its whole time.
 			for (auto const& time_slice : query.time_ranges)
 			{
 				if (time_slice.IsOverlap(time_range))
@@ -673,8 +674,8 @@ namespace UEBabyPram::InsightFilter
 			}
 			return false;
 		case EventQuery::TimeConditionKind::Contained:
-			// The occurrence is counted when one of the slices contains it or is equal to it, so a part of it which
-			// crosses the boundary of a slice is not counted at all.
+			// ITime: the occurrence is counted only when one of the slices contains it or is equal to it, so a part of it
+			// which crosses the boundary of a slice is not counted at all.
 			for (auto const& time_slice : query.time_ranges)
 			{
 				if (time_slice.IsContainsOrEqual(time_range))
@@ -715,8 +716,8 @@ namespace UEBabyPram::InsightFilter
 
 		auto const& query = queries[query_index];
 
-		// Only the Contained condition selects the tree itself, the Overlap condition selects the trees which its
-		// slices overlap, which is what FindMatchedQuery() has already decided.
+		// Only the ITime condition selects the tree itself, the Time condition selects the trees which its slices
+		// overlap, which is what FindMatchedQuery() has already decided.
 		if (query.time_condition != EventQuery::TimeConditionKind::Contained)
 		{
 			return true;

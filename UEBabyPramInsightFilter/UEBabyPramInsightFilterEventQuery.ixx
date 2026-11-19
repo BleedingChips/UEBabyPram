@@ -112,8 +112,8 @@ export namespace UEBabyPram::InsightFilter
 			std::pmr::vector<ThreadSystemID> thread_system_ids;
 			// The slices of the time condition of the query, it is empty when the query carries no time condition.
 			std::pmr::vector<Potato::Misc::IndexSpan<DurationSec>> time_ranges;
-			// The time condition which the slices above are applied with, it decides whether an occurrence has to
-			// overlap one of them (Time) or to be inside one of them (ITime).
+			// The time condition which the slices above are applied with, it decides whether an occurrence has to overlap
+			// one of them (Time) or to be inside one of them (ITime).
 			EventQuery::TimeConditionKind time_condition = EventQuery::TimeConditionKind::None;
 		};
 
@@ -253,9 +253,9 @@ export namespace UEBabyPram::InsightFilter
 
 		// Whether the whole stack tree is inside one of the slices of the time condition of the query, which is the
 		// condition of the parsers which report a whole tree instead of the occurrences: such a parser selects the tree
-		// itself with the time conditions, so a tree is kept by the Contained condition only when one of its slices
-		// contains it, while the Overlap condition keeps the trees which its slices overlap. A query which carries no
-		// time condition accepts every tree.
+		// itself with the time condition, so a tree is kept by the ITime condition only when one of its slices contains
+		// it, while the Time condition keeps the trees which its slices overlap. A query which carries no time condition
+		// accepts every tree.
 		bool IsTreeInsideTime(std::size_t query_index, Potato::Misc::IndexSpan<DurationSec> tree_time_range) const;
 
 	protected:
@@ -265,9 +265,9 @@ export namespace UEBabyPram::InsightFilter
 		static bool IsThreadMatched(Query const& query, ThreadID thread_id);
 		static bool IsThreadMatched(Query const& query, ThreadSystemID thread_system_id);
 
-		// Whether the time range of a collected occurrence is selected by the time condition of the query, which is
-		// the question of IsOverlap for the Overlap condition and the question of IsContainsOrEqual for the Contained
-		// condition. A query which carries no time condition selects every occurrence.
+		// Whether the time range of a collected occurrence is selected by the time condition of the query, which is the
+		// question of IsOverlap for the Time condition and the question of IsContainsOrEqual for the ITime condition. A
+		// query which carries no time condition selects every occurrence.
 		static bool IsTimeRangeMatched(Query const& query, Potato::Misc::IndexSpan<DurationSec> time_range);
 
 		// Whether a stack tree can carry an occurrence which the time condition of the query selects, which is what the

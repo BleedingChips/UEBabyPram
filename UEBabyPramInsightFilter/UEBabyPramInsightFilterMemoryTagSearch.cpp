@@ -52,6 +52,7 @@ namespace UEBabyPram::InsightFilter
 		: resource(in_config.resource)
 		, memory_tags_manager(MemoryTagsManager::Config{ &resource })
 		, matcher(std::move(in_config.matcher))
+		, kind(in_config.kind)
 	{
 	}
 
@@ -108,11 +109,17 @@ namespace UEBabyPram::InsightFilter
 		OutputLog<L"    (FullName: the name which the trace declares; Name: the last segment of the FullName after the last '/', which is the FullName itself when the tag has no parent; Parent: the id and the FullName of the parent tag; Tag Set: the id and the name of the tag set which a tag belongs to)">(
 			printer
 		);
+		OutputLog<L"    (The regular expression matches the whole name, and an empty expression matches every spec)">(printer);
+
+		// Only the kind which the search asks for is reported, so the search of a tracker reports the trackers only.
+		bool const search_tag_set = kind == Kind::All;
+		bool const search_tracker = kind == Kind::All || kind == Kind::Tracker;
+
 		OutputLog<L"    Memory Tag <{}>, Memory Tracker <{}>, Memory Tag Set <{}>">(
 			printer,
-			memory_tags_manager.GetTagCount(),
-			memory_tags_manager.GetTrackerCount(),
-			memory_tags_manager.GetTagSetCount()
+			kind == Kind::All ? memory_tags_manager.GetTagCount() : 0,
+			search_tracker ? memory_tags_manager.GetTrackerCount() : 0,
+			search_tag_set ? memory_tags_manager.GetTagSetCount() : 0
 		);
 
 		if (memory_tags_manager.IsEmpty())
@@ -130,6 +137,11 @@ namespace UEBabyPram::InsightFilter
 
 		for (auto const& block : memory_tags_manager.GetTagSets())
 		{
+			if (!search_tag_set)
+			{
+				break;
+			}
+
 			for (std::size_t index = 0; index < block.count; ++index)
 			{
 				auto const& spec = block.specs[index];
@@ -149,6 +161,11 @@ namespace UEBabyPram::InsightFilter
 
 		for (auto const& block : memory_tags_manager.GetTrackers())
 		{
+			if (!search_tracker)
+			{
+				break;
+			}
+
 			for (std::size_t index = 0; index < block.count; ++index)
 			{
 				auto const& spec = block.specs[index];
@@ -168,6 +185,11 @@ namespace UEBabyPram::InsightFilter
 
 		for (auto const& block : memory_tags_manager.GetTags())
 		{
+			if (kind != Kind::All)
+			{
+				break;
+			}
+
 			for (std::size_t index = 0; index < block.count; ++index)
 			{
 				auto const& spec = block.specs[index];

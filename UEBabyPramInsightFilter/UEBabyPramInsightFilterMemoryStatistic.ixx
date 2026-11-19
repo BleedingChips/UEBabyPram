@@ -155,6 +155,13 @@ export namespace UEBabyPram::InsightFilter
 		// spec, context switch or meta data is needed by this parser.
 		virtual bool IsParserRequired(ParserRequireFlag flag) const override;
 		virtual void AllAnalyzeDone() override;
+		// The conditions of a query which the parser reads: a query which carries another condition is rejected by the
+		// command line instead of being accepted with a condition which the parser would silently ignore.
+		static constexpr QueryConditionFlag AcceptedQueryCondition()
+		{
+			return QueryConditionFlag::Time | QueryConditionFlag::Tracker;
+		}
+
 		bool PrintToLog(Potato::Log::LogPrinter& printer) override;
 
 		// The manager of the specs which the trace declares, the report is written from it.

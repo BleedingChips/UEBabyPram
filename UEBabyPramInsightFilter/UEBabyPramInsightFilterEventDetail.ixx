@@ -102,6 +102,13 @@ export namespace UEBabyPram::InsightFilter
 		virtual void AllAnalyzeDone() override;
 		// Report every saved stack tree with the events which it carries, the analysis has to be done
 		// before this is called.
+		// The conditions of a query which the parser reads: a query which carries another condition is rejected by the
+		// command line instead of being accepted with a condition which the parser would silently ignore.
+		static constexpr QueryConditionFlag AcceptedQueryCondition()
+		{
+			return QueryConditionFlag::Time | QueryConditionFlag::Thread;
+		}
+
 		bool PrintToLog(Potato::Log::LogPrinter& printer) override;
 
 		// The stack trees which are saved, the order is the analysis order.

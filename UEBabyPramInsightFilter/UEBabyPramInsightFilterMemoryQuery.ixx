@@ -18,17 +18,19 @@ export namespace UEBabyPram::InsightFilter
 	// them: the data of the memory channel is shaped differently from the call stacks, so three conditions of the query are
 	// read differently, and they are answered here instead of in every parser which walks a snapshot.
 	//
-	//   - The Thread condition selects the memory trackers: a snapshot is produced by one tracker, so the condition is
-	//     matched against the name of the tracker, and a query which carries no Thread condition selects every tracker.
+	//   - The Tracker condition selects the memory trackers: a snapshot is produced by one tracker, so the condition is
+	//     matched against the whole name of the tracker, and a query which carries no Tracker condition selects every
+	//     tracker. The Thread condition is a condition of the call stacks, so a memory query which carries it is rejected by
+	//     the command line instead of being accepted with a condition which does nothing.
 	//   - The call chain names one memory tag by its parent chain: a tag is named by the segments of its ancestors, ex:
 	//     A/B/C, so every element of the chain is matched against one segment from the root, and a tag is selected only when
 	//     the chain covers its whole name, ex: the chain (^A^) -> (^B^) selects A/B and nothing below it. The element which
 	//     matches any event, % , matches any segment, so a chain which carries % at its end walks one level deeper, and a
 	//     tag whose name carries a different count of segments than the chain is never selected.
 	//   - The time condition is applied to the time point of a snapshot instead of the time range of an occurrence: the time
-	//     of a snapshot is a single point, so Time selects the snapshots which are inside one of its slices or on the
-	//     boundary of one, and ITime selects the snapshots which are strictly inside one of its slices, which is a part of
-	//     the slices and may select no snapshot at all.
+	//     of a snapshot is a single point, so the condition selects the snapshots which are inside one of its slices or on
+	//     the boundary of one. Time and ITime are one condition, both select the snapshots which equal or are contained by
+	//     a slice.
 
 	// Whether the tracker of a snapshot is selected by the query.
 	bool IsMemoryTrackerMatched(EventQuery const& query, std::u8string_view tracker_name);

@@ -27,18 +27,18 @@ namespace
 	//   TimePoint  := Integer 'm' Decimal 's' | Decimal 's' | Integer 's'
 	//               | Integer 'm' Integer 's'
 	//
-	// 'ITime' is the same production as 'Time', but its meaning is not the overlap of an occurrence with the ranges
-	// but the containment of an occurrence by one of them: an occurrence is counted only when one of the ranges of
-	// the ITime condition contains it or is equal to it, and a query carries one of the two conditions, not both.
+	// 'ITime' is an accepted spelling of 'Time', both conditions mean the same thing: an occurrence is counted only
+	// when one of the ranges of the condition equals or contains its time range. The keyword is kept so a query which
+	// was written with 'ITime' still runs.
 	//
 	// The time ranges of a condition are written one after another without a separator, so the ranges of one
 	// condition are merged by writing them next to each other, ex: '&Time=[0s,10s][20s,30s]'.
 	//
-	// The event chain is required, the time and the thread parts are optional and
-	// joined by '&', the 'Time' part may carry more than one time range. The lexical
-	// terminals carry the masks CaretReg[1], Integer[2] and Decimal[3], the reduce
-	// masks are: 1 Query, 2/3 Chain, 4/5/19/20 ChainElem, 6/7/8/21 QueryTail, 9/10 TimeTail,
-	// 11 ThreadCond, 12/13 TimeRanges, 14 TimeRange, 15/16/17/18 TimePoint.
+	// The Tracker condition follows the Thread condition, the two are joined by '&' as well, and every part is
+	// optional. The event chain is required. The lexical terminals carry the masks CaretReg[1], Integer[2] and
+	// Decimal[3], the reduce masks are: 1 Query, 2/3 Chain, 4/5/19/20 ChainElem, 6/7/21 QueryTail,
+	// 22/23/24 CondTail, 25/26 TrackerTail, 11 ThreadCond, 27 TrackerCond, 12/13 TimeRanges, 14 TimeRange,
+	// 15/16/17/18 TimePoint.
 	//
 	// The text of a CaretReg is '^pattern^': the two '^' which surround it are the delimiters of the
 	// terminal, so the characters which the grammar of the query itself uses, ex: '[', ']', '(', ')',
@@ -69,15 +69,19 @@ $ := <Query> ;
 			:= '%' '[' CaretReg ']': [20];
             := '%' : [19] ;
 
-<QueryTail> := '&' 'Time' '=' <TimeRanges> <TimeTail> : [6] ;
-            := '&' 'ITime' '=' <TimeRanges> <TimeTail> : [21] ;
-            := <ThreadCond> : [7] ;
-            := : [8] ;
+<QueryTail> := '&' 'Time' '=' <TimeRanges> <CondTail> : [6] ;
+            := '&' 'ITime' '=' <TimeRanges> <CondTail> : [21] ;
+            := <CondTail> : [7] ;
 
-<TimeTail> := <ThreadCond> : [9] ;
-           := : [10] ;
+<CondTail> := <ThreadCond> <TrackerTail> : [22] ;
+           := <TrackerCond> : [23] ;
+           := : [24] ;
+
+<TrackerTail> := <TrackerCond> : [25] ;
+              := : [26] ;
 
 <ThreadCond> := '&' 'Thread' '=' '(' CaretReg ')' : [11] ;
+<TrackerCond> := '&' 'Tracker' '=' '(' CaretReg ')' : [27] ;
 
 <TimeRanges> := <TimeRange> : [12] ;
              := <TimeRanges> <TimeRange> : [13] ;
@@ -94,14 +98,15 @@ $ := <Query> ;
 	using UEBabyPram::InsightParser::DurationSec;
 	using Potato::Misc::IndexSpan;
 
-	// The partial query which the QueryTail and the TimeTail build.
+	// The partial query which the QueryTail and the CondTail build.
 	struct QueryTailData
 	{
-		// The time condition which the tail carries, None when the tail only carries the thread condition.
+		// The time condition which the tail carries, None when the tail carries no time condition.
 		EventQuery::TimeConditionKind time_condition = EventQuery::TimeConditionKind::None;
 		// The slices of the time condition, they are empty when the time condition is None.
 		std::vector<IndexSpan<DurationSec>> time_ranges;
 		std::shared_ptr<re2::RE2> thread_matcher;
+		std::shared_ptr<re2::RE2> tracker_matcher;
 	};
 
 	using TimeRange = IndexSpan<DurationSec>;
@@ -224,9 +229,10 @@ namespace UEBabyPram::InsightFilter
 					QueryTailData tail = production[1].Consume<QueryTailData>();
 					result.time_condition = tail.time_condition;
 					result.time_ranges = std::move(tail.time_ranges);
-					// The thread condition is a part of the query as well: without it the query would silently count
-					// every thread, which is what a query without the condition means.
+					// The conditions are a part of the query as well: without them the query would silently count
+					// every thread and every tracker, which is what a query without the condition means.
 					result.thread_matcher = std::move(tail.thread_matcher);
+					result.tracker_matcher = std::move(tail.tracker_matcher);
 					return result;
 				}
 				case 2:
@@ -273,37 +279,49 @@ namespace UEBabyPram::InsightFilter
 				}
 				case 6:
 				{
-					// The Time condition: the occurrence of a collected event is counted when its time range overlaps
-					// one of the slices.
-					QueryTailData tail;
+					// The Time condition: an occurrence is counted when its time range overlaps one of the slices, so an
+					// occurrence which crosses the boundary of a slice is counted with its whole time.
+					QueryTailData tail = production[4].Consume<QueryTailData>();
 					tail.time_condition = EventQuery::TimeConditionKind::Overlap;
 					tail.time_ranges = production[3].Consume<std::vector<TimeRange>>();
-					tail.thread_matcher = production[4].Consume<std::shared_ptr<re2::RE2>>();
 					return tail;
 				}
 				case 21:
 				{
-					// The ITime condition is the same production as the Time condition, only the kind of it differs:
-					// the occurrence has to be inside one of the slices instead of overlapping it.
-					QueryTailData tail;
+					// The ITime condition has the same production as the Time condition, only the kind differs: an
+					// occurrence is counted only when one of the slices contains it or is equal to it.
+					QueryTailData tail = production[4].Consume<QueryTailData>();
 					tail.time_condition = EventQuery::TimeConditionKind::Contained;
 					tail.time_ranges = production[3].Consume<std::vector<TimeRange>>();
-					tail.thread_matcher = production[4].Consume<std::shared_ptr<re2::RE2>>();
 					return tail;
 				}
 				case 7:
+					return production[0].Consume<QueryTailData>();
+				case 22:
 				{
+					// A Thread condition followed by the tracker tail, which is either the Tracker condition or nothing.
 					QueryTailData tail;
 					tail.thread_matcher = production[0].Consume<std::shared_ptr<re2::RE2>>();
+					tail.tracker_matcher = production[1].Consume<std::shared_ptr<re2::RE2>>();
 					return tail;
 				}
-				case 8:
+				case 23:
+				{
+					// A Tracker condition with no thread condition in front of it.
+					QueryTailData tail;
+					tail.tracker_matcher = production[0].Consume<std::shared_ptr<re2::RE2>>();
+					return tail;
+				}
+				case 24:
 					return QueryTailData{};
-				case 9:
+				case 25:
 					return production[0].Consume<std::shared_ptr<re2::RE2>>();
-				case 10:
+				case 26:
 					return std::shared_ptr<re2::RE2>{};
 				case 11:
+				case 27:
+					// The Thread condition and the Tracker condition carry their regular expression at the same place,
+					// the pattern between the parentheses.
 					return production[4].Consume<std::shared_ptr<re2::RE2>>();
 				case 12:
 					return BuildTimeRanges(production[0].Consume<TimeRange>());
@@ -375,5 +393,60 @@ namespace UEBabyPram::InsightFilter
 			);
 			return message;
 		}
+	}
+
+	QueryConditionFlag GetQueryCondition(EventQuery const& query)
+	{
+		QueryConditionFlag condition = static_cast<QueryConditionFlag>(0);
+
+		if (!query.time_ranges.empty())
+		{
+			condition = condition | QueryConditionFlag::Time;
+		}
+
+		if (query.thread_matcher)
+		{
+			condition = condition | QueryConditionFlag::Thread;
+		}
+
+		if (query.tracker_matcher)
+		{
+			condition = condition | QueryConditionFlag::Tracker;
+		}
+
+		return condition;
+	}
+
+	std::u8string CheckQueryCondition(EventQuery const& query, QueryConditionFlag accepted)
+	{
+		QueryConditionFlag condition = GetQueryCondition(query);
+		std::u8string rejected;
+
+		auto reject = [&rejected, condition, accepted](QueryConditionFlag flag, std::u8string_view name) {
+			if (!HasQueryCondition(condition, flag) || IsQueryConditionAccepted(accepted, flag))
+			{
+				return;
+			}
+
+			if (!rejected.empty())
+			{
+				rejected += u8", ";
+			}
+			rejected += name;
+		};
+
+		reject(QueryConditionFlag::Time, u8"Time");
+		reject(QueryConditionFlag::Thread, u8"Thread");
+		reject(QueryConditionFlag::Tracker, u8"Tracker");
+
+		if (rejected.empty())
+		{
+			return {};
+		}
+
+		std::u8string message = u8"the condition <";
+		message += rejected;
+		message += u8"> is not read by this mode, so the query is rejected instead of the condition being ignored";
+		return message;
 	}
 }

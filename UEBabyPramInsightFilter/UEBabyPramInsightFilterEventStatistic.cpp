@@ -807,20 +807,13 @@ namespace UEBabyPram::InsightFilter
 			}
 		}
 
-		if (query.thread_matcher)
-		{
-			text += L" & Thread=(^";
-			text += EncodePattern(*query.thread_matcher);
-			text += L"^)";
-		}
-
-		// The time condition is written back with the slices one after another without a separator, which is the way the
-		// grammar merges several slices, so the printed query is accepted as an input query again.
+		// The conditions are written in the order which the grammar accepts them, the time condition first, so the printed
+		// query is accepted as an input query again. The keyword of the time condition is the one which the query carries,
+		// and the slices are written one after another without a separator, which is the way the grammar merges them.
 		if (query.time_condition != EventQuery::TimeConditionKind::None)
 		{
 			text += L" & ";
-			text += query.time_condition == EventQuery::TimeConditionKind::Contained ? L"ITime" : L"Time";
-			text += L"=";
+			text += query.time_condition == EventQuery::TimeConditionKind::Contained ? L"ITime=" : L"Time=";
 			for (auto const& range : query.time_ranges)
 			{
 				text += std::format(
@@ -830,6 +823,15 @@ namespace UEBabyPram::InsightFilter
 				);
 			}
 		}
+
+		if (query.thread_matcher)
+		{
+			text += L" & Thread=(^";
+			text += EncodePattern(*query.thread_matcher);
+			text += L"^)";
+		}
+
+
 
 		return text;
 	}

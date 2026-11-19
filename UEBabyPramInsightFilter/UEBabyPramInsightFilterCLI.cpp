@@ -1,4 +1,4 @@
-﻿module;
+module;
 
 #include <cassert>
 #include <re2/re2.h>
@@ -32,403 +32,166 @@ namespace UEBabyPram::InsightFilter
 
 		void PrintGeneralHelp()
 		{
-			// The help text is longer than the limit of the compile time string template argument (8192 characters),
-			// so it is printed in parts: the first part carries the log header and the parts which follow only
-			// continue the text, the newline which a part ends with is the one which the log appends by itself.
+			// The help text is longer than the limit of the compile time string template argument (8192 characters), so it
+			// is printed in parts: the first part carries the header and the parts which follow only continue the text, the
+			// newline which a part ends with is the one which the log appends by itself.
 			Log::Log<CommandLineLogCategory, Log::LogLevel::Display, LR"HELP(
-UEBabyPramInsightFilter, report the GameThread timing of an unreal insight .utrace file,
-search the events of the trace by a regular expression of the event name, report the
-timing statistic of every event whose name is matched by a regular expression, search
-the threads of the trace by a regular expression of the thread name, report the value
-statistic or the time line of the memory tags which a query selects, or search the memory
-tags, the memory trackers and the memory tag sets which the trace declares.
+UEBabyPramInsightFilter, report the GameThread timing and the memory channel of an unreal insight .utrace file.
 
-Usage:
-  UEBabyPramInsightFilter -f <path of the .utrace file> [options]
-  UEBabyPramInsightFilter -f <path of the .utrace file> -r <regex> [options]
-  UEBabyPramInsightFilter -f <path of the .utrace file> -es <query> [options]
-  UEBabyPramInsightFilter -f <path of the .utrace file> -ed <query> [options]
-  UEBabyPramInsightFilter -f <path of the .utrace file> -ef <query> [options]
-  UEBabyPramInsightFilter -f <path of the .utrace file> -ts <regex> [options]
-  UEBabyPramInsightFilter -f <path of the .utrace file> -ms <query> [options]
-  UEBabyPramInsightFilter -f <path of the .utrace file> -mv <query> [options]
-  UEBabyPramInsightFilter -f <path of the .utrace file> -mt <regex> [options]
+Usage: UEBabyPramInsightFilter -f <trace> [mode] [options]
+  The default mode reports the GameThread frames, the other modes report what an option asks for and
+  only one of them runs at a time. Every report goes to the log unless -o or -a names a file.
 
-Options:
-  -f, --file <path>
-      Path of the unreal insight .utrace file which should be analyzed. Required.
-      The terminal is told the bytes which are read once per 1 GiB of the input, and the end of the input is
-      reported when a read returns fewer bytes than it was asked for. The report file itself carries no
-      progress.
+  Query, which the modes -es, -ed, -ef, -ms and -mv carry:
+    <query>   := <chain> [ '&' ( Time | ITime ) '=' <slices> ] [ '&' Thread=(^regex^) ]
+                     [ '&' Tracker=(^regex^) ]
+    <chain>   := <element> ( '->' <element> )*
+    <element> := % | (^regex^) | [^regex^] | %[^regex^]
+    <slices>  := '[' <time> ',' <time> ']' ...     <time> := 90s | 1m30s | 1m30.5s | 30.5s
 
-  -o, --output <path>
-      Path of the file which the report is written into, the file is created and its previous content is
-      emptied. When neither -o nor -a is given, the report is written into the standard output.
-
-  -a, --append <path>
-      Path of the file which the report is appended to, the file is created when it does not exist and its
-      previous content is kept, so the reports of several runs are collected in one file. Only plain text is
-      supported: the report is UTF-8 text and nothing is written before it, so it starts at the end of the
-      previous content.
-      -a and -o can not be used at the same time.
-
-  -r, --regex <regex>
-      Regular expression of the event name, in the re2 (RE2) syntax.
-      The expression has to match the whole event name,
-      ex: -r "FEngineLoop::.*" or -r ".*Tick.*".
-      When it is set, every event whose name is matched is reported with the file path and
-      the line where it is defined, otherwise the GameThread timing analysis is reported.
-      The file path is the source file path at the time the package which produced the trace
-      was built, it points to the build machine, so convert it to the local working directory
-      path by yourself.
-      The same regex may match several event names, the matched events are grouped by the
-      event name, every name is counted separately.
-      The same event name may be defined in several places, so every location is reported.
-      The event of the CPU scope logger carries no location, it is reported with
-      an unknown file and line 0.
-      Narrow the filter as much as possible: a filter which is too wide reports a very large
-      amount of information, which is slow to print and hard to read.
-      Performance: every regular expression is tested against the name of every event which the trace
-      carries, and a real trace carries thousands of names, so a wide or a complex expression, ex: .*,
-      .*Tick.* or (^.*^), makes the whole analysis slow and its report large. Keep the expressions as
-      specific as possible and prefer the fixed parts of the names; in a query the '%' element carries
-      no expression at all, so it costs nothing when any event is acceptable.
-      -r, -es, -ed, -ef, -ts and -ms can not be used at the same time.
+    Every regular expression matches the whole name, and the default mode takes no regular
+    expression: its GameThread is the thread whose name is exactly GameThread.
+    The chain is the call chain of the events, and
+    the chain of a memory tag is the segments of its name, so (^A^)->(^B^) selects A/B exactly; %
+    matches any event or any segment, which is the way to walk one level deeper.
+    Time selects an occurrence when its time range overlaps a slice, ITime selects it only when a
+    slice contains it or is equal to it. The parsers of the memory channel read the time point of a
+    snapshot instead of a range, so Time and ITime select the same snapshots there.
+    Thread selects the thread of the call stacks, Tracker selects the memory tracker.
+    Every mode reads only the conditions which it needs and rejects the others, so a query which
+    was written for another mode is reported instead of selecting more data than expected:
+      -es, -ed, -ef  read the chain, Time/ITime and Thread
+      -ms, -mv       read the chain, Time/ITime and Tracker
 )HELP">();
 
-			Log::LogTo<Log::DefaultLogFormatter, LR"HELP(  -es, --event_stat <query>
-      Query of the events whose timing should be collected, the grammar is:
-        chain [ '&' ( 'Time' | 'ITime' ) '=' [TimePoint, TimePoint]+ ] [ '&' 'Thread' '=' (^Regex^) ]
-        chain     := elem ( '->' elem )*
-        elem      := (^Regex^)      the event is only matched as a part of the call chain
-                  |  [^Regex^]      the event is matched and its timing is collected
-                  |  %[^Regex^]     the event is matched, its timing is collected, and every event which
-                                   the element matches is merged into one statistic
-                  |  %             any event, only matched as a part of the call chain
-        TimePoint := Integer 'm' Decimal 's' | Decimal 's' | Integer 's' | Integer 'm' Integer 's'
-      Ex: -es "(^FEngineLoop::Tick^)->[^.*TickActor.*^]"
-          -es "[^UWorld::Tick^]&Time=[0s,10s]&Thread=(^.*GameThread.*^)"
-          -es "[^UWorld::Tick^]&ITime=[0s,10s][20s,30s]"
-          -es "%[^UWorld::Tick^]"
-      Every regex is the re2 syntax and it has to match the whole event name. The text of a regex is
-      delimited by its own two '^', so the characters which the grammar of the query uses as well,
-      ex: '[', ']', '(', ')', '%' and '->', are a part of the pattern without any escape, while a
-      '^' inside the pattern has to be written as '\^'.
-      The element which matches any event, %, is much more efficient than a regular expression which
-      matches every name, ex: (^.*^): the element carries no expression at all, so no name is ever
-      matched against one, while the expression has to be tested against the name of every event.
-      The chain is matched on the call stack: every element has to be a descendant of the previous
-      one and the elements are matched in the order of the call, but the events which are not a part
-      of the chain may be between them. Only the [^Regex^] and the %[^Regex^] elements collect the
-      timing, one statistic per event name for the first kind, and one statistic for every event which
-      a %[^Regex^] element matches.
-      One element of the chain matches at most once per subtree: the first candidate of an element is
-      searched from the beginning of the tree, and the next candidate of that element is searched after
-      the whole subtree of the candidate which was matched, so the candidates of one element are never
-      nested into each other. A query therefore reports one occurrence per matched call instead of every
-      nested match: an element which matches every name, ex: (^.*^) or [^.*^], only reports the root of
-      the call tree, because the root is its first candidate and every other match is inside the subtree
-      of the root. Write the names of the events which have to be counted, and use '%' for the elements
-      which only complete the chain (it matches any event and costs nothing).
-      The same name is only collected by the topmost of the collecting elements, so one occurrence is
-      never counted twice by one query.
-      The Time, the ITime and the Thread conditions only filter the collected events, the events which
-      complete the call chain are not filtered by them.
-      Time selects a collected event when the time range which the event occupies overlaps one of the
-      slices of the condition: an event which is entirely before a slice, or entirely after it, or which
-      only touches its end, is not selected.
-      ITime selects a collected event when one of the slices of the condition contains it or is equal to
-      it, so the whole time range of the event has to be inside that slice: an event which starts before
-      the slice, or which ends after it, or which crosses its boundary, is not selected, while the event
-      which spans the slice exactly is selected.
-      Several slices of one condition are written one after another without a separator, so the slices
-      are merged by writing them next to each other, ex: '&Time=[0s,10s][20s,30s]' selects the events
-      which overlap either slice, and '&ITime=[0s,10s][20s,30s]' selects the events which are inside one
-      of the two slices. One query carries either the Time slices or the ITime slices, not both, because
-      an event which ITime selects is a part of an event which Time selects.
-      The thread name has to match the whole thread name.
-      -es can be given more than once, every query keeps its own statistics, so the same event name
-      may be reported several times, once per query which collects it.
-      Every occurrence is grouped into the game frame which carries its beginning (the stack trees of
-      the game thread which begin with FEngineLoop::Tick or Frame are the frames), and the frames are
-      merged by the count of the occurrences which one frame carries: every count reports how many frames
-      carry it, the mean of the total time which the event took inside those frames, and the frame of that
-      count in which the event took the most time.
-      When the count of the occurrences of an event is greater than the top count (-tx), the range from
-      the shortest duration of the single occurrence to the longest one is split into top count buckets,
-      and every bucket is reported with its range, the count of the occurrences which fell into it and
-      the share of them over the whole count.
-      The statistics can be written into a CSV file instead of the text report with -csv <path>: every
-      statistic is one row of the file, so a spreadsheet or a script reads the result without parsing
-      the text report. The rows are ordered by the query and by the total duration of the statistic,
-      the longest one first, and every row repeats the text of its query. Only the statistics which
-      carry an occurrence are written, the same as the text report. The CSV file carries the summary of
-      every event, the top occurrences, the game frame statistics and the duration distribution are
-      only carried by the text report.
-      Narrow the filter as much as possible: a filter which is too wide reports a very large
-      amount of information, which is slow to print and hard to read.
-      Performance: every regular expression is tested against the name of every event which the trace
-      carries, and a real trace carries thousands of names, so a wide or a complex expression, ex: .*,
-      .*Tick.* or (^.*^), makes the whole analysis slow and its report large. Keep the expressions as
-      specific as possible and prefer the fixed parts of the names; in a query the '%' element carries
-      no expression at all, so it costs nothing when any event is acceptable.
-      -r, -es, -ed, -ef, -ts and -ms can not be used at the same time.
-)HELP">(*Log::GetSTDOutPrinter());
+			Log::LogTo<Log::DefaultLogFormatter, LR"HELP(
+  -r, --regex <regex>
+      Report the location of every event whose whole name is matched, -mlc limits the count.
 
-			Log::LogTo<Log::DefaultLogFormatter, LR"HELP(  -ed, --event_detail <query>
-      Query of the stack trees which should be saved and reported, the grammar is the same as -es.
-      Every stack tree whose thread, time and call chain are matched by the query is copied, the
-      -mvc longest ones are kept, and the copies are reported when the whole trace is analyzed. A
-      stack tree is only kept while the kept ones are fewer than -mvc, or when it is longer than the
-      shortest of them, which is dropped for it, so the count is the count of the longest calls, not
-      the count of the calls which are matched first.
-      The query decides which events of a kept stack tree are reported. A query which carries no
-      element whose timing is collected, i.e. neither [^Regex^] nor %[^Regex^], only selects the
-      trees, so the whole tree of every kept stack tree is reported. A query which captures reports
-      every completed call chain separately: the events which the collecting elements matched are
-      reported in the order of the call, the elements which only complete the chain above the last
-      captured event and the ancestors of the first captured event are left out, and the whole
-      subtree of the last captured event is reported under it. The events which are out of the time
-      ranges of the query are reported as well: the time ranges only decide which stack trees are
-      kept.
-      The report of one reported tree is limited by -mnc and -md: the nodes over the count and the
-      nodes which are deeper than the depth are not printed, and the place of the nodes which are left
-      is marked with '...'. The limits are applied to every reported tree separately, so every
-      captured call of the same stack tree is limited by itself.
-      Narrow the filter as much as possible: a filter which is too wide reports a very large
-      amount of information, which is slow to print and hard to read.
-      Performance: every regular expression is tested against the name of every event which the trace
-      carries, and a real trace carries thousands of names, so a wide or a complex expression, ex: .*,
-      .*Tick.* or (^.*^), makes the whole analysis slow and its report large. Keep the expressions as
-      specific as possible and prefer the fixed parts of the names; in a query the '%' element carries
-      no expression at all, so it costs nothing when any event is acceptable.
-      -r, -es, -ed, -ef, -ts and -ms can not be used at the same time.
+  -es, --event_stat <query>
+      The statistics of every [^regex^] element of the query: the count, the total, the mean and the
+      median duration, the top occurrences (-tx) and their duration histogram (-dbc). The query may
+      be given more than once, and every query keeps its own statistics.
+
+  -ed, --event_detail <query>
+      The stack trees which complete the query, with the whole call tree of every one of them
+      (-mvc, -mnc and -md).
 
   -ef, --event_flame_graph <query>
-      Query of the stack trees which should be aggregated into a flame graph, the grammar is the same
-      as -es. The call paths of every matched stack tree are merged, and the time of every call path
-      is reported with its percentage of the whole matched time. The -mvc longest stack trees are
-      aggregated, the same as -ed.
-      The query decides which events of a kept stack tree are aggregated. A query which carries no
-      element whose timing is collected, i.e. neither [^Regex^] nor %[^Regex^], only selects the
-      trees, so the whole tree of every kept stack tree is aggregated and every call path of it is
-      printed. A query which captures aggregates every completed call chain: the events which the
-      collecting elements matched and the whole subtree of the last captured event are counted, the
-      elements which only complete the chain above the last captured event and the ancestors of the
-      first captured event are left out, and every captured call is merged into the graph.
-      The time ranges of the query only decide which stack trees are aggregated, not which events of
-      an aggregated tree are counted: a stack tree which overlaps one of the ranges is aggregated by
-      the rule above, so the time of an event is never cut to the ranges, and an event which crosses
-      the boundary of a range counts with its whole time. Every call path of the aggregation is
-      printed.
-      The flame graph can be written into a folded stack file with -fs <path> instead of the text
-      report: every line of the file is one call path and the time which the path took on its own in
-      microseconds, "<Frame>;<Frame>;... <Microsecond>", which is the format of the folded stacks
-      which the flame graph tools read, ex: flamegraph.pl. Every call path which the report prints is
-      written, and the sum of the weights is the whole matched time of the graph.
-      Narrow the filter as much as possible: a filter which is too wide reports a very large
-      amount of information, which is slow to print and hard to read.
-      Performance: every regular expression is tested against the name of every event which the trace
-      carries, and a real trace carries thousands of names, so a wide or a complex expression, ex: .*,
-      .*Tick.* or (^.*^), makes the whole analysis slow and its report large. Keep the expressions as
-      specific as possible and prefer the fixed parts of the names; in a query the '%' element carries
-      no expression at all, so it costs nothing when any event is acceptable.
-      -r, -es, -ed, -ef, -ts and -ms can not be used at the same time.
+      The same trees folded into a flame graph, or into a folded stack file when -fs names one.
 
   -ts, --thread_search <regex>
-      Regular expression of the thread name, in the re2 (RE2) syntax, the same syntax as -r.
-      The expression has to match the whole thread name, ex: -ts ".*Thread" or -ts "GameThread".
-      When it is set, every thread whose name is matched is reported with the thread id and
-      the system thread id.
-      An empty regex (ex: -ts "") matches every thread of the trace.
-      -r, -es, -ed, -ef, -ts and -ms can not be used at the same time.
-)HELP">(*Log::GetSTDOutPrinter());
+      Every thread whose whole name is matched.
 
-			Log::LogTo<Log::DefaultLogFormatter, LR"HELP(  -ms, --memory_stat <query>
-      Collect the memory tag snapshots which the query selects and report the value statistics of
-      every memory tag per tracker: the first snapshot which carries the tag and its value, the last
-      one and its value, the snapshot of the largest value, the snapshot of the smallest value, and
-      the mean of the values of every snapshot which carries the tag. Every value is written with its
-      unit, which is B, KB, MB or GB, with 2 decimals. The rows are ordered by the tracker and then by the
-      tag, use -msr to put the largest mean or the largest value first.
-      The query is the query of -es/-ed/-ef, and it reads the memory data as follows:
-        Thread=(^Regex^)  matches the name of the memory tracker which produces the snapshots, and a
-                          query which carries no Thread condition selects every tracker;
-        (^A^)->(^B^)      the chain names one memory tag by its parent chain: the segments of the
-                          name are matched from the root, and a tag is selected only when the chain
-                          covers its whole name, ex: (^A^)->(^B^) selects A/B and nothing below it.
-                          The element which matches any event, %, matches any segment, so a chain
-                          which ends with % walks one level deeper, ex: (^A^)->(^B^)->% selects the
-                          tags of the level below A/B, and (^A^) selects A alone;
-        Time=[a,b]        selects the snapshots whose time point is inside a slice or on the
-                          boundary of one;
-        ITime=[a,b]       selects the snapshots whose time point is strictly inside a slice, so a
-                          slice may select no snapshot at all.
-      Every statistic also carries its trend: the interval from the first snapshot of the largest value to
-      the first snapshot of the smallest one, the value at 20%, 40%, 60% and 80% of that interval, the slope
-      of the part of the interval which ends at every one of those points, which is a size in bytes per
-      second, and the standard deviation of the four slopes.
-      The statistics are written into a CSV file instead of the text report by -csv <path>.
-      The trace has to carry the LLM channel (the memory tracing of Unreal Insights); a trace which
-      was captured without it declares no memory spec and carries no snapshot.
-      -r, -es, -ed, -ef, -ts, -ms, -mv and -mt can not be used at the same time.
-)HELP">(*Log::GetSTDOutPrinter());
+  -ms, --memory_stat <query>
+      The statistics of every memory tag which the query selects, per tracker: the first, the last,
+      the largest and the smallest value, the mean, and the trend of the tag: the interval between
+      the first largest value and the first smallest one, in the order of the time, the value at 20%,
+      40%, 60% and 80% of it, the slope of every one of those parts and the standard deviation of the
+      slopes. -msr orders the rows and -mst limits how many of them are printed.
 
-			Log::LogTo<Log::DefaultLogFormatter, LR"HELP(  -mv, --memory_value <query>
-      Collect the memory tag snapshots which the query selects and report the shape of the time line of
-      every memory tag per tracker: the first sample of the tag, the samples where the slope of the
-      values turns, which are the peaks and the valleys of the time line, and the last sample. Every
-      point is printed with its time, its value and the slope of the values at it, which is a size in
-      bytes per second. The query is read the same way as the query of -ms, see it for the conditions.
-      A peak which is less than 5% away from the peak before it, measured against the larger of the two
-      values, is a small wave and is dropped, so the noise of the allocator does not hide the shape of
-      the tag; the first and the last sample are always printed. The count of the peaks of one tag is
-      limited by -mvp and two printed peaks are at least -mvs samples apart. The report tells how many
-      points of how many samples are printed, and it warns when the count is large. The time lines are
-      written into a CSV file instead of the text report by -csv <path>.
-      -r, -es, -ed, -ef, -ts, -ms, -mv and -mt can not be used at the same time.
-)HELP">(*Log::GetSTDOutPrinter());
+  -mv, --memory_value <query>
+      The shape of the time line of every selected tag: the first sample, the peaks, which are the
+      samples where the slope of the values turns, and the last sample, every one of them with its
+      time, its value and the slope of the values at it. A peak which is less than 5% away from the
+      peak before it is a small wave and is dropped. -mvp limits the peaks of one tag, -mvs keeps two
+      printed peaks that many samples apart, and --all_samples prints every sample instead.
 
-			Log::LogTo<Log::DefaultLogFormatter, LR"HELP(  -mt, --memory_tag <regex>
-      Search the memory tags, the memory trackers and the memory tag sets which the trace declares by
-      the regular expression of their name, and report every spec whose name is matched with its id,
-      its full name and its name, and every tag with the id and the name of its parent tag and of its
-      tag set. The whole name has to be matched, and the regex .* matches every spec, which is the way
-      to dump the whole memory tag tree of a trace (an empty regex matches every spec as well, but a
-      shell may drop an empty argument before it reaches the tool).
-      Only the specs of the memory channel are read, so the events of the snapshots are skipped instead
-      of being decoded, while the trace file itself is still read end to end.
-      -r, -es, -ed, -ef, -ts, -ms, -mv and -mt can not be used at the same time.
-)HELP">(*Log::GetSTDOutPrinter());
+  -mt, --memory_tag <regex>
+      Every memory spec whose whole name is matched: the tags, the memory trackers and the tag sets.
 
-			Log::LogTo<Log::DefaultLogFormatter, LR"HELP(  -mlc, --max_location_count <count>
-      How many matched event locations should be reported with -r, 0 for no limit, default is 256.
-
-  -tx, --top_count <count>
-      How many of the longest occurrences should be reported with -es, default is 5.
-
-  -dbc, --duration_bucket_count <count>
-      How many buckets the histogram of the duration of the single occurrence should carry with -es,
-      default is 5. The histogram is only built for an event whose occurrence count is greater than the
-      top count (-tx), and the range from the shortest duration of the single occurrence to the longest
-      one is split into this count of buckets.
+  -mtt, --memory_tracker <regex>
+      Only the memory trackers whose whole name is matched, which is the spec of the LLM channel
+      which produces the snapshots.
 
   --all_samples
-      Print every sample of every memory tag which the query selects with -mv, instead of the first sample,
-      the peaks and the last one. It is the mode which exports the whole time line, ex: for a chart which is
-      drawn from every sample or for a tool which aggregates the samples itself, and -mvp and -mvs do not
-      apply to it. A trace which carries a memory snapshot per frame produces a very large report in this
-      mode, so the CSV file of -csv is the way to read it.
-
-  -mvp, --max_peak_count <count>
-      How many peaks of one memory tag should be printed with -mv, default is 20, and 0 prints every peak
-      which survives the filter of the small waves. A peak is a sample where the slope of the values
-      turns, i.e. where it goes from positive to negative, from negative to positive, or to zero, so the
-      report carries the shape of the time line of the tag instead of its samples. When the tag carries
-      more peaks than this count, the peaks are picked evenly from the ones which survive, so the report
-      still covers the whole time line.
-
-  -mvs, --min_peak_sample_count <count>
-      How many samples are between two printed peaks of a tag at least, default is 5, and 0 drops no peak
-      for the distance. A peak which is fewer samples after the previous printed peak is dropped, which
-      keeps a tag which oscillates around one value, ex: the allocator of the trace itself, from being
-      reported as thousands of peaks. The first and the last sample of a tag are always printed.
-
-  -msr, --memory_sort <name|mean|max>
-      The order of the rows of -ms: name is the order of the data, the query, the tracker and the tag,
-      which is the default; mean puts the largest mean value first, and max puts the largest value
-      which a tag was sampled with first. The order by name decides between two rows of the same value,
-      so the report of the same trace is always the same.
-
-  -mst, --max_tag_count <count>
-      How many memory tag statistics should be printed with -ms, in the order which -msr asks for, 0
-      for no limit, default is 0. The report tells how many of the selected tags it carries when the
-      limit leaves the rest out. The CSV file of -ms carries the same rows.
-
+      Print every sample of every tag which -mv selects instead of its peaks, which is the mode of
+      the whole time line; -mvp and -mvs do not apply to it.
 )HELP">(*Log::GetSTDOutPrinter());
 
-			Log::LogTo<Log::DefaultLogFormatter, LR"HELP(  -csv, --csv <path>
-      Write the report into <path> as a CSV file instead of printing it, the file is created and its
-      previous content is emptied. The content is UTF-8 without a BOM and the fields follow RFC 4180, so
-      a field which carries ',', '"' or a line break is quoted. The option is accepted by four modes:
-      -es: every statistic is one row, the columns are QueryIndex, Event, Kind, EventIdCount,
-        OccurrenceCount, TotalD_ms, MeanD_ms, MedianD_ms, StdD_ms, TotalE_ms, MeanE_ms and Query, where
-        Kind is Name for a statistic of one event name and Regex for a merged element, and EventIdCount
-        is the count of the event ids which the statistic of the row carries. The rows are ordered by the
-        query and by the total duration of the statistic, the longest one first.
-      -ms: every memory tag statistic is one row, ordered by the tracker and then by the tag (and by
-        the value first when -msr asks for it), and the columns are Tracker, MemoryTag, Count, FirstTime_s,
-        FirstValue_B, LastTime_s, LastValue_B, MaxTime_s, MaxValue_B, MinTime_s, MinValue_B, Mean_B and the
-        trend columns TrendStart_s, Trend20_s, Trend20_B, Trend40_s, Trend40_B, Trend60_s, Trend60_B,
-        Trend80_s, Trend80_B, TrendEnd_s, Slope20_Bps, Slope40_Bps, Slope60_Bps, Slope80_Bps and
-        SlopeStdDev_Bps. The values are bytes without a unit and the slopes are bytes per second, so the
-        file is computable and the unit is the name of the column.
-      -mv: every printed point of a memory tag is one row, ordered by the tracker and then by the tag,
-        and the columns are Tracker, MemoryTag, PointIndex, Kind, Time_s, Value_B and Slope_Bps, where
-        Kind is First, Peak or Last, the value is in bytes like the columns of -ms, and the slope is in
-        bytes per second.
-      The default mode, i.e. when neither -r, -es, -ed, -ef, -ts, -ms, -mv nor -mt is given: every
-        analyzed frame is one row, ordered by the time, and the columns are FrameIndex, Begin_s, End_s,
-        Duration_ms, ENCS_ms and FPS. The rows cover every analyzed frame, not only the longest ones
-        which the text report carries, so the file is the whole timeline of the frames of the sampled
-        range, and ENCS_ms is the time of the frame without the time which the thread spent out of the
-        CPU in it.
-      -csv can not be used with -o or -a at the same time.
-
-  -fs, --folded_stack <path>
-      Write the flame graph of -ef into <path> as a folded stack file instead of the text report, the
-      file is created and its previous content is emptied, and the text report is not printed. Every
-      line is one call path and the time which it took on its own, "<Frame>;<Frame>;... <Microsecond>",
-      which is the format of the folded stacks which the flame graph tools read, ex: flamegraph.pl, so
-      the file can be turned into a picture, ex:
-        flamegraph.pl result.folded > result.svg
-      The delimiter ';', the line break and the tab of a frame name are replaced, so one line always
-      carries one call path. Every call path of the graph is written, so the sum of the weights is the
-      whole matched time of the graph. -fs can only be used with -ef, and it can not be used with -o
-      at the same time.
-
+			Log::LogTo<Log::DefaultLogFormatter, LR"HELP(
+  -f, --file <path>            The .utrace file to analyze.
+  -o, --output <path>          Write the report into the file instead of the log.
+  -a, --append <path>          Append the report to the file instead of the log, -a and -o can not
+                               be used at the same time.
+  -csv, --csv <path>           Write the report as CSV instead of the text report, for -es, -ms, -mv
+                               and the default mode.
+  -fs, --folded_stack <path>   Write the flame graph of -ef as a folded stack file: one call path
+                               per line with the self time of the path in microseconds.
+  -mlc, --max_location_count <count>
+                               How many event locations -r reports, 0 for no limit, default is 256.
+  -tx, --top_count <count>     How many occurrences -es reports in its top list, default is 5.
+  -dbc, --duration_bucket_count <count>
+                               How many buckets the duration histogram of -es carries, default is 5.
   -mvc, --max_view_count <count>
-      How many of the longest stack trees should be saved and reported with -ed, and aggregated
-      into the flame graph with -ef, default is 10. The stack tree which is kept is dropped for a
-      longer one when the count is reached, so the kept ones are the longest calls which the query
-      matches.
-
+                               How many of the longest stack trees -ed and -ef keep, default is 10.
+                               Unlike -mnc and -md, 0 keeps no view at all, so the report is empty.
   -mnc, --max_node_count <count>
-      How many nodes of one reported tree should be printed with -ed, 0 for no limit, default is
-      100. The nodes over the count are not printed, and their place is marked with '...'. The count
-      is the count of the nodes of one reported tree, so every captured call of a stack tree is
-      limited separately.
-
-  -md, --max_depth <depth>
-      How many levels of one reported tree should be printed with -ed, 0 for no limit, default is 8.
-      The nodes which are deeper than the depth are not printed, and their place is marked with
-      '...', once per node of the deepest printed level. The first level of the tree is 1.
-
+                               How many nodes of one reported tree -ed prints, 0 for no limit, the
+                               nodes over it and the whole subtree behind them are left out and marked
+                               with a single '...', default is 100.
+  -md, --max_depth <depth>     How deep one reported tree -ed is printed, 0 for no limit, the nodes
+                               below the depth are marked with one '...' per level, default is 8.
+  -msr, --memory_sort <name|mean|max>
+                               The order of the rows of -ms: name is the order of the tracker and then
+                               of the tag, mean and max put the largest value first, default is name.
+  -mst, --max_tag_count <count>
+                               How many statistics -ms prints, 0 for no limit, default is 0.
+  -mvp, --max_peak_count <count>
+                               How many peaks of one tag -mv prints, 0 for no limit, default is 20.
+  -mvs, --min_peak_sample_count <count>
+                               How many samples are between two printed peaks at least, default is 5.
   -mrf, --max_record_frame <count>
-      How many of the longest game frames should be recorded and reported, default is 10.
-
+                               How many of the longest GameThread frames the default mode records,
+                               default is 10.
   -metc, --max_exclude_time_count <count>
-      How many of the longest exclude time events should be kept in every top list, default is 30.
-
+                               How many exclude time events its top lists keep, default is 30.
   -sr, --sampling_ratio <ratio>
-      Sampling ratio of the analyzed time range, a value in [0.0, 1.0], default is 0.9, which
-      analyzes the middle 90% of the time range. The beginning and the end of the .utrace are the time
-      when the trace is saved, which is triggered at the start and at the end of the capture, so the
-      frames there take the saving into the timing and their data is not accurate; a ratio below 1.0
-      only analyzes the middle of the time range and leaves both ends out, ex: 0.8 analyzes the middle
-      80% of the range, and 1.0 analyzes the whole range.
-      The report only covers the frames whose time range intersects the sampled range: a frame which
-      is entirely out of it is not counted and not listed, and a frame which only crosses the boundary
-      of the sampled range is counted with the whole time of the frame, the time of a frame is never
-      cut to the range. The Sampled Range and the ratio which is used are reported with the report.
+                               The ratio of the time range which the default mode analyzes, between
+                               0.0 and 1.0, default is 0.9: the beginning and the end of a trace are
+                               the time when the trace is saved, so their frames are not accurate. The
+                               report covers the frames whose time range intersects the sampled range,
+                               and it reports the sampled range and the ratio which was used.
+  -h, --help                   Print this help.
+  -v, --version                Print the version of the tool.
 
-  -h, --help
-      Print this help.
-
-  -v, --version
-      Print the version of the tool.
+  Restrictions, which the command line reports as an error instead of ignoring:
+    -csv prints the report itself, so it can only be given with -es, -ms, -mv or the default mode,
+    and it can not be used with -o or -a.
+    -fs prints the flame graph itself, so it can only be given with -ef, and it can not be used
+    with -o or -a either.
+    -mt and -mtt can not be used at the same time.
+    The modes are exclusive as well: only one of -r, -es, -ed, -ef, -ts, -ms, -mv, -mt and -mtt
+    may be given.
 )HELP">(*Log::GetSTDOutPrinter());
 		}
+	}
+
+	// Whether the query carries a condition which the parser does not read. It is reported and ends the command: a
+	// condition which a parser does not read is rejected instead of being ignored, so a query which was written for
+	// another mode is reported instead of selecting more data than the caller expects. The mode and the option are only
+	// used for the message.
+	bool ReportRejectedQueryCondition(
+		EventQuery const& query,
+		QueryConditionFlag accepted,
+		std::wstring_view mode,
+		std::wstring_view option
+	)
+	{
+		std::u8string error = CheckQueryCondition(query, accepted);
+		if (error.empty())
+		{
+			return true;
+		}
+
+		std::wstring message;
+		Encode::UnicodeEncoder<char8_t, wchar_t>::EncodeTo(error, std::back_inserter(message));
+		Log::Log<CommandLineLogCategory, Log::LogLevel::Error, L"{} {} <query> : <{}>, use -h for detailed help">(
+			mode,
+			option,
+			message
+		);
+		return false;
 	}
 
 	int HandleCommand(int argc, char* argv[], CommandLineSetting& setting)
@@ -601,8 +364,16 @@ Options:
 						return -1;
 					}
 
+					// The parser reads the time and the thread conditions, a query which carries another condition is
+					// rejected here, before the trace is read.
+					auto& query = std::get<EventQuery>(query_result);
+					if (!ReportRejectedQueryCondition(query, EventStatisticParser::AcceptedQueryCondition(), L"-es", L"--event_stat"))
+					{
+						return -1;
+					}
+
 					// The queries are accumulated, every one of them keeps its own statistics.
-					statistic_config.queries.push_back(std::move(std::get<EventQuery>(query_result)));
+					statistic_config.queries.push_back(std::move(query));
 					statistic_event = true;
 					++i;
 				}
@@ -630,9 +401,15 @@ Options:
 						return -1;
 					}
 
+					auto& query = std::get<EventQuery>(query_result);
+					if (!ReportRejectedQueryCondition(query, EventDetailParser::AcceptedQueryCondition(), L"-ed", L"--event_detail"))
+					{
+						return -1;
+					}
+
 					// The detail parser keeps the stack trees which the query matches, only one query
 					// is accepted by it, and the text is reported with the saved views.
-					detail_config.query = std::move(std::get<EventQuery>(query_result));
+					detail_config.query = std::move(query);
 					detail_config.query_text = std::move(query_text);
 					detail_event = true;
 					++i;
@@ -661,9 +438,15 @@ Options:
 						return -1;
 					}
 
+					auto& query = std::get<EventQuery>(query_result);
+					if (!ReportRejectedQueryCondition(query, EventFlameGraphParser::AcceptedQueryCondition(), L"-ef", L"--event_flame_graph"))
+					{
+						return -1;
+					}
+
 					// The flame graph parser aggregates the stack trees which the query matches, only
 					// one query is accepted by it, and the text is reported with the graph.
-					flame_config.query = std::move(std::get<EventQuery>(query_result));
+					flame_config.query = std::move(query);
 					flame_config.query_text = std::move(query_text);
 					flame_event = true;
 					++i;
@@ -721,8 +504,16 @@ Options:
 						return -1;
 					}
 
+					// The memory parsers read the time and the tracker conditions, the thread condition belongs to the call
+					// stacks, so a query which carries it is rejected here instead of counting every tracker.
+					auto& query = std::get<EventQuery>(query_result);
+					if (!ReportRejectedQueryCondition(query, MemoryStatisticParser::AcceptedQueryCondition(), L"-ms", L"--memory_stat"))
+					{
+						return -1;
+					}
+
 					// The queries are accumulated, every one of them keeps its own statistics.
-					memory_config.queries.push_back(std::move(std::get<EventQuery>(query_result)));
+					memory_config.queries.push_back(std::move(query));
 					statistic_memory = true;
 					++i;
 				}
@@ -750,8 +541,14 @@ Options:
 						return -1;
 					}
 
+					auto& query = std::get<EventQuery>(query_result);
+					if (!ReportRejectedQueryCondition(query, MemoryValueParser::AcceptedQueryCondition(), L"-mv", L"--memory_value"))
+					{
+						return -1;
+					}
+
 					// The queries are accumulated, every one of them keeps its own time lines.
-					memory_value_config.queries.push_back(std::move(std::get<EventQuery>(query_result)));
+					memory_value_config.queries.push_back(std::move(query));
 					statistic_memory_value = true;
 					++i;
 				}
@@ -869,7 +666,14 @@ Options:
 					auto matcher = std::make_shared<re2::RE2>(pattern, options);
 					if (matcher->ok())
 					{
+						if (memory_tag_search_config.kind == MemoryTagSearchParser::Kind::Tracker)
+						{
+							Log::Log<CommandLineLogCategory, Log::LogLevel::Error, L"-mt --memory_tag and -mtt --memory_tracker can not be used at the same time, use -h for detailed help">();
+							return -1;
+						}
+
 						memory_tag_search_config.matcher = std::move(matcher);
+						memory_tag_search_config.kind = MemoryTagSearchParser::Kind::All;
 						search_memory_tag = true;
 						++i;
 					}
@@ -883,6 +687,43 @@ Options:
 				}
 				else {
 					Log::Log<CommandLineLogCategory, Log::LogLevel::Error, L"Unsupport command -mt --memory_tag, use -h for detailed help">();
+					return -1;
+				}
+			}
+			else if (argv_string == "-mtt" || argv_string == "--memory_tracker")
+			{
+				if (i + 1 < argc)
+				{
+					if (search_memory_tag)
+					{
+						Log::Log<CommandLineLogCategory, Log::LogLevel::Error, L"-mt --memory_tag and -mtt --memory_tracker can not be used at the same time, use -h for detailed help">();
+						return -1;
+					}
+
+					std::string_view pattern = argv[i + 1];
+					re2::RE2::Options options;
+					// The error is reported below, re2 should not print it a second time.
+					options.set_log_errors(false);
+					auto matcher = std::make_shared<re2::RE2>(pattern, options);
+					if (matcher->ok())
+					{
+						// Only the memory trackers are searched, which is the spec of the LLM channel which produces the
+						// snapshots, so the tags and the tag sets are left out of the report.
+						memory_tag_search_config.matcher = std::move(matcher);
+						memory_tag_search_config.kind = MemoryTagSearchParser::Kind::Tracker;
+						search_memory_tag = true;
+						++i;
+					}
+					else {
+						Log::Log<CommandLineLogCategory, Log::LogLevel::Error, L"-mtt --memory_tracker <regex> : <{}> is not an acceptable regex : <{}>, use -h for detailed help">(
+							pattern,
+							std::string_view{ matcher->error() }
+						);
+						return -1;
+					}
+				}
+				else {
+					Log::Log<CommandLineLogCategory, Log::LogLevel::Error, L"Unsupport command -mtt --memory_tracker, use -h for detailed help">();
 					return -1;
 				}
 			}

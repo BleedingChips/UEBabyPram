@@ -16,45 +16,36 @@ namespace UEBabyPram::InsightFilter
 
 	bool IsMemoryTrackerMatched(EventQuery const& query, std::u8string_view tracker_name)
 	{
-		if (!query.thread_matcher)
+		// The Tracker condition selects the tracker which produced the snapshot, and a query which carries no Tracker
+		// condition selects every tracker. The Thread condition is not read by the parsers of the memory channel, and the
+		// command line rejects a memory query which carries it instead of ignoring it.
+		if (!query.tracker_matcher)
 		{
 			return true;
 		}
 
-		return IsEventNameMatched(*query.thread_matcher, tracker_name);
+		return IsEventNameMatched(*query.tracker_matcher, tracker_name);
 	}
 
 	bool IsMemoryTimePointMatched(EventQuery const& query, DurationSec time)
 	{
-		switch (query.time_condition)
+		// The time point of a snapshot is a single point, so the boundary of a slice is a part of it: the slice covers the
+		// points from its beginning to its end. Time and ITime select the same snapshots, because a point is contained by a
+		// slice exactly when it overlaps it.
+		if (query.time_ranges.empty())
 		{
-		case EventQuery::TimeConditionKind::None:
 			return true;
-		case EventQuery::TimeConditionKind::Overlap:
-			// The time point of a snapshot is a single point, so the boundary of a slice is a part of it: the slice covers
-			// the points from its beginning to its end.
-			for (auto const& slice : query.time_ranges)
-			{
-				if (slice.Begin() <= time && time <= slice.End())
-				{
-					return true;
-				}
-			}
-			return false;
-		case EventQuery::TimeConditionKind::Contained:
-			// The points which are strictly inside a slice, which is a part of the points which the Overlap condition selects
-			// and may be empty.
-			for (auto const& slice : query.time_ranges)
-			{
-				if (slice.Begin() < time && time < slice.End())
-				{
-					return true;
-				}
-			}
-			return false;
 		}
 
-		return true;
+		for (auto const& slice : query.time_ranges)
+		{
+			if (slice.Begin() <= time && time <= slice.End())
+			{
+				return true;
+			}
+		}
+
+		return false;
 	}
 
 	bool IsMemoryTagNameMatched(EventQuery const& query, std::u8string_view tag_full_name)

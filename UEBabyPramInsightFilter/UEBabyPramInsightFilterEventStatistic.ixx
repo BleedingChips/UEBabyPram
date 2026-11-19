@@ -201,6 +201,13 @@ export namespace UEBabyPram::InsightFilter
 		virtual bool IsThreadRequired(ThreadID thread_id) const override;
 		virtual bool IsThreadRequired(ThreadSystemID thread_system_id) const override;
 		virtual void AllAnalyzeDone() override;
+		// The conditions of a query which the parser reads: a query which carries another condition is rejected by the
+		// command line instead of being accepted with a condition which the parser would silently ignore.
+		static constexpr QueryConditionFlag AcceptedQueryCondition()
+		{
+			return QueryConditionFlag::Time | QueryConditionFlag::Thread;
+		}
+
 		bool PrintToLog(Potato::Log::LogPrinter& printer) override;
 
 		// The statistics of every event of every query, keyed by EventStatistic::query_index and by the id of the

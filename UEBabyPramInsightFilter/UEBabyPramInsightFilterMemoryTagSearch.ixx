@@ -32,12 +32,23 @@ export namespace UEBabyPram::InsightFilter
 	// time of the search is dominated by reading the file, and only the parsing of the snapshots is saved.
 	struct MemoryTagSearchParser : public Parser
 	{
+		// Which kind of spec the search reports.
+		enum class Kind : std::uint8_t
+		{
+			// Every kind: the tags, the trackers and the tag sets.
+			All,
+			// Only the trackers, which is the spec of the LLM channel which produces the snapshots.
+			Tracker,
+		};
+
 		struct Config
 		{
 			// The regular expression of the name, the same syntax as the one of -r and -ts: the whole name has to be matched,
 			// and an empty expression matches every spec. The expression is compiled by the command line from its text, so
 			// the parser only receives the matcher which is ready to be used.
 			std::shared_ptr<re2::RE2> matcher;
+			// Which kind of spec is searched, it is Kind::All for the search of -mt and Kind::Tracker for -mtt.
+			Kind kind = Kind::All;
 			std::pmr::memory_resource* resource = std::pmr::get_default_resource();
 		};
 
@@ -64,5 +75,7 @@ export namespace UEBabyPram::InsightFilter
 		std::pmr::unsynchronized_pool_resource resource;
 		MemoryTagsManager memory_tags_manager;
 		std::shared_ptr<re2::RE2> matcher;
+		// Which kind of spec is searched, it is Config::kind.
+		Kind kind = Kind::All;
 	};
 }

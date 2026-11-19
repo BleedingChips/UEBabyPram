@@ -80,6 +80,13 @@ export namespace UEBabyPram::InsightFilter
 		// are only complete after the whole trace is analyzed together with the longest ones which are kept.
 		virtual void AllAnalyzeDone() override;
 		// Report the flame graph, the analysis has to be done before this is called.
+		// The conditions of a query which the parser reads: a query which carries another condition is rejected by the
+		// command line instead of being accepted with a condition which the parser would silently ignore.
+		static constexpr QueryConditionFlag AcceptedQueryCondition()
+		{
+			return QueryConditionFlag::Time | QueryConditionFlag::Thread;
+		}
+
 		bool PrintToLog(Potato::Log::LogPrinter& printer) override;
 	protected:
 
