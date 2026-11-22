@@ -122,7 +122,7 @@ namespace UEBabyPram::LogParser
 			auto iter_string = string.substr(offset);
 			for (auto& ite : Levels)
 			{
-				if (string.starts_with(ite))
+				if (iter_string.starts_with(ite))
 				{
 					property.level = ite.substr(0, ite.size() - 2);
 					offset += ite.size();
@@ -173,7 +173,7 @@ namespace UEBabyPram::LogParser
 			auto iter_string = string.substr(offset);
 			for (auto& ite : Levels)
 			{
-				if (string.starts_with(ite))
+				if (iter_string.starts_with(ite))
 				{
 					property.level = ite.substr(0, ite.size() - 2);
 					offset += ite.size();

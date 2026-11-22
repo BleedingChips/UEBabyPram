@@ -1,5 +1,5 @@
 module;
-#include <absl/strings/string_view.h>
+#include <re2/re2.h>
 module UEBabyPramLogFilter;
 import Potato;
 
@@ -51,23 +51,6 @@ namespace UEBabyPram::LogFilter
 		+('||' '|');
 	)";
 
-	static constexpr std::u8string_view filter_string = u8R"(
-		String:='[^\{\}]+' : [1];
-		String:='\{\{' : [2];
-		String:='\}\}' : [3];
-		String:='\{[0-9]\}' : [4];
-		String:='\{Time\}' : [5];
-		String:='\{Level\}' : [6];
-		String:='\{Line\}' : [7];
-		String:='\{Message\}' : [8];
-		String:='\{Category\}' : [9];
-		%%%%
-		$:=<Exp>;
-		<Exp> := : [1];
-			:= <Exp> String : [2];
-		%%%%
-	)";
-
 	static std::array<std::u8string_view, 7> log_level_array = {
 		u8"VeryVerbose", u8"Verbose", u8"Log", u8"Display", u8"Warning", u8"Error", u8"Fatal"
 	};
@@ -75,12 +58,6 @@ namespace UEBabyPram::LogFilter
 	Potato::EBNF::Ebnf const& GetEbnf()
 	{
 		static Potato::EBNF::Ebnf ebnf(ebnf_string);
-		return ebnf;
-	}
-
-	Potato::EBNF::Ebnf const& GetFilterEbnf()
-	{
-		static Potato::EBNF::Ebnf ebnf(filter_string);
 		return ebnf;
 	}
 
@@ -181,7 +158,7 @@ namespace UEBabyPram::LogFilter
 			std::size_t index = 0;
 			for (; index < log_level_array.size(); ++index)
 			{
-				if (log.property.category == log_level_array[index])
+				if (level_string == log_level_array[index])
 				{
 					break;
 				}
@@ -497,221 +474,4 @@ namespace UEBabyPram::LogFilter
 		return false;
 	}
 
-	bool LogFilterFormatter::AddStatement(std::u8string_view regstatement, std::u8string_view filter_type, std::u8string& error_message)
-	{
-		auto str = std::make_shared<re2::RE2>(
-			std::string_view(reinterpret_cast<char const*>(regstatement.data()), regstatement.size())
-		);
-		if (!str->ok())
-		{
-			std::string error;
-			std::format_to(
-				std::back_insert_iterator(error),
-				"Unsupport Reg : <{}>",
-				Potato::Log::AddLogStringWrapper(regstatement)
-			);
-			Potato::Encode::UnicodeEncoder<char, char8_t>::EncodeTo(
-				error,
-				std::back_insert_iterator(error_message)
-			);
-			return false;
-		}
-		Potato::EBNF::EbnfProcessor pro;
-		
-		auto symbol = [=](Potato::EBNF::SymbolInfo syminfo, std::size_t mask) -> std::any {
-			switch (mask)
-			{
-			case 1:
-			{
-				std::u8string string;
-				auto str = syminfo.TokenIndex.Slice(filter_type);
-				for (std::size_t index = 0; index < str.size(); ++index)
-				{
-					auto ite = str[index];
-					if (ite == u8'\\')
-					{
-						if (index + 1 < str.size())
-						{
-							auto ite2 = str[index + 1];
-							index += 1;
-							switch (ite2)
-							{
-							case u8'r':
-								string.push_back(u8'\r');
-								break;
-							case u8't':
-								string.push_back(u8'\t');
-								break;
-							case u8'n':
-								string.push_back(u8'\n');
-								break;
-							case u8'v':
-								string.push_back(u8'\v');
-								break;
-							default:
-								string.push_back(ite2);
-								break;
-							}
-						}
-						else {
-							string.push_back(ite);
-						}
-					}
-					else {
-						string.push_back(ite);
-					}
-				}
-				return Filter::ElementType{string};
-			}
-			case 2:
-			{
-				std::u8string string(u8"{");
-				return Filter::ElementType{ string };
-			}
-			case 3:
-			{
-				std::u8string string(u8"}");
-				return Filter::ElementType{ string };
-			}
-			case 4:
-			{
-				std::size_t index = 0;
-				auto str = syminfo.TokenIndex.SubIndex(1, syminfo.TokenIndex.Size() - 2).Slice(filter_type);
-				Potato::Format::DirectDeformat(str, index);
-				return Filter::ElementType{ index };
-			}
-			default:
-				if (mask >= 5 && mask <= 9)
-				{
-					return Filter::ElementType{static_cast<PropertyType>(mask - 5)};
-				}
-			}
-			return {};
-			};
-
-		auto reduce = [=](Potato::EBNF::SymbolInfo symbol, Potato::EBNF::ReduceProduction production) -> std::any {
-			if (production.UserMask == 1)
-			{
-				std::pmr::vector<Filter::ElementType> values;
-				return values;
-			}
-			else if (production.UserMask == 2)
-			{
-				auto values = *production[0].TryConsume<std::pmr::vector<Filter::ElementType>>();
-				values.push_back(*production[1].TryConsume<Filter::ElementType>());
-				return values;
-			}
-			return {};
-			};
-		
-		
-		pro.SetObserverTable(GetFilterEbnf(),
-			symbol,
-			reduce
-		);
-
-		if (Potato::EBNF::Process(pro, filter_type))
-		{
-			Filter filter;
-			filter.matched_regex = str;
-			filter.value = pro.GetData<std::pmr::vector<Filter::ElementType>>();
-			filters.push_back(std::move(filter));
-			return true;
-		}
-		else {
-			std::string error;
-			std::format_to(
-				std::back_insert_iterator(error),
-				"Unsupport Formatter : <{}>",
-				Potato::Log::AddLogStringWrapper(filter_type)
-			);
-			Potato::Encode::UnicodeEncoder<char, char8_t>::EncodeTo(
-				error,
-				std::back_insert_iterator(error_message)
-			);
-			return false;
-		}
-	}
-
-	std::optional<std::u8string> LogFilterFormatter::Format(UEBabyPram::LogParser::LogLine const& line)
-	{
-		std::u8string target;
-		for (auto& ite : filters)
-		{
-			std::array<absl::string_view, 20> string;
-			if (ite.matched_regex->Match(
-				std::string_view(reinterpret_cast<char const*>(line.str.data()), line.str.size()),
-				0,
-				line.str.size(),
-				re2::RE2::Anchor::UNANCHORED,
-				string.data(),
-				string.size()
-			))
-			{
-				for (auto& ite_filer : ite.value)
-				{
-					if (std::holds_alternative<std::size_t>(ite_filer))
-					{
-						auto index = std::get<std::size_t>(ite_filer);
-						if (index < string.size())
-						{
-							target += std::u8string_view{
-								reinterpret_cast<char8_t const*>(string[index].data()),
-								string[index].size()
-							};
-						}
-						else {
-							target += u8"[OutOfRange]";
-						}
-					}
-					else if (std::holds_alternative<std::u8string>(ite_filer))
-					{
-						target += std::get<std::u8string>(ite_filer);
-					}
-					else if (std::holds_alternative<PropertyType>(ite_filer))
-					{
-						auto property = std::get<PropertyType>(ite_filer);
-						switch (property)
-						{
-						case PropertyType::Category:
-							target += line.property.category;
-							break;
-						case PropertyType::Level:
-							target += line.property.level;
-							break;
-						case PropertyType::Line:
-						{
-							std::string str;
-							std::format_to(
-								std::back_insert_iterator(str),
-								"{}",
-								line.line.Begin()
-							);
-							target += std::u8string_view{
-								reinterpret_cast<char8_t const*>(str.data()),
-								str.size()
-							};
-						}
-							break;
-						case PropertyType::Log:
-						{
-							target += line.str;
-						}
-						case PropertyType::Time:
-							if (!line.property.time.total.empty())
-							{
-								target += line.property.time.year;
-							}
-							else {
-								target += u8"---";
-							}
-							break;
-						}
-					}
-				}
-				return target;
-			}
-		}
-		return std::nullopt;
-	}
 }

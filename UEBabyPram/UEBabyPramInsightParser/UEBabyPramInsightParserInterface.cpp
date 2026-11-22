@@ -14,6 +14,7 @@
 #include "UEBabyPramInsightParserPlatformAnalysis.h"
 #include "UEBabyPramInsightParserAnalysisContext.h"
 #include "UEBabyPramInsightParserMemoryAnalysis.h"
+#include "UEBabyPramInsightParserBookMarksAnalysis.h"
 
 namespace UEBabyPram::InsightParser
 {
@@ -27,6 +28,7 @@ namespace UEBabyPram::InsightParser
 
 		FPlatformEventTraceAnalyzer platform_event_analyzer{ parser };
 		FMemoryAnalyzer memory_analyze{ parser, ana_context };
+		FBookmarksAnalyzer bool_mark_analyze{parser};
 
 		//TSharedPtr<TraceServices::IAnalysisSession> Session = TraceServices::CreateAnalysisSession(0, nullptr, {});
 
@@ -35,7 +37,7 @@ namespace UEBabyPram::InsightParser
 		//FSummarizeCpuProfilerProvider CpuProfilerProvider;
 		//TSharedPtr<UE::Trace::IAnalyzer> CpuProfilerAnalyzer = TraceServices::CreateCpuProfilerAnalyzer(*Session, FTimingProfilerProvider, FTimingProfilerProvider);
 
-		TArray<UE::Trace::IAnalyzer*> List = { &cpu_analyzer, &platform_event_analyzer, &memory_analyze };
+		TArray<UE::Trace::IAnalyzer*> List = { &cpu_analyzer, &platform_event_analyzer, &memory_analyze, &bool_mark_analyze };
 		UE::Trace::FMessageDelegate Delegate;
 		UE::Trace::FAnalysisEngine engine{ std::move(List), std::move(Delegate) };
 

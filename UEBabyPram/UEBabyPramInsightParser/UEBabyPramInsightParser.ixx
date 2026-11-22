@@ -61,6 +61,14 @@ export namespace UEBabyPram::InsightParser
 		bool operator==(MemoryTagSetId const&) const = default;
 	};
 
+	struct BookMarksId
+	{
+		std::uint64_t id = std::numeric_limits<std::uint64_t>::max();
+		operator bool() const { return id != std::numeric_limits<std::uint64_t>::max(); }
+		std::strong_ordering operator<=>(BookMarksId const&) const = default;
+		bool operator==(BookMarksId const&) const = default;
+	};
+
 	using DurationSec = std::chrono::duration<double, std::ratio<1, 1>>;
 
 	// A time point (or duration) which is displayed as "<minutes>m<seconds>s",
@@ -712,6 +720,8 @@ export namespace UEBabyPram::InsightParser
 		virtual void OnMemoryTrackerSpec(MemoryTrackerId tracker_id, std::u8string_view tracker_name) {}
 		virtual void OnMemoryTagSetSpec(MemoryTagSetId tag_set_id, std::u8string_view tag_set_name) {}
 		virtual void OnMemoryTagSnap(MemoryTagSnapView snap_view) {}
+		virtual void OnBookMarksSpec(int64 book_marks_id, int32 book_marks_line, std::u8string_view file_name, std::wstring_view format_string) {}
+		virtual void OnBookMarks(BookMarksId book_marks_id, DurationSec time, std::span<std::uint8_t const> data, std::uint32_t call_stack_id) {}
 		static std::wstring_view CoverStringView(wchar_t const* ScopeName, std::size_t ScopeNameLen);
 
 		struct CPUEventInfo
@@ -734,6 +744,16 @@ export namespace UEBabyPram::InsightParser
 		std::optional<ThreadInfo> GetThreadInfo(ThreadSystemID thread_system_id) const;
 
 	private:
+
+		virtual void OnBookMarks(uint64 book_marks_id, double time, uint8 const* data, std::size_t data_length, uint32 call_stack_id) override
+		{
+			OnBookMarks(BookMarksId{ book_marks_id }, DurationSec{ time }, std::span<std::uint8_t const>{ data, data_length }, call_stack_id);
+		}
+
+		virtual void OnBookMarksSpec(uint64 book_marks_id, int32 book_marks_line, char const* file_name, std::size_t file_name_len, wchar_t const* format_string, std::size_t format_string_len) override
+		{
+			OnBookMarksSpec(static_cast<int64>(book_marks_id), book_marks_line, std::u8string_view{ reinterpret_cast<char8_t const*>(file_name), file_name_len }, std::wstring_view{ format_string, format_string_len });
+		}
 		
 		virtual void OnCPUEventDiscovered(uint32_t space_id, wchar_t const* event_name, std::size_t event_name_len, wchar_t const* file, std::size_t file_name_len, std::size_t line) override
 		{

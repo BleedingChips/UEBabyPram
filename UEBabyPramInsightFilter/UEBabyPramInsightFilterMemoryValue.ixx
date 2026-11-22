@@ -31,38 +31,44 @@ export namespace UEBabyPram::InsightFilter
 	// parser aggregates the values of a tag into its first, last, largest, smallest and mean value, and this parser prints
 	// the shape of the time line of the tag, which is what a chart of the memory of one tag is built from.
 	//
-	// A tag may be sampled thousands of times, so the report does not print every sample: it prints the first sample, the
-	// last sample and the peaks between them, which are the samples where the slope of the values turns, i.e. where it goes
-	// from positive to negative, from negative to positive, or to zero. A peak which is less than 5% away from the peak
-	// before it, measured against the larger of the two values, is a small wave which the report drops, so the shape of the
-	// tag is not hidden by the noise of the memory allocator. The first and the last sample are always printed.
-	//
-	// Config::max_peak_count limits how many peaks of one tag are printed, the largest ones are kept by an even pick of the
-	// peaks, and Config::min_peak_sample_count keeps two printed peaks at least that many samples apart, so a tag which
-	// oscillates around one value is not reported as thousands of peaks. Config::all_samples prints every sample of the tag
-	// instead, which is the mode of the whole time line, and the two limits do not apply to it.
+	// The report has two modes:
+	//   - Peak: every extremum point, which is a sample where the slope changes from positive to negative or from
+	//     negative to positive, a slope of 0 is not a turning point. The last peak carries the LastPeak role, and
+	//     the first, last, largest and smallest samples are always added.
+	//   - All: the time range of the tag is split into Config::max_point_count equal segments, and every segment
+	//     prints its first, last, largest and smallest sample with their time, value and slope, followed by the
+	//     mean, median and standard deviation of all samples of the segment.
+	// A sample which carries more than one role keeps all of them, ex: First/Max or Start/Max, and the points are
+	// sorted by time.
 	struct MemoryValueParser : public Parser
 	{
+		// The mode which decides the points between the four special points.
+		enum class PointMode : std::uint8_t
+		{
+			// The extremum points, with the four special points of the whole time line.
+			Peak,
+			// Equal time segments, every one with its own four points and its statistics.
+			All,
+		};
+
 		struct Config
 		{
 			// The queries of the analysis, every one of them is built from its text by ParseEventQuery. The command line
 			// collects them from the -mv arguments and reports the error of a query which is not acceptable, so the parser
 			// only receives the queries which are ready to be analyzed. The queries are taken over by the parser.
 			std::vector<EventQuery> queries;
-			// How many peaks of one memory tag are printed, the peaks are picked evenly when the tag carries more of them than
-			// this count. 0 prints every peak.
-			std::size_t max_peak_count = 20;
-			// How many samples are between two printed peaks at least: a peak which is fewer samples after the previous printed
-			// peak is dropped, which keeps a tag which oscillates around one value from being reported as thousands of peaks.
-			// 0 drops no peak for the distance.
-			std::size_t min_peak_sample_count = 5;
-			// Whether every sample of a tag is printed instead of the first sample, the peaks and the last one: it is the mode
-			// which exports the whole time line, ex: for a chart which is drawn from every sample, and it is what the CSV file
-			// of a long time line is for. The limits of the peaks do not apply to it.
-			bool all_samples = false;
+			// The mode of the points.
+			PointMode mode = PointMode::Peak;
+			// The Peak mode prints at most this many extremum points of one tag, 0 for no limit. The All mode splits the
+			// time range of one tag into this many equal segments, and 0 uses a single segment which covers the whole range.
+			std::size_t max_point_count = 20;
+			// The Peak mode drops an extremum point whose absolute slope is less than the largest absolute slope of the
+			// extremum points of the tag multiplied by this ratio, so the noise of the small turns is not printed. 0
+			// keeps every extremum point. The All mode does not read it.
+			double min_slope_ratio = 0.05;
 			// The path of the CSV file which the time lines are written into instead of the text report, the file is created
-			// and its previous content is emptied. Every sample is one row, the value of the row is bytes, and the text report
-			// is not printed when the path is set.
+			// and its previous content is emptied. The points which the report prints are the rows of the file, and its value
+			// is bytes.
 			std::optional<std::filesystem::path> csv_path;
 			std::pmr::memory_resource* resource = std::pmr::get_default_resource();
 		};
@@ -74,28 +80,50 @@ export namespace UEBabyPram::InsightFilter
 			int64 value = 0;
 		};
 
-		// Where a point of the report is in the time line of the tag.
-		enum class PointKind : std::uint8_t
+		// The role of a point in the time line. A point carries one or more roles, so a sample which is both the first
+		// sample and the largest value carries First and Max.
+		enum class PointKind : std::uint16_t
 		{
-			// The first sample of the tag, which is always printed.
-			First,
-			// A sample where the slope of the values turned, which is a peak or a valley of the time line.
-			Peak,
-			// A sample which is neither the first nor the last one, which is only printed by the mode which prints every
-			// sample of the tag.
-			Sample,
-			// The last sample of the tag, which is always printed.
-			Last,
+			// A sample where the slope turns from positive to negative or from negative to positive.
+			Peak = 1 << 0,
+			// A sample of the Peak mode, which is also its last one.
+			LastPeak = 1 << 1,
+			// The first sample of the tag.
+			First = 1 << 2,
+			// The last sample of the tag.
+			Last = 1 << 3,
+			// The first sample of a segment of the All mode.
+			SegmentStart = 1 << 4,
+			// The last sample of a segment of the All mode.
+			SegmentEnd = 1 << 5,
+			// The first sample of the largest value.
+			Max = 1 << 6,
+			// The first sample of the smallest value.
+			Min = 1 << 7,
+			// A sample of the All mode.
+			Sample = 1 << 8,
 		};
 
+		static constexpr PointKind CombinePointKind(PointKind left, PointKind right)
+		{
+			return static_cast<PointKind>(
+				static_cast<std::uint16_t>(left) | static_cast<std::uint16_t>(right)
+			);
+		}
+
+		static constexpr bool HasPointKind(PointKind flags, PointKind kind)
+		{
+			return (static_cast<std::uint16_t>(flags) & static_cast<std::uint16_t>(kind)) != 0;
+		}
+
 		// One point of the report: the time and the value of a printed sample, the slope of the values at it, which is a size
-		// in bytes per second, and where the point is in the time line.
+		// in bytes per second, and the roles of the point in the time line.
 		struct PeakPoint
 		{
 			DurationSec time = DurationSec::zero();
 			int64 value = 0;
 			double slope = 0.0;
-			PointKind kind = PointKind::Peak;
+			PointKind kind = PointKind::Sample;
 		};
 
 		// The time line of one memory tag of one tracker which one query selects, the samples are kept in the order of the
@@ -141,8 +169,8 @@ export namespace UEBabyPram::InsightFilter
 
 	protected:
 
-		// Write the time lines into the CSV file of Config::csv_path, the file is created or emptied: one row carries one
-		// sample, and the value of the row is bytes, so the file is computable.
+		// Write the points of the report into the CSV file of Config::csv_path, the file is created or emptied: one row
+		// carries one point, and the value of the row is bytes, so the file is computable.
 		bool WriteCSV();
 
 		// Find the time line of the tag of the tracker, and create it when the snapshot is the first one which carries the tag.
@@ -150,11 +178,34 @@ export namespace UEBabyPram::InsightFilter
 		// one per query.
 		TagTimeLine& FindTagTimeLine(MemoryTrackerId tracker_id, MemoryTagId tag_id);
 
-		// Pick the points which the report prints: the first sample of the tag, the peaks between them and the last sample.
-		// A peak is a sample where the slope of the values turns, a peak which is less than 5% away from the previous peak is
-		// dropped, and the peaks are limited by Config::max_peak_count and spaced by Config::min_peak_sample_count. The
-		// points are kept in the order of the time.
-		std::pmr::vector<PeakPoint> PickPeaks(std::span<ValueSample const> samples);
+		// One segment of the All mode: the time range which it covers, its four points (start, end, max and min)
+		// and the statistics of every sample in it. The points are sorted by time, and a point which carries more
+		// than one role keeps all of them.
+		struct SegmentReport
+		{
+			explicit SegmentReport(std::pmr::memory_resource* resource) : points(resource) {}
+
+			std::size_t index = 0;
+			Potato::Misc::IndexSpan<DurationSec> time_range;
+			std::size_t sample_count = 0;
+			std::pmr::vector<PeakPoint> points;
+			// The mean, median and population standard deviation of the values of the segment, in bytes.
+			long double mean = 0.0L;
+			long double median = 0.0L;
+			long double standard_deviation = 0.0L;
+		};
+
+		// Pick the extremum points of the Peak mode which the slope filter keeps, limit them by Config::max_point_count,
+		// add the four special points (first, last, max and min), and mark the last printed peak. When extremum_count is
+		// not null, it is set to the count of every extremum point of the time line before the filter and the limit, so
+		// the report tells how many extremum points the tag carries. The points are kept in the order of the time, and
+		// a point which carries more than one role keeps all of them.
+		std::pmr::vector<PeakPoint> PickPoints(std::span<ValueSample const> samples, std::size_t* extremum_count = nullptr);
+
+		// Build the segments of the All mode: the time range of the samples is split into Config::max_point_count
+		// equal segments (a single segment when the count is 0), and every segment keeps its start, end, max and min
+		// points and the mean, median and standard deviation of its samples.
+		std::pmr::vector<SegmentReport> BuildSegments(std::span<ValueSample const> samples);
 
 		// The resource of the specs and of the time lines, it is Config::resource and the storages below are allocated from
 		// it.
@@ -165,12 +216,12 @@ export namespace UEBabyPram::InsightFilter
 		std::pmr::vector<EventQuery> queries;
 		// The path of the CSV file of the time lines, it is described by Config::csv_path.
 		std::optional<std::filesystem::path> csv_path;
-		// How many peaks of one tag are printed, it is Config::max_peak_count and 0 prints every peak.
-		std::size_t max_peak_count = 20;
-		// How many samples are between two printed peaks at least, it is Config::min_peak_sample_count.
-		std::size_t min_peak_sample_count = 5;
-		// Whether every sample of a tag is printed, it is Config::all_samples.
-		bool all_samples = false;
+		// The mode of the points, it is Config::mode.
+		PointMode mode = PointMode::Peak;
+		// How many points of one tag a mode may print, it is Config::max_point_count and 0 prints every selected point.
+		std::size_t max_point_count = 20;
+		// The ratio of the largest absolute slope below which an extremum point is dropped, it is Config::min_slope_ratio.
+		double min_slope_ratio = 0.05;
 		// Whether the tracker and the time point of the snapshot which is being read are selected by any query, which decides
 		// whether the walk of the tags of that snapshot asks the question of the chain at all.
 		bool is_snapshot_selected = false;

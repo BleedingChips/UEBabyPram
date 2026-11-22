@@ -377,8 +377,6 @@ namespace UEBabyPram::InsightFilter
 		};
 
 		print_line(L"MemoryStatisticParser Output:");
-		print_line(L"    (Memory Tag Statistic: the values which the snapshots of one tracker sampled for one memory tag which the query selects)");
-		print_line(L"    (First/Last: the first and the last snapshot which carries the tag, with the value of that snapshot; Max/Min: the snapshot of the largest and of the smallest value; Mean: the mean of the values of every snapshot which carries the tag)");
 
 		print_line(std::format(L"    Sorted by: <{}>", SortKindName(sort)));
 

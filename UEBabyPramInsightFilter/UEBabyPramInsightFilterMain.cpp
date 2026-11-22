@@ -154,7 +154,6 @@ int main(int argc, char* argv[])
 	Potato::Document::DocumentReader Reader(setting.insight_path);
 	ProgressDocumentWrapper Input(Reader);
 	UEBabyPram::InsightParser::ExecuteParser(Input, *setting.parser);
-
 	// The report is written into the file which -o names, which is created and emptied, or into the file which -a
 	// names, which keeps its previous content, and into the standard output when neither of them is given.
 	// The parser reports whether the report is written, the report of -es which is a CSV file is the one which may

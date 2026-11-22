@@ -1,4 +1,4 @@
-﻿module;
+module;
 
 #include <re2/re2.h>
 
@@ -31,12 +31,11 @@ export namespace UEBabyPram::InsightFilter
 	}
 
 	// Report that the trace carries no Context Switch event, which every parser which reads the context switch
-	// streamer tells its report: the Context Switch Time of every event of such a trace is 0, and the Exclude Time
-	// WithOut Context Switch Time is the same as the Exclude Time, so the time which a thread spent out of the CPU is
-	// missing from the trace instead of being 0, and the time of the report is the time which the thread was scheduled.
+	// streamer tells its report: the Context Switch Time of every event is 0 and its Exclude Time WithOut
+	// Context Switch Time is the same as its Exclude Time.
 	inline void OutputNoContextSwitchEventNote(Potato::Log::LogPrinter& printer)
 	{
-		OutputLog<L"    (No Context Switch event is recorded in the trace: the Context Switch Time (CS) of every event is 0 and the Exclude Time WithOut Context Switch Time (ENCS) is the same as the Exclude Time (E), the trace is captured without the context switch channel of the CPU)">(
+		OutputLog<L"    (No Context Switch event: CS is 0 and ENCS equals E)">(
 			printer
 		);
 	}

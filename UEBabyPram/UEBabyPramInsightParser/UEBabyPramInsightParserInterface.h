@@ -25,18 +25,21 @@ namespace UEBabyPram::InsightParser
 
 	enum class ParserRequireFlag : std::size_t
 	{
-		CPU_EVENT = 1 << 1,
-		EVENT_SPEC = 1 << 2,
-		CONTEXT_SWITCH = 1 << 3,
-		META_DATA = 1 << 4,
+		CPU_EVENT,
+		EVENT_SPEC,
+		CONTEXT_SWITCH,
+		META_DATA,
 		// The specs of the memory tracing of the LLM channel: the memory tags (TagsSpec), the trackers (TrackerSpec) and
 		// the tag sets (TagSetSpec). A parser which only resolves the id of a memory tag to a name requires this one, and
 		// nothing else, so the snapshots of the tags are not read for it.
-		MEMORY_TAG = 1 << 5,
+		MEMORY_TAG,
 		// The snapshots of the memory tags (TagValue): the time and the value which every tracker sampled for every tag
 		// which it tracks. A parser which reports a value requires this one as well as MEMORY_TAG, because an id is only
 		// resolvable to a name through the specs.
-		MEMORY_VALUE = 1 << 6
+		MEMORY_VALUE,
+
+		BOOK_MARKS_SPEC,
+		BOOK_MARKS,
 	};
 
 	struct BaseParser
@@ -57,6 +60,8 @@ namespace UEBabyPram::InsightParser
 		virtual void OnMemoryTagSetSpec(int32 tag_set_id, char const* name, std::size_t name_count) {};
 		virtual void OnMemoryTagSnap(int32 tracker_id, double time, int64 const* tags, std::size_t tag_count, int64 const* sampled_value, std::size_t sampled_value_count) {}
 		virtual void OnMemoryTagSnap(int32 tracker_id, double time, uint32 const* tags, std::size_t tag_count, int64 const* sampled_value, std::size_t sampled_value_count) {}
+		virtual void OnBookMarksSpec(uint64 book_marks_id, int32 book_marks_line, char const* file_name, std::size_t file_name_len, wchar_t const* format_string, std::size_t format_string_len) {}
+		virtual void OnBookMarks(uint64 book_marks_id, double time, uint8 const* data, std::size_t data_length, uint32 call_stack_id) {}
 		virtual ThreadTimeLineInterface* GetThreadTimeLine(uint32 thread_id) = 0;
 		//virtual void AddThread(uint32 thread_id, uint32 thread_system_id, char const* thread_name) = 0;
 		virtual uint32 AddMetaData(uint32 SpecId, uint32 MetaDataId, MetaDataFormat format, uint8 const* meta_data, std::size_t meta_data_len, uint32 thread_id) { return 0; }

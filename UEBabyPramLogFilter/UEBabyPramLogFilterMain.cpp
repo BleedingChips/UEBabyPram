@@ -8,346 +8,232 @@ using namespace UEBabyPram;
 using namespace UEBabyPram::LogFilter;
 using namespace Potato;
 
-std::filesystem::path GetTemporaryPath(std::filesystem::path const& reference_path)
+namespace
 {
-	auto temporary_path = std::filesystem::temp_directory_path();
-	temporary_path += reference_path.filename();
-	std::string time_file_name;
-	std::format_to(std::back_insert_iterator(time_file_name), "_{}.temp", std::chrono::system_clock::now().time_since_epoch().count());
-	temporary_path += time_file_name;
-	return temporary_path;
+	std::filesystem::path GetTemporaryPath(std::filesystem::path const& reference_path)
+	{
+		auto temporary_path = std::filesystem::temp_directory_path();
+		temporary_path += reference_path.filename();
+		std::string time_file_name;
+		std::format_to(std::back_insert_iterator(time_file_name), "_{}.temp", std::chrono::system_clock::now().time_since_epoch().count());
+		temporary_path += time_file_name;
+		return temporary_path;
+	}
+
+	std::wstring ToWide(std::u8string_view text)
+	{
+		std::wstring wide;
+		Potato::Encode::UnicodeEncoder<char8_t, wchar_t>::EncodeTo(text, std::back_inserter(wide));
+		return wide;
+	}
 }
 
 int main(int argc, char* argv[])
 {
 	UEBabyPram::LogFilter::FilterSetting setting;
 	UEBabyPram::LogFilter::LogFilterProcessor processor;
-	UEBabyPram::LogFilter::LogFilterFormatter formatter;
 
 	try {
-		auto resulr = UEBabyPram::LogFilter::HandleComment(argc, argv, setting, processor, formatter);
-		if (resulr > 0)
+		auto result = UEBabyPram::LogFilter::HandleComment(argc, argv, setting, processor);
+		if (result > 0)
+		{
 			return 0;
-		else if (resulr < 0)
-			return resulr;
+		}
+		else if (result < 0)
+		{
+			return result;
+		}
 	}
 	catch (std::exception const& exc)
 	{
 		LogToConsole<Log::LogLevel::Error, L"{}">(std::string_view{ exc.what() });
-	}
-	
-
-	if (setting.input_file.empty())
-	{
-		LogToConsole<Log::LogLevel::Error, L"Require an target file with -f or --file, see -h or --help for more infomation">();
 		return -1;
 	}
 
-	std::pmr::vector<std::filesystem::path> paths = std::move(setting.input_file);
+	std::filesystem::path const& input_file = setting.input_file;
+	std::filesystem::path const& output_file = setting.output_file;
+	bool const write_log = !output_file.empty();
 
-	for (auto& ite : paths)
+	Potato::Document::DocumentReader reader(input_file);
+	if (!reader)
 	{
-		auto find = std::find(setting.input_file.begin(), setting.input_file.end(), ite);
-		if (find == setting.input_file.end())
+		if (std::filesystem::exists(input_file))
 		{
-			setting.input_file.emplace_back(std::move(ite));
+			auto temporary_path = GetTemporaryPath(input_file);
+			std::filesystem::copy_file(
+				input_file,
+				temporary_path,
+				std::filesystem::copy_options::overwrite_existing
+			);
+			reader.Open(temporary_path);
 		}
 	}
 
-	if (setting.target == UEBabyPram::LogFilter::OutputTarget::STD)
+	if (!reader)
 	{
-		SetConsoleLogSuppressed(true);
+		LogToConsole<Log::LogLevel::Error, L"Unable to open <{}>">(input_file.generic_wstring());
+		return -1;
 	}
 
-	Potato::Task::Context context;
+	Potato::Document::PlainTextReader::Config reader_config;
+	reader_config.cache_buffer_size = std::min(static_cast<std::size_t>(1024) * 1024 * 100, reader.GetStreamSize());
+	Potato::Document::PlainTextReader plain_reader(reader, reader_config);
 
-	for (auto& file_path : setting.input_file)
+	std::filesystem::path temporary_output_path;
+	Potato::Document::DocumentWriter writer;
+	if (write_log)
 	{
-		context.Commit(
-			[&, file_path](Potato::Task::Context&, Potato::Task::Node::Parameter&, Potato::Task::Node&) {
-				LogToConsole<Log::LogLevel::Log, u8"Input <{}>">(file_path.generic_u8string());
-				Potato::Document::DocumentReader reader(file_path);
-				if (!reader)
+		temporary_output_path = GetTemporaryPath(input_file);
+		temporary_output_path += ".output";
+		writer.Open(temporary_output_path, Potato::Document::DocumentWriter::OpenMode::CREATE_OR_EMPTY);
+		if (!writer)
+		{
+			LogToConsole<Log::LogLevel::Error, L"Unable to create <{}>">(output_file.generic_wstring());
+			return -1;
+		}
+	}
+
+	Potato::Document::PlainTextWriter::Config writer_config;
+	writer_config.bom = Potato::Document::BomT::UTF8;
+	Potato::Document::PlainTextWriter plain_writer(writer, writer_config);
+
+	std::size_t matched_count = 0;
+	std::size_t output_index = 0;
+	std::u8string first_time;
+	std::u8string last_time;
+	std::size_t first_line = 0;
+	std::size_t last_line = 0;
+	bool have_first_time = false;
+	bool have_last_time = false;
+	bool have_line = false;
+
+	UEBabyPram::LogParser::LogLine::TimeT last_frame_time;
+	std::optional<std::size_t> last_frame_count;
+	std::u8string formatted_line;
+	std::u8string separator_line;
+
+	UEBabyPram::LogParser::ForeachLogLine(plain_reader, [&](UEBabyPram::LogParser::LogLine log_line) -> bool {
+		if (processor)
+		{
+			auto matched = processor.Detect(log_line);
+			if (!matched.has_value() || !*matched)
+			{
+				return true;
+			}
+		}
+
+		++matched_count;
+
+		if (!have_line)
+		{
+			first_line = log_line.line.Begin();
+			have_line = true;
+		}
+		last_line = log_line.line.Begin();
+
+		if (!log_line.property.time.total.empty())
+		{
+			if (!have_first_time)
+			{
+				first_time.assign(log_line.property.time.total.begin(), log_line.property.time.total.end());
+				have_first_time = true;
+			}
+
+			last_time.assign(log_line.property.time.total.begin(), log_line.property.time.total.end());
+			have_last_time = true;
+		}
+
+		if (!write_log)
+		{
+			return true;
+		}
+
+		if (!setting.output_span.IsInclude(output_index))
+		{
+			++output_index;
+			return true;
+		}
+
+		formatted_line.clear();
+		separator_line.clear();
+
+		if (setting.mode == UEBabyPram::LogFilter::OutputMode::NORMAL_WITH_LINE)
+		{
+			std::format_to(
+				Potato::Encode::FormatterOutputIteratorWrapper(std::back_insert_iterator(formatted_line)),
+				"line-{}:",
+				log_line.line.Begin()
+			);
+		}
+
+		if (setting.output_with_separate_frame)
+		{
+			auto frame_count = log_line.GetFrameCount();
+			auto time = log_line.GetSystemClockTimePoint();
+
+			if (frame_count.has_value() && time.has_value())
+			{
+				if (last_frame_count.has_value())
 				{
-					if (std::filesystem::exists(file_path))
+					if (*frame_count != *last_frame_count)
 					{
-						auto temporary_path = GetTemporaryPath(file_path);
-						std::filesystem::copy_file(
-							file_path,
-							temporary_path,
-							std::filesystem::copy_options::overwrite_existing
-						);
-						reader.Open(temporary_path);
-					}
-				}
+						std::int64_t frame_delta = static_cast<std::int64_t>(*frame_count) - static_cast<std::int64_t>(*last_frame_count);
+						auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(*time - last_frame_time);
 
-				if (reader)
-				{
-					auto temporary_output_path = GetTemporaryPath(file_path);
-					temporary_output_path += ".output";
-					std::filesystem::path out_path = setting.output_path;
-					if (out_path.empty())
-					{
-						out_path = file_path;
-					}
-					else {
-						out_path /= file_path.filename();
-					}
-
-					if (!setting.output_expand.empty())
-					{
-						out_path += setting.output_expand;
-					}
-
-					Potato::Document::PlainTextReader::Config config;
-					config.cache_buffer_size = std::min(static_cast<std::size_t>(1024) * 1024 * 100, reader.GetStreamSize());
-					Potato::Document::PlainTextReader plain_reader(reader, config);
-					Potato::Document::DocumentWriter writter;
-					if (setting.target == UEBabyPram::LogFilter::OutputTarget::FILE)
-					{
-						writter.Open(temporary_output_path, Potato::Document::DocumentWriter::OpenMode::CREATE_OR_EMPTY);
-					}
-					Potato::Document::PlainTextWriter::Config writer_config;
-					config.bom = Potato::Document::BomT::UTF8;
-					Potato::Document::PlainTextWriter plain_writer(writter, writer_config);
-
-					UEBabyPram::LogParser::LogLine::TimeT last_frame_time;
-					std::optional<std::size_t> last_frame_count;
-					std::u8string formated_line;
-					std::u8string formated_this_line;
-					std::u8string sperated_line;
-					std::u8string single_sperated_line;
-					std::chrono::system_clock::time_point last_log_time = std::chrono::system_clock::now();
-					struct LineCount
-					{
-						std::string string;
-					};
-					std::pmr::deque<LineCount> line_record;
-					std::size_t count = 0;
-					std::optional<std::size_t> min_line;
-					std::optional<std::size_t> min_line_outputed;
-					std::size_t max_line = 0;
-					std::size_t max_line_outputed = 0;
-					std::vector<std::u8string> repeated_string;
-					UEBabyPram::LogParser::ForeachLogLine(plain_reader, [&](UEBabyPram::LogParser::LogLine log_line) -> bool {
-						
-						formated_this_line.clear();
-						sperated_line.clear();
-						single_sperated_line.clear();
-						
-						if (processor)
-						{
-							auto re = processor.Detect(log_line);
-
-							if (!re.has_value() || !*re)
-								return true;
-						}
-
-						if (!min_line.has_value())
-						{
-							min_line = log_line.line.Begin();
-						}
-						max_line = log_line.line.Begin();			
-
-						if (!setting.output_span.IsInclude(count))
-						{
-							return true;
-						}
-
-						if (setting.mode == UEBabyPram::LogFilter::OutputMode::NORMAL)
-						{
-							formated_this_line += log_line.total_str;
-						}
-						else if(setting.mode == UEBabyPram::LogFilter::OutputMode::NORMAL_WITH_LINE) 
-						{
-							std::format_to(
-								Potato::Encode::FormatterOutputIteratorWrapper(std::back_insert_iterator(formated_this_line)),
-								"line-{}:{}",
-								log_line.line.Begin(),
-								Potato::Log::AddLogStringWrapper(log_line.total_str)
-							);
-						}
-						else if (setting.mode == UEBabyPram::LogFilter::OutputMode::ONLY_TIME_AND_LINE)
-						{
-							if (!log_line.property.time.year.empty())
-							{
-								std::format_to(
-									Potato::Encode::FormatterOutputIteratorWrapper(std::back_insert_iterator(formated_this_line)),
-									"[Time:({}) Line:({})]\r\n",
-									Potato::Log::AddLogStringWrapper(log_line.property.time.total),
-									log_line.line.Begin()
-								);
-							}
-							else {
-								std::format_to(
-									Potato::Encode::FormatterOutputIteratorWrapper(std::back_insert_iterator(formated_this_line)),
-									"[Time:(---) Line:({})]\r\n",
-									log_line.line.Begin()
-								);
-							}
-						}
-						else if (setting.mode == UEBabyPram::LogFilter::OutputMode::CUSTOM)
-						{
-							auto string = formatter.Format(log_line);
-							if (string.has_value())
-							{
-								std::format_to(
-									Potato::Encode::FormatterOutputIteratorWrapper(std::back_insert_iterator(formated_this_line)),
-									"{}\r\n",
-									Potato::Log::AddLogStringWrapper(*string)
-								);
-							}
-						}
-
-						if (setting.not_repeat)
-						{
-							bool repeat = false;
-							for (auto& ite : repeated_string)
-							{
-								if (ite == formated_this_line)
-								{
-									repeat = true;
-									break;
-								}
-							}
-							if (repeat)
-							{
-								return true;
-							}
-							else {
-								repeated_string.push_back(formated_this_line);
-							}
-						}
-
-						count += 1;
-
-						if (!min_line_outputed.has_value())
-						{
-							min_line_outputed = log_line.line.Begin();
-						}
-						max_line_outputed = log_line.line.Begin();
-
-						if (setting.output_with_separate_frame)
-						{
-							auto fc = log_line.GetFrameCount();
-							auto time = log_line.GetSystemClockTimePoint();
-
-							if (fc.has_value())
-							{
-								if (last_frame_count.has_value())
-								{
-									if (*fc != *last_frame_count)
-									{
-										std::int64_t count = static_cast<std::int64_t>(*fc) - static_cast<std::int64_t>(*last_frame_count);
-										auto dur = std::chrono::duration_cast<std::chrono::milliseconds>(*time - last_frame_time);
-
-										std::format_to(
-											Potato::Encode::FormatterOutputIteratorWrapper(std::back_insert_iterator(single_sperated_line)),
-											"===[{}]Frame  [{}]ms===",
-											count, dur.count()
-										);
-										if (setting.target == UEBabyPram::LogFilter::OutputTarget::FILE)
-										{
-											for (std::size_t i = 0; i < 10; ++i)
-											{
-												sperated_line += u8"\t\t\t\t";
-												sperated_line += single_sperated_line;
-												sperated_line += u8"\t\t\t\t";
-											}
-										}
-										else {
-											sperated_line += single_sperated_line;
-										}
-										sperated_line += u8"\r\n";
-										last_frame_count = *fc;
-										last_frame_time = *time;
-									}
-								}
-								else {
-									last_frame_count = fc;
-									last_frame_time = *time;
-								}
-							}
-						}
-
-						formated_line += sperated_line;
-						formated_line += formated_this_line;
-
-						if (setting.target == UEBabyPram::LogFilter::OutputTarget::FILE)
-						{
-							plain_writer.Write(formated_line);
-							formated_line.clear();
-						}
-
-						return true;
-						});
-
-					;
-
-					std::u8string line_report;
-					if (min_line.has_value())
-					{
 						std::format_to(
-							Potato::Encode::FormatterOutputIteratorWrapper(std::back_insert_iterator(line_report)),
-							"LineRange[{}, {}] ",
-							*min_line,
-							max_line
-						);
-					}
-
-					if (min_line_outputed.has_value())
-					{
-						std::format_to(
-							Potato::Encode::FormatterOutputIteratorWrapper(std::back_insert_iterator(line_report)),
-							"OutputedLineRange[{}, {}] ",
-							*min_line_outputed,
-							max_line_outputed
-						);
-					}
-
-					if (setting.target == UEBabyPram::LogFilter::OutputTarget::STD)
-					{
-						std::string out_buffer;
-						std::format_to(
-							std::back_insert_iterator(out_buffer),
-							"Input <{}>, <{}> Logs Matched",
-							file_path.generic_string(),
-							count
-						);
-						LogToConsole<Log::LogLevel::Display, "{} {}: {};">(out_buffer, line_report, formated_line);
-					}
-
-					reader.Close();
-					plain_writer.Flush();
-					writter.Close();
-
-					if (setting.target == UEBabyPram::LogFilter::OutputTarget::FILE)
-					{
-						if (std::filesystem::exists(out_path))
-						{
-							std::filesystem::remove(out_path);
-						}
-						std::filesystem::rename(
-							temporary_output_path,
-							out_path
+							Potato::Encode::FormatterOutputIteratorWrapper(std::back_insert_iterator(separator_line)),
+							"===[{}]Frame  [{}]ms===\r\n",
+							frame_delta,
+							duration.count()
 						);
 
-						LogToConsole<Log::LogLevel::Log, u8"Output <{}>, <{}> Logs Matched, {}">(
-							out_path.generic_u16string(), count, line_report
-						);
+						last_frame_count = *frame_count;
+						last_frame_time = *time;
 					}
 				}
 				else {
-					LogToConsole<Log::LogLevel::Log, u8"Unable To Handle File <{}>">(file_path.generic_u16string());
+					last_frame_count = frame_count;
+					last_frame_time = *time;
 				}
 			}
-		);
+		}
+
+		if (!separator_line.empty())
+		{
+			formatted_line.insert(0, separator_line);
+		}
+
+		formatted_line += log_line.total_str;
+		plain_writer.Write(formatted_line);
+		++output_index;
+		return true;
+	});
+
+	reader.Close();
+	plain_writer.Flush();
+	if (write_log)
+	{
+		writer.Close();
+
+		if (std::filesystem::exists(output_file))
+		{
+			std::filesystem::remove(output_file);
+		}
+		std::filesystem::rename(temporary_output_path, output_file);
 	}
-	context.CreateThreads(context.GetSuggestThreadCount());
-	context.ExecuteContextThreadUntilNoExistTask();
 
-	LogToConsole<Log::LogLevel::Log, u8"All Done">();
-
+	// The standard output carries the summary only: the target, the output when -o was given, the matched count
+	// and the time of the first and of the last matched line.
+	LogToConsole<Log::LogLevel::Display, L"Target: <{}>">(input_file.generic_wstring());
+	if (write_log)
+	{
+		LogToConsole<Log::LogLevel::Display, L"Output: <{}>">(output_file.generic_wstring());
+	}
+	LogToConsole<Log::LogLevel::Display, L"Matched: <{}>">(matched_count);
+	LogToConsole<Log::LogLevel::Display, L"Start: <{}>">(have_first_time ? ToWide(first_time) : std::wstring{ L"---" });
+	LogToConsole<Log::LogLevel::Display, L"End: <{}>">(have_last_time ? ToWide(last_time) : std::wstring{ L"---" });
+	LogToConsole<Log::LogLevel::Display, L"StartLine: <{}>">(have_line ? std::to_wstring(first_line) : std::wstring{ L"---" });
+	LogToConsole<Log::LogLevel::Display, L"EndLine: <{}>">(have_line ? std::to_wstring(last_line) : std::wstring{ L"---" });
 
 	return 0;
 }

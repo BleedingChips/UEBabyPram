@@ -103,13 +103,9 @@ namespace UEBabyPram::InsightFilter
 		using InsightFilter::OutputLog;
 
 		OutputLog<L"MemoryTagSearchParser Output:">(printer);
-		OutputLog<L"    (Memory Tag: the tag which the LLM channel of the trace declares; Memory Tracker: the tracker which the LLM channel declares; Memory Tag Set: the tag set which the LLM channel declares)">(
+		OutputLog<L"    (FullName/Name: declared and last path segment; Parent/Tag Set: id:name; regex matches whole name, empty matches all)">(
 			printer
 		);
-		OutputLog<L"    (FullName: the name which the trace declares; Name: the last segment of the FullName after the last '/', which is the FullName itself when the tag has no parent; Parent: the id and the FullName of the parent tag; Tag Set: the id and the name of the tag set which a tag belongs to)">(
-			printer
-		);
-		OutputLog<L"    (The regular expression matches the whole name, and an empty expression matches every spec)">(printer);
 
 		// Only the kind which the search asks for is reported, so the search of a tracker reports the trackers only.
 		bool const search_tag_set = kind == Kind::All;

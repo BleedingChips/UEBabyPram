@@ -1,216 +1,116 @@
 ---
 name: uebabypram-log-filter
-description: 使用 UEBabyPramLogFilter CLI 工具过滤和格式化 Unreal Engine .log 文件。用于按时间范围、日志级别、行号、分类和日志内容进行过滤。仅在用户需要处理 UE 日志文件过滤时使用。
+description: 使用 UEBabyPramLogFilter 过滤 Unreal Engine .log 文件。用于按时间、级别、行号、Category 和消息内容查找日志，并把匹配行写入指定输出文件。仅在用户需要处理 UE 日志时使用。
 ---
 
-# UEBabyPramLogFilter 日志过滤工具
+# UEBabyPramLogFilter
 
-UEBabyPramLogFilter 是一个用于过滤和格式化 Unreal Engine（UE4/UE5）`.log` 文件的命令行工具，支持按时间范围、日志级别、行号、分类（Category）和日志内容进行匹配过滤。
+UEBabyPramLogFilter 读取**一个** `.log` 文件，按条件筛选日志行。
 
-## 工具路径
+## 核心行为
 
-```
-.\scripts\UEBabyPramLogFilter.exe
-```
+- `-f` 只能给一次，且文件扩展名必须是 `.log`。
+- **不带 `-o`**：只查找/计数，不写任何日志文件。
+- **带 `-o <file>`**：把匹配行写入该文件。
+- stdout 只输出摘要，不输出日志正文：
+  ```text
+  Target: <输入日志>
+  Output: <输出日志>        # 仅带 -o 时
+  Matched: <匹配条数>
+  Start: <第一条匹配的时间>
+  End: <最后一条匹配的时间>
+  StartLine: <第一条匹配的行号>
+  EndLine: <最后一条匹配的行号>
+  ```
+- 没有匹配时 `Start` / `End` / `StartLine` / `EndLine` 为 `---`。
+- `EndLine` 始终是最后一条匹配日志的行号，不受 `-or` 限制。
 
-使用 PowerShell 调用时，必须使用 `&` 调用操作符包裹带空格的路径：
-
-```powershell
-& ".\scripts\UEBabyPramLogFilter.exe" [参数...]
-```
-
-## 核心概念
-
-- 工具读取 `.log` 文件，根据一个或多个条件过滤日志行，输出过滤后的结果。
-- 默认情况下，输出文件保存在输入文件同目录下，扩展名为 `.filterout`。
-- 多个 `-c` 条件之间为 **或（OR）** 关系；单个条件内部可使用 `&` 和 `|` 构建复杂逻辑。
-
----
-
-## 命令参考
-
-### 通用
+## 命令
 
 | 选项 | 说明 |
 |------|------|
-| `-v, --version` | 输出工具的版本并退出，输出形如 `UEBabyPramLogFilter <1.0>` |
-| `-h, --help [topic]` | 输出总帮助，或某个主题的详细帮助 |
+| `-h, --help [condition]` | 总帮助；`-h condition` 查看条件语法 |
+| `-v, --version` | 版本，当前 `UEBabyPramLogFilter <1.2>` |
+| `-f, --file <path>` | 唯一输入 `.log` 文件 |
+| `-c, --condition <statement>` | 过滤条件；可重复，多个 `-c` 之间为 **OR** |
+| `-o, --output <path>` | 把匹配行写入该文件；省略则只统计 |
+| `-oml, --output_mode_line` | 写入时给每行加 `line-<行号>:`；需要 `-o` |
+| `-osf, --output_separate_frame` | 写入时在帧号变化处插入帧分隔行；需要 `-o` |
+| `-or, --output_range <min> <max>` | 只写入输出序号 `[min, max)` 的行，0-based；需要 `-o` |
 
-### 输入
+## 过滤条件
 
-| 选项 | 说明 |
-|------|------|
-| `-f, --file <path>` | 添加单个 `.log` 文件作为输入。可多次使用以处理多个文件。 |
-| `-p, --path <directory>` | 扫描目录下所有 `.log` 文件（非递归）并添加为输入。 |
+```text
+Time <OP> <time>
+Level <OP> <level>
+Line <OP> <number>
+Message.<FUNC>(^字符串^)
+Category.<FUNC>(^字符串^)
 
-### 过滤条件
-
-| 选项 | 说明 |
-|------|------|
-| `-c, --condition <statement>` | 添加过滤条件（EBNF 语法）。多次使用表示 OR 关系。 |
-
-### 输出控制
-
-| 选项 | 说明 |
-|------|------|
-| `-oml, --output_mode_line` | 输出模式：标准模式带行号（与 `-omtl`、`-omc` 互斥） |
-| `-omtl, --output_mode_only_time_and_line` | 输出模式：仅显示时间戳和行号（与 `-oml`、`-omc` 互斥） |
-| `-omc, --output_mode_custom <regex> <format>` | 自定义输出模式：用正则匹配并格式化（与 `-oml`、`-omtl` 互斥，可多次使用代表多个独立模式） |
-| `-osf, --output_separate_frame` | 在帧之间插入帧计数分隔线 |
-| `-nr, --not_repeat` | 抑制重复输出行，每行唯一内容只输出一次 |
-| `-e, --extension <ext>` | 自定义输出文件扩展名（默认 `.filterout`） |
-| `-or, --output_range <num1> <num2>` | 设置已被筛选完成的输出日志行的索引范围（0-indexed，输出索引 >= num1 且 < num2 的条数） |
-| `-op, --out_path <directory>` | 设置输出目录 |
-| `-ostd, --output_std` | 输出到 stdout 而非文件 |
-
----
-
-## 过滤条件语法（EBNF 语法）
-
-### 比较条件
-
-| 类型 | 语法 | 说明 |
-|------|------|------|
-| 时间 | `Time <OP> <time>` | 按时间戳过滤 |
-| 级别 | `Level <OP> <level>` | 按日志级别过滤 |
-| 行号 | `Line <OP> <number>` | 按行号过滤 |
-| 消息 | `Message.<FUNC>(^<string>^)` | 按日志消息内容过滤 |
-| 分类 | `Category.<FUNC>(^<string>^)` | 按日志分类（Category）过滤 |
-| 逻辑与 | `(<cond>) & (<cond>)` | 逻辑 AND |
-| 逻辑或 | `(<cond>) \| (<cond>)` | 逻辑 OR |
-| 逻辑非 | `!<cond>` | 逻辑 NOT |
-
-### 比较运算符 `<OP>`
-
-`<` `<=` `==` `>=` `>`
-
-### 字符串函数 `<FUNC>`
-
-`StartWith` `EndWith` `Equal` `Contains` `Match`（RE2 正则）
-
-### 日志级别（从低到高）
-
-`VeryVerbose` `Verbose` `Log` `Display` `Warning` `Error` `Fatal`
-
-### 时间格式
-
-| 格式 | 示例 |
-|------|------|
-| `YYYY.MM.DD:HH.MM.SS:mmm` | `2021.10.11-11.53.12:082` |
-| `MM.DD:HH.MM.SS:mmm` | `10.11-11.53.12:082`（省略年份） |
-| `DD:HH.MM.SS:mmm` | `11-11.53.12:082`（省略年、月） |
-| `HH.MM.SS` | `11.53.12`（仅时间） |
-
----
-
-## 自定义输出模式（-omc）占位符
-
-| 占位符 | 说明 |
-|--------|------|
-| `{Time}` | 时间戳 |
-| `{Level}` | 日志级别 |
-| `{Line}` | 行号 |
-| `{Message}` | 日志消息正文 |
-| `{Category}` | 日志分类名称 |
-| `{0}` - `{9}` | 正则捕获组引用（按左括号编号） |
-| `{{` `}}` | 转义的花括号 |
-
----
-
-## 典型示例
-
-### 过滤警告及以上级别的日志
-```powershell
-& "...UEBabyPramLogFilter.exe" -f "D:\Logs\MyGame.log" -c "Level >= Warning"
+(cond) & (cond)     AND
+(cond) | (cond)     OR
+!cond               NOT
 ```
 
-### 过滤特定时间范围
-```powershell
-& "...\UEBabyPramLogFilter.exe" -f "MyGame.log" -c "Time >= 2021.10.11-10.00.00:000" -c "Time < 2021.10.11-12.00.00:000"
+比较符：
+
+```text
+<  <=  ==  >=  >
 ```
 
-### 过滤包含 "Error" 的日志
-```powershell
-& "...\UEBabyPramLogFilter.exe" -f "MyGame.log" -c 'Message.Contains(^Error^)'
+字符串函数：
+
+```text
+StartWith  EndWith  Equal  Contains  Match
 ```
 
-### 组合条件：Error 级别且消息包含 "Fatal"
-```powershell
-& "...\UEBabyPramLogFilter.exe" -f "MyGame.log" -c "Level >= Error & Message.Contains(^Fatal^)"
+- `Match` 使用 RE2，非锚定匹配；
+- 其他函数为大小写敏感的普通字符串比较；
+- 字符串由 `^...^` 包裹，字面量 `^` 写成 `^^`。
+
+日志级别从低到高：
+
+```text
+VeryVerbose  Verbose  Log  Display  Warning  Error  Fatal
 ```
 
-### 按分类正则匹配
-```powershell
-& "...\UEBabyPramLogFilter.exe" -f "MyGame.log" -c 'Category.Match(^Log.*^)'
+时间格式：
 
-### 处理整个目录的日志，输出到指定目录
-```powershell
-& "...\UEBabyPramLogFilter.exe" -p "D:\Logs" -c "Level >= Warning" -op "D:\Filtered"
+```text
+YYYY.MM.DD-HH.MM.SS:mmm
+YYYY.MM.DD-HH.MM.SS
+HH.MM.SS:mmm
+HH.MM.SS
 ```
 
-### 仅输出时间戳和行号
+多个 `-c` 是 OR。时间范围必须写在同一个 `-c` 内：
+
 ```powershell
-& "...\UEBabyPramLogFilter.exe" -f "MyGame.log" -c "Level >= Error" -omtl
+-c "Time >= 2021.10.11-10.00.00:000 & Time < 2021.10.11-12.00.00:000"
 ```
 
-### 使用自定义格式提取数据
+## 示例
+
 ```powershell
-& "...\UEBabyPramLogFilter.exe" -f "MyGame.log" -omc "Loc:\[X=([-0-9\.]+) Y=([-0-9\.]+) Z=([-0-9\.]+)\]" "(x={1} y={2} z={3})"
+# 只统计 Warning 及以上数量，不写日志
+& ".\scripts\UEBabyPramLogFilter.exe" -f "D:\Logs\MyGame.log" -c "Level >= Warning"
+
+# 把 Error 及以上写入文件
+& ".\scripts\UEBabyPramLogFilter.exe" -f "MyGame.log" -c "Level >= Error" -o "D:\Logs\errors.log"
+
+# 输出带行号
+& ".\scripts\UEBabyPramLogFilter.exe" -f "MyGame.log" -c "Message.Contains(^Error^)" -o "out.log" -oml
+
+# 限制写入前 50 条（Matched 仍是全部匹配数）
+& ".\scripts\UEBabyPramLogFilter.exe" -f "MyGame.log" -c "Level >= Error" -o "out.log" -or 0 50
+
+# 时间范围 + 级别
+& ".\scripts\UEBabyPramLogFilter.exe" -f "MyGame.log" -c "Time >= 2021.10.11-10.00.00:000 & Time < 2021.10.11-12.00.00:000 & Level >= Warning"
 ```
 
-### 使用自定义格式提取日志的种类
-```powershell
-& "...\UEBabyPramLogFilter.exe" -f "MyGame.log" -omc ".*" "{Category}"
-```
+## 注意
 
-### 限制输出行数范围并输出到 stdout
-```powershell
-& "...\UEBabyPramLogFilter.exe" -f "MyGame.log" -c "Level >= Error" -or 0 50 -ostd
-```
-
-### 只查找包含 "Error" 的日志并禁止输出日志
-```powershell
-& "...\UEBabyPramLogFilter.exe" -f "MyGame.log" -c "Level >= Error" -or 0 0 -ostd
-```
-
-### 启用帧分隔
-```powershell
-& "...\UEBabyPramLogFilter.exe" -f "MyGame.log" -c "Level >= Warning" -osf
-```
-
-### 过滤重复日志行
-```powershell
-& "...\UEBabyPramLogFilter.exe" -f "MyGame.log" -c "Level >= Error" -nr
-```
-
-### 查找所有分类包含Log的所有分类，并输出到 stdout
-```powershell
-& "...\UEBabyPramLogFilter.exe" -f "MyGame.log" -c "Category.Match(^Log^)" -omc ".*" "{Category}" -ostd -nr
-```
-
----
-
-## 工作流程指南
-
-当用户请求筛选或者查询，按以下步骤操作：
-
-1. **确定输入**：确定用户的日志文件路径，或日志躲在目录路径
-2. **理解过滤需求**：将用户的自然语言描述转换成对应的过滤条件语法，检查是否需要转义
-3. **选择输出方式**：
-- 默认输出到文件(`.filterout` 扩展名)
-- 若只需要查看符合条件的日志条数，添加 `-ostd` 参数让结果输出到 stdout，并且通过 `-or 0 n` 设置需要的索引范围
-- 若需直接查看结果，添加 `-ostd` 参数，输出的结果数量可能过大，一般需要添加 `-or 0 n` 限制输出行数范围
-4. **选择输出格式**：确定用户的输出格式要求需求，若无特定需求可跳过
-5. **构建命令**：组装完整的命令并执行，一般Windows系统下优先选用PowerShell
-6. **展示结果**：想用户展示过滤结果或输出文件路径
-
----
-
-## 注意事项
-
-1. **路径中的空格**：文件路径或目录路径包含空格时，需用双引号包裹。
-2. **多条件关系**：多个 `-c` 条件为 **OR** 关系；单个 `-c` 内的 `&` 为 AND 关系。
-3. **互斥输出模式**：`-oml`、`-omtl`、`-omc` 三者互斥，同时只能选一个。
-4. **输出目录**：使用 `-op` 时，目标目录必须已存在。
-5. **正则引擎**：`Match` 函数使用 RE2 正则表达式语法。
-6. **日志输出**: `-ostd` 需要配合 `-or` 使用限制输出的日志量。
+- `-o` 的父目录必须存在；
+- `-oml`、`-osf`、`-or` 只能与 `-o` 一起使用；
+- `-or` 只限制写入文件的行，摘要中的 `Matched` 是全部匹配数；
+- 不带 `-o` 时不会生成 `.filterout` 文件。

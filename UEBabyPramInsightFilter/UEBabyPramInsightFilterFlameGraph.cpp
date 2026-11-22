@@ -445,7 +445,7 @@ namespace UEBabyPram::InsightFilter
 		}
 
 		OutputLog<L"EventFlameGraphParser Output:">(printer);
-		OutputLog<L"    (D: Inclusive Duration of a call path, the sum of the duration of every occurrence of the path; Percent: the time of the path over the whole matched time)">(
+		OutputLog<L"    (D: Inclusive Duration; Percent: share of matched time)">(
 			printer
 		);
 		OutputLog<L"    Query: <{}>">(printer, std::u8string_view{ query_text });

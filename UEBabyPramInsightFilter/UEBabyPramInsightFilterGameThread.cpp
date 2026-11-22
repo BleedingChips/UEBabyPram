@@ -22,7 +22,6 @@ namespace UEBabyPram::InsightFilter
 		, csv_path(std::move(in_config.csv_path))
 		, max_record_frame(in_config.max_record_frame)
 		, max_exclude_time_count(in_config.max_exclude_time_count)
-		, sampling_ratio(in_config.sampling_ratio)
 	{
 		
 	}
@@ -87,15 +86,78 @@ namespace UEBabyPram::InsightFilter
 			auto result = event_scope.FindNextEvent({ tick_event_id.data(), tick_event_id.size() });
 			if (result)
 			{
-				FrameRecord records{ &resource };
+				// Only a stack tree whose FindNextEvent finds the tick event is a frame. Every frame is counted
+				// here, and the longest ones are kept sorted, so the sorting starts while the trace is analyzed.
 				auto current_time_range = *event_scope.GetTimeRange();
-				records.duration = current_time_range.Size();
-				records.events.insert(records.events.end(), event_scope.view.begin(), event_scope.view.end());
-				records.time_range = current_time_range;
-				// The listener of the frame is created with the time range of the frame, so the context switch events
-				// of the game thread which are in the frame are collected for it.
-				records.context_switch_listener = context_switch_streamer.AddListener(game_thread_system_id, current_time_range);
-				event_records.push_back(std::move(records));
+				DurationSec duration = current_time_range.Size();
+
+				if (total_count == 0)
+				{
+					total_range = current_time_range;
+				}
+				else {
+					total_range = Potato::Misc::IndexSpan<DurationSec>{
+						std::min(total_range.Begin(), current_time_range.Begin()),
+						std::max(total_range.End(), current_time_range.End())
+					};
+				}
+
+				++total_count;
+				total_time += duration;
+
+				for (std::size_t i = 0; i < fps_frame_record.size(); ++i)
+				{
+					if (i + 1 == fps_frame_record.size() || duration < fps_thresholds[i])
+					{
+						fps_frame_record[i] += 1;
+						break;
+					}
+				}
+
+				// The listener of the frame collects the context switch events of its time range. It is shared by
+				// the frame record and the CSV summary, and a frame which is dropped keeps it only when the CSV
+				// file carries the frame.
+				auto listener = context_switch_streamer.AddListener(game_thread_system_id, current_time_range);
+				if (csv_path)
+				{
+					frame_summaries.push_back(FrameSummary{ current_time_range, duration, listener });
+				}
+
+				if (max_record_frame == 0)
+				{
+					return;
+				}
+
+				// The frame is dropped when it is not longer than the shortest frame of a full top list, so the
+				// frames which are outside the sampling range do not keep their event data.
+				if (event_records.size() >= max_record_frame && duration <= event_records.back().duration)
+				{
+					return;
+				}
+
+				FrameRecord record{ &resource };
+				record.frame_index = total_count;
+				record.duration = duration;
+				record.time_range = current_time_range;
+				record.context_switch_listener = listener;
+				record.events.insert(record.events.end(), event_scope.view.begin(), event_scope.view.end());
+
+				// The records are kept sorted from the longest to the shortest, so the report is ready without a
+				// sort and the shortest record is the one which is dropped.
+				auto position = std::upper_bound(
+					event_records.begin(),
+					event_records.end(),
+					duration,
+					[](DurationSec value, FrameRecord const& entry) {
+						return value > entry.duration;
+					}
+				);
+
+				event_records.insert(position, std::move(record));
+				if (event_records.size() > max_record_frame)
+				{
+					event_records.pop_back();
+				}
 			}
 		}
 	}
@@ -111,207 +173,147 @@ namespace UEBabyPram::InsightFilter
 
 		if (event_records.size() > 0)
 		{
-			double current_sampling_ratio = std::clamp(sampling_ratio, 0.0, 1.0);
-			
-			total_range = Potato::Misc::IndexSpan<DurationSec>{
-				event_records.front().time_range.Begin(),
-				event_records.back().time_range.End()
-			};
-			
-			sampled_range = Potato::Misc::IndexSpan<DurationSec>{
-				total_range.Begin() + total_range.Size() * (1.0 - current_sampling_ratio) / 2.0,
-				total_range.End() - total_range.Size() * (1.0 - current_sampling_ratio) / 2.
-			};
-
-			event_records.erase(
-				std::remove_if(event_records.begin(), event_records.end(), [&](const FrameRecord& record) {
-					return 	record.time_range.End() < sampled_range.Begin() || record.time_range.Begin() > sampled_range.End();
-					}),
-				event_records.end()
-			);
-
-			// The frames are summarized before the records are sorted and cut to the longest ones, so the CSV report of
-			// the frames carries every analyzed frame in the order of the time, while the text report only carries the
-			// longest ones.
-			frame_summaries.clear();
-			frame_summaries.reserve(event_records.size());
-			for (auto& record : event_records)
-			{
-				frame_summaries.push_back(FrameSummary{ record.time_range, record.duration, record.context_switch_listener });
-			}
-
-			for (auto& ite : event_records)
-			{
-				total_time += ite.duration;
-				total_count += 1;
-				auto duration = ite.duration;
-
-				for (std::size_t i = 0; i < fps_frame_record.size(); ++i)
-				{
-					if (i + 1 == fps_frame_record.size() || duration < fps_thresholds[i])
+			// The totals and the frame rate are accumulated while the frames are analyzed, and event_records
+			// is already the sorted top list, so only the exclude time lists of the kept frames are built here.
+			auto StatisRecord = [this](ThreadCPUEventView view, std::pmr::vector<CrossFrameEventRecord>& output, std::size_t frame_index) {
+				// The context switch statis of a range is asked from the listener of the frame, and a frame which
+				// carries no listener carries no context switch event, so the whole range is its active time.
+				auto context_switch_provider = [this, frame_index](Potato::Misc::IndexSpan<DurationSec> range) {
+					if (auto& listener = event_records[frame_index].context_switch_listener; listener)
 					{
-						fps_frame_record[i] += 1;
+						auto statis = listener->GetContextSwitchStatis(range);
+						return ThreadCPUEventView::ContextSwitchStatis{ statis.removed_context_switch_time, statis.switch_count };
+					}
+					return ThreadCPUEventView::ContextSwitchStatis{ range.Size(), 0 };
+				};
+
+				std::size_t index_offset = 0;
+				while (index_offset < view.view.size())
+				{
+					auto current_event = view.FindNextEvent({}, index_offset);
+
+					if (current_event)
+					{
+						auto event_spec = events_manager.GetEventSpec(current_event.event_id);
+						auto find = std::find_if(output.begin(), output.end(), [&](CrossFrameEventRecord const& list) {
+							return list.event_name == event_spec.name_view;
+							});
+						if (find != output.end())
+						{
+							auto exclude_time = *view.GetExcludeTime(current_event, context_switch_provider);
+							find->durations += exclude_time.active_time;
+							find->durations_without_context_switch += exclude_time.active_time_without_context_switch;
+							find->count += 1;
+
+							if (find->max_time_range.Size() < current_event.time_range.Size())
+							{
+								find->max_time_range = current_event.time_range;
+							}
+						}
+						else {
+							CrossFrameEventRecord new_record;
+							new_record.count = 1;
+							auto exclude_time = *view.GetExcludeTime(current_event, context_switch_provider);
+							new_record.durations = exclude_time.active_time;
+							new_record.durations_without_context_switch = exclude_time.active_time_without_context_switch;
+							new_record.event_name = event_spec.name_view;
+							new_record.from_frame_index = frame_index;
+							new_record.max_time_range = current_event.time_range;
+							output.push_back(new_record);
+						}
+						index_offset = current_event.index_range.Begin() + 1;
+					}
+					else {
 						break;
 					}
 				}
-			}
 
-			std::sort(event_records.begin(), event_records.end(), [](const FrameRecord& a, const FrameRecord& b) {
-				return a.duration > b.duration;
-				});
+				};
 
-			if (event_records.size() > max_record_frame)
+			longest_frame_records.clear();
+			ThreadCPUEventView view{
+				game_thread_id,
+				game_thread_system_id,
+				std::span(event_records.begin()->events),
+				std::nullopt
+			};
+
+			StatisRecord(view, longest_frame_records, 0);
+
+			std::sort(
+				longest_frame_records.begin(),
+				longest_frame_records.end(),
+				[](CrossFrameEventRecord const& record1, CrossFrameEventRecord const& record2) {
+					return record1.durations > record2.durations;
+				}
+			);
+
+			if (longest_frame_records.size() > max_exclude_time_count)
 			{
-				event_records.erase(
-					event_records.begin() + max_record_frame,
-					event_records.end()
+				longest_frame_records.erase(
+					longest_frame_records.begin() + max_exclude_time_count,
+					longest_frame_records.end()
 				);
 			}
 
-			if (event_records.size() > 0)
+			longest_frame_records_in_top.clear();
+
+			std::pmr::vector<CrossFrameEventRecord> temp_cross_frame_record;
+
+			for (std::size_t index = 0; index < event_records.size(); ++index)
 			{
-				auto StatisRecord = [this](ThreadCPUEventView view, std::pmr::vector<CrossFrameEventRecord>& output, std::size_t frame_index) {
-					// The context switch statis of a range is asked from the listener of the frame, and a frame which
-					// carries no listener carries no context switch event, so the whole range is its active time.
-					auto context_switch_provider = [this, frame_index](Potato::Misc::IndexSpan<DurationSec> range) {
-						if (auto& listener = event_records[frame_index].context_switch_listener; listener)
-						{
-							auto statis = listener->GetContextSwitchStatis(range);
-							return ThreadCPUEventView::ContextSwitchStatis{ statis.removed_context_switch_time, statis.switch_count };
-						}
-						return ThreadCPUEventView::ContextSwitchStatis{ range.Size(), 0 };
-					};
-
-					std::size_t index_offset = 0;
-					while (index_offset < view.view.size())
-					{
-						auto current_event = view.FindNextEvent({}, index_offset);
-
-						if (current_event)
-						{
-							auto event_spec = events_manager.GetEventSpec(current_event.event_id);
-							auto find = std::find_if(output.begin(), output.end(), [&](CrossFrameEventRecord const& list) {
-								return list.event_name == event_spec.name_view;
-								});
-							if (find != output.end())
-							{
-								auto exclude_time = *view.GetExcludeTime(current_event, context_switch_provider);
-								find->durations += exclude_time.active_time;
-								find->durations_without_context_switch += exclude_time.active_time_without_context_switch;
-								find->count += 1;
-
-								if (find->max_time_range.Size() < current_event.time_range.Size())
-								{
-									find->max_time_range = current_event.time_range;
-								}
-							}
-							else {
-								CrossFrameEventRecord new_record;
-								new_record.count = 1;
-								auto exclude_time = *view.GetExcludeTime(current_event, context_switch_provider);
-								new_record.durations = exclude_time.active_time;
-								new_record.durations_without_context_switch = exclude_time.active_time_without_context_switch;
-								new_record.event_name = event_spec.name_view;
-								new_record.from_frame_index = frame_index;
-								new_record.max_time_range = current_event.time_range;
-								output.push_back(new_record);
-							}
-							index_offset = current_event.index_range.Begin() + 1;
-						}
-						else {
-							break;
-						}
-					}
-
-					};
-
-				longest_frame_records.clear();
+				temp_cross_frame_record.clear();
 				ThreadCPUEventView view{
 					game_thread_id,
 					game_thread_system_id,
-					std::span(event_records.begin()->events),
+					std::span(event_records[index].events),
 					std::nullopt
 				};
-
-				StatisRecord(view, longest_frame_records, 0);
-
-				std::sort(
-					longest_frame_records.begin(),
-					longest_frame_records.end(),
-					[](CrossFrameEventRecord const& record1, CrossFrameEventRecord const& record2) {
-						return record1.durations > record2.durations;
-					}
-				);
-
-				if (longest_frame_records.size() > max_exclude_time_count)
+				StatisRecord(view, temp_cross_frame_record, index);
+				if (longest_frame_records_in_top.size() == 0)
 				{
-					longest_frame_records.erase(
-						longest_frame_records.begin() + max_exclude_time_count,
-						longest_frame_records.end()
-					);
+					longest_frame_records_in_top = temp_cross_frame_record;
 				}
-
-				longest_frame_records_in_top.clear();
-
-				std::pmr::vector<CrossFrameEventRecord> temp_cross_frame_record;
-
-				for (std::size_t index = 0; index < event_records.size(); ++index)
-				{
-					temp_cross_frame_record.clear();
-					ThreadCPUEventView view{
-						game_thread_id,
-						game_thread_system_id,
-						std::span(event_records[index].events),
-						std::nullopt
-					};
-					StatisRecord(view, temp_cross_frame_record, index);
-					if (longest_frame_records_in_top.size() == 0)
+				else {
+					for (auto& ite : temp_cross_frame_record)
 					{
-						longest_frame_records_in_top = temp_cross_frame_record;
-					}
-					else {
-						for (auto& ite : temp_cross_frame_record)
+						auto finded = std::find_if(
+							longest_frame_records_in_top.begin(),
+							longest_frame_records_in_top.end(),
+							[&](CrossFrameEventRecord const& record) {
+								return record.event_name == ite.event_name;
+							}
+						);
+						if (finded != longest_frame_records_in_top.end())
 						{
-							auto finded = std::find_if(
-								longest_frame_records_in_top.begin(),
-								longest_frame_records_in_top.end(),
-								[&](CrossFrameEventRecord const& record) {
-									return record.event_name == ite.event_name;
-								}
-							);
-							if (finded != longest_frame_records_in_top.end())
+							if (finded->durations > ite.durations)
 							{
-								if (finded->durations > ite.durations)
-								{
-									ite = *finded;
-								}
+								ite = *finded;
 							}
-							else {
-								longest_frame_records_in_top.emplace_back(ite);
-							}
+						}
+						else {
+							longest_frame_records_in_top.emplace_back(ite);
 						}
 					}
 				}
-
-				std::sort(
-					longest_frame_records_in_top.begin(),
-					longest_frame_records_in_top.end(),
-					[](CrossFrameEventRecord const& record1, CrossFrameEventRecord const& record2) {
-						return record1.durations > record2.durations;
-					}
-				);
-
-				if (longest_frame_records_in_top.size() > max_exclude_time_count)
-				{
-					longest_frame_records_in_top.erase(
-						longest_frame_records_in_top.begin() + max_exclude_time_count,
-						longest_frame_records_in_top.end()
-					);
-				}
 			}
 
-		}
+			std::sort(
+				longest_frame_records_in_top.begin(),
+				longest_frame_records_in_top.end(),
+				[](CrossFrameEventRecord const& record1, CrossFrameEventRecord const& record2) {
+					return record1.durations > record2.durations;
+				}
+			);
 
+			if (longest_frame_records_in_top.size() > max_exclude_time_count)
+			{
+				longest_frame_records_in_top.erase(
+					longest_frame_records_in_top.begin() + max_exclude_time_count,
+					longest_frame_records_in_top.end()
+				);
+			}
+		}
 	}
 
 	bool GameThreadParser::WriteCSV() const
@@ -397,11 +399,15 @@ namespace UEBabyPram::InsightFilter
 			OutputNoContextSwitchEventNote(printer);
 		}
 
-		// The report is built from the frames whose time range intersects the sampled range, which is the middle of the
-		// trace according to Config::sampling_ratio, so the note of the report tells which data are listed: a frame
-		// which is entirely out of the sampled range is not counted, and a frame which only crosses the boundary of the
-		// sampled range is counted with the whole time of the frame, the time of a frame is never cut to the range.
-		OutputLog<L"    (Every frame, statistic and list below only covers the frames whose time range intersects the Sampled Range of -sr: a frame entirely out of the Sampled Range is not counted, and a frame which only crosses its boundary is counted with its whole time)">(
+		// The totals and the frame rate cover every frame, while the longest frame list keeps the longest
+		// max_record_frame frames only. The first 4 and the last 4 frames are at the beginning and at the end of
+		// the recording, where the trace is saved, so their time may be inaccurate; when such a frame is in the
+		// longest frame list, its recording phase and frame number are reported with it.
+		OutputLog<L"    (All frames counted; Top {} keeps the longest frames; first/last 4 frames are marked when listed)">(
+			printer,
+			max_record_frame
+		);
+		OutputLog<L"    (E: Elapsed; ENCS: Elapsed without CS; TR: Time Range; OC: Occurrence Count)">(
 			printer
 		);
 
@@ -536,26 +542,16 @@ namespace UEBabyPram::InsightFilter
 		DisplayTimePoint total_range_display_begin{ total_range.Begin() };
 		DisplayTimePoint total_range_display_end{ total_range.End() };
 
-		DisplayTimePoint sampled_range_display_begin{ sampled_range.Begin() };
-		DisplayTimePoint sampled_range_display_end{ sampled_range.End() };
-
-		OutputLog<L"    Time Range: [{}, {}] Sampled Range: [{}, {}] Sampled Ratio: <{:.2f}>">(
+		OutputLog<L"    Time Range: [{}, {}]">(
 			printer,
 			total_range_display_begin,
-			total_range_display_end,
-			sampled_range_display_begin,
-			sampled_range_display_end,
-			std::clamp(sampling_ratio, 0.0, 1.0)
+			total_range_display_end
 		);
 
 		OutputLog<L"{}Top <{}> Longest GameThread:">(
 			printer,
 			printer.EndLineString(),
 			max_record_frame
-		);
-
-		OutputLog<L"    (E: Elapsed Time; ENCS: Elapsed Time WithOut Context Switch Time; TR: Time period of Longgest Elapsed Event Occurrenced)">(
-			printer
 		);
 
 		std::size_t count = 0;
@@ -589,15 +585,41 @@ namespace UEBabyPram::InsightFilter
 				start_duration,
 				end_duration
 			);
+
+			// The first 4 and the last 4 frames are at the recording begin and end, where the trace is saved, so
+			// their time may be inaccurate. The frame number is the number in the whole trace, not the number in
+			// the sorted top list.
+			constexpr std::size_t recording_phase_frame_count = 4;
+			bool begin_phase = ite.frame_index <= recording_phase_frame_count;
+			bool end_phase = ite.frame_index + recording_phase_frame_count > total_count;
+
+			if (begin_phase || end_phase)
+			{
+				std::wstring phase;
+				if (begin_phase && end_phase)
+				{
+					phase = L"the Recording Begin And End Phase";
+				}
+				else if (begin_phase)
+				{
+					phase = L"the Recording Begin Phase";
+				}
+				else {
+					phase = L"the Recording End Phase";
+				}
+
+				OutputLog<L"        -- Frame <{}/{}> is in {}, the time of the frame may be inaccurate, for reference only">(
+					printer,
+					ite.frame_index,
+					total_count,
+					std::wstring_view{ phase }
+				);
+			}
 		}
 
 		OutputLog<L"{}Top ExcludeTime In Longgest Frame:">(
 			printer,
 			printer.EndLineString()
-		);
-
-		OutputLog<L"    (E: Exclude Time; ENCS: Exclude Time WithOut Context Switch Time; OC: Occurrenced Time; TR: Time period of Longgest Exclude Time Occurrenced)">(
-			printer
 		);
 
 		for (auto& ite : longest_frame_records)
@@ -624,10 +646,6 @@ namespace UEBabyPram::InsightFilter
 			printer,
 			printer.EndLineString(),
 			max_record_frame
-		);
-
-		OutputLog<L"    (E: Exclude Time; ENCS: Exclude Time WithOut Context Switch Time; OC: Occurrenced Time; TR: Time period of Longgest Exclude Time Occurrenced)">(
-			printer
 		);
 
 		for (auto& ite : longest_frame_records_in_top)

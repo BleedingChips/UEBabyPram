@@ -196,7 +196,7 @@ namespace UEBabyPram::InsightFilter
 		{
 			OutputNoContextSwitchEventNote(printer);
 		}
-		OutputLog<L"    (View: E: Elapsed Time of the whole stack tree; Node: D: Duration of the event, E: Exclude Time of the event, CS: Context Switch Time of the Exclude Time, it is only printed when the thread spent time off the CPU in the exclude time; TR: Time Range)">(
+		OutputLog<L"    (View E: Elapsed; Node D/E/CS: Duration/Exclude/Context Switch; TR: Time Range)">(
 			printer
 		);
 		OutputLog<L"    Query: <{}>">(printer, std::u8string_view{ query_text });

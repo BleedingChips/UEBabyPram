@@ -952,7 +952,7 @@ namespace UEBabyPram::InsightFilter
 			OutputNoContextSwitchEventNote(printer);
 		}
 
-		OutputLog<L"    (D: Duration of the single occurrence; E: Exclude Time, the duration without the time of the child events; ENCS: Exclude Time WithOut Context Switch Time; CS: Context Switch Time, the time which the thread spent out of the CPU in the time range of the occurrence; Mean D / Median D / Std D: the mean, the median and the standard deviation of the single duration; TName: the name of the thread which the occurrence happened on; TR: Time Range of the occurrence)">(
+		OutputLog<L"    (D: Duration; E: Exclude; ENCS: E without CS; CS: Context Switch; TR: Time Range; TName: Thread Name)">(
 			printer
 		);
 

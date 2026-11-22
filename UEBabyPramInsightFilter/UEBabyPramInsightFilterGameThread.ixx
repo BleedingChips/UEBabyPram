@@ -20,17 +20,16 @@ export namespace UEBabyPram::InsightFilter
 	{
 		struct Config
 		{
+			// How many of the longest frames are kept and analyzed in detail. The frames are sampled while the
+			// trace is analyzed: only the longest max_record_frame frames keep their events, and a frame which
+			// is not in this top list is dropped in OnCPUStackTree(). Every frame still counts in the total
+			// time, the frame count and the frame rate statistics.
 			std::size_t max_record_frame = 10;
 			std::size_t max_exclude_time_count = 30;
-			// The ratio of the time range which is analyzed, 0.9 is the default and analyzes the middle 90% of the range.
-			// The beginning and the end of the trace are the time when the trace is saved, so the frames there are not
-			// accurate, and the middle of the range is what the sampling is for. Only the frames whose time range
-			// intersects the sampled range are counted and listed, see GameThreadParser::PrintToLog().
-			double sampling_ratio = 0.9;
 			// The path of the CSV file which the frames are written into instead of the text report, the file is
-			// created and its previous content is emptied. Every analyzed frame is one row, ordered by the time, and
-			// the frames are not cut to the longest ones, so the file carries the whole timeline of the frames before
-			// the report does. The text report is not printed when the path is set.
+			// created and its previous content is emptied. Every analyzed frame is one row, ordered by the time,
+			// so the file carries the whole timeline of the frames, while the text report only carries the longest
+			// ones. The text report is not printed when the path is set.
 			std::optional<std::filesystem::path> csv_path;
 			std::pmr::memory_resource* resource = std::pmr::get_default_resource();
 		};
@@ -63,6 +62,9 @@ export namespace UEBabyPram::InsightFilter
 			FrameRecord(FrameRecord const&) = default;
 			FrameRecord(FrameRecord&&) = default;
 			FrameRecord& operator=(FrameRecord&&) = default;
+			// The number of the frame in the analysis order, from 1. It is the number of the frame in the trace,
+			// not the number of the frame in the sorted top list.
+			std::size_t frame_index = 0;
 			DurationSec duration = DurationSec::zero();
 			Potato::Misc::IndexSpan<DurationSec> time_range;
 			// The listener which collects the context switch blocks of the frame, it is created with the time range of the
@@ -86,23 +88,22 @@ export namespace UEBabyPram::InsightFilter
 		// it only reports the longest frames.
 		bool WriteCSV() const;
 
+		// The longest frames which are kept, sorted by the duration from the longest to the shortest while the trace is
+		// analyzed. A frame which is not in this top list is dropped in OnCPUStackTree().
 		std::pmr::vector<FrameRecord> event_records;
+		// Every analyzed frame, in the order of the time, it is only filled when the CSV file is requested.
 		std::pmr::vector<FrameSummary> frame_summaries;
 		// The path of the CSV file of the frames, it is described by Config::csv_path.
 		std::optional<std::filesystem::path> csv_path;
-		DurationSec min_duration = DurationSec::zero();
 		std::size_t max_record_frame = 10;
 		std::size_t max_exclude_time_count = 30;
 		std::array<std::size_t, 5> fps_frame_record = {0, 0, 0, 0, 0};
 		InsightParser::DurationSec total_time = InsightParser::DurationSec::zero();
 		Potato::Misc::IndexSpan<DurationSec> total_range;
-		Potato::Misc::IndexSpan<DurationSec> sampled_range;
 		std::size_t total_count = 0;
 		ThreadID game_thread_id;
 		ThreadSystemID game_thread_system_id;
 		std::vector<EventID> tick_event_id;
-		// The ratio of the time range which is analyzed, it is Config::sampling_ratio and it is 0.9 by default.
-		double sampling_ratio = 0.9;
 
 		struct CrossFrameEventRecord
 		{
