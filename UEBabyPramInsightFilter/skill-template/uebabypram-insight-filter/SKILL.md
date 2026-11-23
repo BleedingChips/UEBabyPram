@@ -10,7 +10,6 @@ description: 用 UEBabyPramInsightFilter 分析 Unreal Insights .utrace：GameTh
 技能包内的布局固定为 `SKILL.md` + `scripts\`，所以在**技能根目录**（即 `SKILL.md` 所在目录）下执行：
 
 ```powershell
-$env:PATH = ".\scripts;$env:PATH"                 # tbbmalloc.dll 等运行时库在 scripts 里
 .\scripts\UEBabyPramInsightFilter.exe -v          # 打印版本
 .\scripts\UEBabyPramInsightFilter.exe -f "<trace 路径>" ...
 ```
@@ -266,5 +265,3 @@ $t   = "<trace 路径>"
 - 慢帧定位：`-mrf` 拿到 `TR:[b,e]`，再用 `-ed "[^FEngineLoop::Tick^]&ITime=[b,e]"` 取单帧（时间戳建议加 0.1ms 余量）。
 - 事件名必须猜对：`-r ".*"` 可列出所有事件；query 匹配为空多半是名字不对。
 - **录制首尾帧**：保存 trace 本身会影响前 4 帧和后 4 帧的耗时；它们若出现在 Top 列表里，会在帧下面标注 `Frame <当前>/<总数>` 和 `Recording Begin/End Phase`，数据可能有误差、仅供参考；总帧数/帧率仍覆盖全部帧。
-- 运行前把 `scripts` 目录加进 `PATH`，否则会报 `System DLL not found`（缺 `tbbmalloc.dll`）。
-- 版本在各自 CLI 内维护（`-v`），两个工具（LogFilter / InsightFilter）独立版本。

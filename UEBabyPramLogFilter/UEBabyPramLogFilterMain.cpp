@@ -180,12 +180,23 @@ int main(int argc, char* argv[])
 						std::int64_t frame_delta = static_cast<std::int64_t>(*frame_count) - static_cast<std::int64_t>(*last_frame_count);
 						auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(*time - last_frame_time);
 
+						std::u8string separator_block;
 						std::format_to(
-							Potato::Encode::FormatterOutputIteratorWrapper(std::back_insert_iterator(separator_line)),
-							"===[{}]Frame  [{}]ms===\r\n",
+							Potato::Encode::FormatterOutputIteratorWrapper(std::back_insert_iterator(separator_block)),
+							"===[{}]Frame  [{}]ms===",
 							frame_delta,
 							duration.count()
 						);
+
+						// The frame separator is a single ruler line: the block is repeated ten times, and every
+						// repetition is preceded by a tab, so the line stands out from the log text around it.
+						for (std::size_t repeat = 0; repeat < 10; ++repeat)
+						{
+							separator_line += u8"\t\t\t\t";
+							separator_line += separator_block;
+							separator_line += u8"\t\t\t\t";
+						}
+						separator_line += u8"\r\n";
 
 						last_frame_count = *frame_count;
 						last_frame_time = *time;
