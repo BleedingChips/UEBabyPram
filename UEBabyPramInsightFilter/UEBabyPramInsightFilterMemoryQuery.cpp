@@ -65,12 +65,12 @@ namespace UEBabyPram::InsightFilter
 				: remaining.substr(0, separator);
 
 			auto const& element = query.chain[chain_index];
-			if (element.kind != EventQuery::ChainElement::Kind::Any)
+			// The element which matches any segment carries no regular expression, which is the % element and
+			// the %% element ([^.*^]): both of them match any segment here, the kind is only about the timing
+			// which the parser of the call stacks collects.
+			if (element.matcher && !IsEventNameMatched(*element.matcher, segment))
 			{
-				if (!element.matcher || !IsEventNameMatched(*element.matcher, segment))
-				{
-					return false;
-				}
+				return false;
 			}
 
 			if (separator == std::u8string_view::npos)

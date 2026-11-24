@@ -59,6 +59,7 @@ namespace UEBabyPram::InsightFilter
 			std::vector<EventQuery>{ std::move(in_config.query) },
 			&resource
 		})
+		, events_manager(EventSpecManager::Config{ false, &resource })
 		, event_statistics(&resource)
 		, report_order(&resource)
 		, top_count(in_config.top_count)
@@ -82,7 +83,14 @@ namespace UEBabyPram::InsightFilter
 
 	void ExcludeStatisticParser::OnCPUEventDiscovered(EventID id, std::wstring_view event_name, std::wstring_view, std::size_t)
 	{
-		auto result = query_mapping.AddEvent(id, event_name);
+		// The events manager dedups the event, so the query system is asked about it once and the dedup lookup of the
+		// query system is skipped.
+		if (!events_manager.AddEvent(id, event_name, {}, 0))
+		{
+			return;
+		}
+
+		auto result = query_mapping.AddEvent(id, event_name, {}, true);
 		if (result.is_matched)
 		{
 			RecordEventName(id, event_name);
@@ -91,7 +99,14 @@ namespace UEBabyPram::InsightFilter
 
 	void ExcludeStatisticParser::OnCPUScopeEventDiscovered(EventID id, std::u8string_view event_name)
 	{
-		auto result = query_mapping.AddEvent(id, event_name);
+		// The event of the CPU scope logger is reported once per scope instance, so it is deduplicated by the events
+		// manager instead of by the query system, which is only asked about the event once.
+		if (!events_manager.AddEvent(id, event_name, {}, 0))
+		{
+			return;
+		}
+
+		auto result = query_mapping.AddEvent(id, event_name, {}, true);
 		if (result.is_matched)
 		{
 			RecordEventName(id, event_name);

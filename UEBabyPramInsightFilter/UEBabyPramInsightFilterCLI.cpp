@@ -49,14 +49,17 @@ Usage: UEBabyPramInsightFilter -f <trace> [mode] [options]
     <query>   := <chain> [ '&' ( Time | ITime ) '=' <slices> ] [ '&' Thread=(^regex^) ]
                      [ '&' Tracker=(^regex^) ]
     <chain>   := <element> ( '->' <element> )*
-    <element> := % | (^regex^) | [^regex^] | %[^regex^]
+    <element> := % | %% | (^regex^) | [^regex^] | %[^regex^]
     <slices>  := '[' <time> ',' <time> ']' ...     <time> := 90s | 1m30s | 1m30.5s | 30.5s
 
     Every regular expression matches the whole name, and the default mode takes no regular
     expression: its GameThread is the thread whose name is exactly GameThread.
     The chain is the call chain of the events, and
     the chain of a memory tag is the segments of its name, so (^A^)->(^B^) selects A/B exactly; %
-    matches any event or any segment, which is the way to walk one level deeper.
+    matches any event or any segment, which is the way to walk one level deeper. %% matches any
+    event and collects its timing, one statistic per event name. The pattern .* matches every name,
+    so (^.*^) is read as %, [^.*^] is read as %%, and %[^.*^] is read as the merged statistic of
+    every event; none of the three carries a regular expression.
     Time selects an occurrence when its time range overlaps a slice, ITime selects it only when a
     slice contains it or is equal to it. The parsers of the memory channel read the time point of a
     snapshot instead of a range, so Time and ITime select the same snapshots there.
@@ -73,9 +76,10 @@ Usage: UEBabyPramInsightFilter -f <trace> [mode] [options]
       Report the location of every event whose whole name is matched, -mlc limits the count.
 
   -es, --event_stat <query>
-      The statistics of every [^regex^] element of the query: the count, the total, the mean and the
-      median duration, the top occurrences (-tx) and their duration histogram (-dbc). The query may
-      be given more than once, and every query keeps its own statistics.
+      The statistics of every element which collects its timing ([^regex^] or %%): the count, the
+      total, the mean and the median duration, the top occurrences (-tx) and their duration
+      histogram (-dbc). The query may be given more than once, and every query keeps its own
+      statistics.
 
   -ex, --exclude_stat <query>
       The event names whose highest Exclude Time is the largest, -xt limits how many names are

@@ -17,12 +17,12 @@ namespace UEBabyPram::InsightFilter
 
 	namespace
 	{
-		// Whether the element of the chain collects the timing of the events which it matches, both of the statistic
-		// kinds do it, and the merged one shares one statistic between all the events which it matches.
+		// Whether the element of the chain collects the timing of the events which it matches, which is every statistic
+		// kind. The merged kinds share one statistic between all the events which they match, the other two keep one
+		// statistic per event name.
 		bool IsStatisticKind(EventQuery::ChainElement::Kind kind)
 		{
-			return kind == EventQuery::ChainElement::Kind::QueryAndStatistic
-				|| kind == EventQuery::ChainElement::Kind::QueryAndStatisticMerged;
+			return IsStatisticChainElementKind(kind);
 		}
 	}
 
@@ -44,12 +44,12 @@ namespace UEBabyPram::InsightFilter
 				auto& node = target.nodes.emplace_back(&resource);
 				node.kind = element.kind;
 				node.matcher = std::move(element.matcher);
-				assert(node.matcher || node.kind == EventQuery::ChainElement::Kind::Any);
+				assert(node.matcher || IsAnyChainElementKind(node.kind));
 			}
 		}
 	}
 
-	auto EventQueryMapping::AddEvent(EventID id, std::u8string_view event_name, ExportVisitorT visitor) -> AddEventResult
+	auto EventQueryMapping::AddEvent(EventID id, std::u8string_view event_name, ExportVisitorT visitor, bool skip_dedup) -> AddEventResult
 	{
 		AddEventResult result;
 
@@ -64,34 +64,56 @@ namespace UEBabyPram::InsightFilter
 			for (std::size_t node_index = 0; node_index < query.nodes.size(); ++node_index)
 			{
 				auto& node = query.nodes[node_index];
+
+				// The element which matches any event carries no regular expression, so no name has to be matched
+				// for it. Only the element which collects the timing exports the event, and it keeps no id: every
+				// event matches it, so the caller is the one which resolves an event once.
 				if (!node.matcher)
+				{
+					if (!IsStatisticKind(node.kind))
+					{
+						continue;
+					}
+
+					result.is_matched = true;
+					result.is_exported = true;
+					if (visitor)
+					{
+						visitor(id, query_index, node_index);
+					}
+					continue;
+				}
+
+				// The whole name has to be matched, the same as the name of a thread.
+				if (!IsEventNameMatched(*node.matcher, event_name))
 				{
 					continue;
 				}
-				// The whole name has to be matched, the same as the name of a thread.
-				if (IsEventNameMatched(*node.matcher, event_name))
+
+				// The element resolves every id only once: an id which the element already carries is not added
+				// again, and it is neither reported as matched nor exported again, so a name which is discovered
+				// more than once (ex: the event of the CPU scope logger) is not exported more than once. The caller
+				// which has already deduplicated the events skips the lookup, which is the price of the dedup.
+				if (!skip_dedup)
 				{
-					// The element resolves every id only once: an id which the element already carries is not added
-					// again, and it is neither reported as matched nor exported again, so a name which is discovered
-					// more than once (ex: the event of the CPU scope logger) is not exported more than once.
 					if (std::find(node.event_ids.begin(), node.event_ids.end(), id) != node.event_ids.end())
 					{
 						result.is_marked = true;
 						continue;
 					}
+				}
 
-					node.event_ids.push_back(id);
-					result.is_matched = true;
+				node.event_ids.push_back(id);
+				result.is_matched = true;
 
-					// Only the element whose timing is collected exports the event, the elements which are only a part
-					// of the call chain resolve the chain without exporting anything.
-					if (IsStatisticKind(node.kind))
+				// Only the element whose timing is collected exports the event, the elements which are only a part
+				// of the call chain resolve the chain without exporting anything.
+				if (IsStatisticKind(node.kind))
+				{
+					result.is_exported = true;
+					if (visitor)
 					{
-						result.is_exported = true;
-						if (visitor)
-						{
-							visitor(id, query_index, node_index);
-						}
+						visitor(id, query_index, node_index);
 					}
 				}
 			}
@@ -100,7 +122,7 @@ namespace UEBabyPram::InsightFilter
 		return result;
 	}
 
-	auto EventQueryMapping::AddEvent(EventID id, std::wstring_view event_name, ExportVisitorT visitor) -> AddEventResult
+	auto EventQueryMapping::AddEvent(EventID id, std::wstring_view event_name, ExportVisitorT visitor, bool skip_dedup) -> AddEventResult
 	{
 		// The matcher needs the name in UTF-8, the event spec carries it in wide characters.
 		encoded_event_name.clear();
@@ -108,7 +130,7 @@ namespace UEBabyPram::InsightFilter
 			event_name,
 			std::back_inserter(encoded_event_name)
 		);
-		return AddEvent(id, std::u8string_view{ encoded_event_name }, visitor);
+		return AddEvent(id, std::u8string_view{ encoded_event_name }, visitor, skip_dedup);
 	}
 
 	void EventQueryMapping::AddThread(ThreadID id, ThreadSystemID system_id, std::string_view thread_name)
@@ -199,7 +221,7 @@ namespace UEBabyPram::InsightFilter
 			bool chain_resolvable = true;
 			for (auto const& node : query.nodes)
 			{
-				if (node.kind != EventQuery::ChainElement::Kind::Any && node.event_ids.empty())
+				if (!IsAnyChainElementKind(node.kind) && node.event_ids.empty())
 				{
 					chain_resolvable = false;
 					break;
@@ -374,7 +396,7 @@ namespace UEBabyPram::InsightFilter
 			bool chain_resolvable = true;
 			for (auto const& node : query.nodes)
 			{
-				if (node.kind != EventQuery::ChainElement::Kind::Any && node.event_ids.empty())
+				if (!IsAnyChainElementKind(node.kind) && node.event_ids.empty())
 				{
 					chain_resolvable = false;
 					break;
@@ -628,7 +650,7 @@ namespace UEBabyPram::InsightFilter
 			bool chain_resolvable = true;
 			for (auto const& node : query.nodes)
 			{
-				if (node.kind != EventQuery::ChainElement::Kind::Any && node.event_ids.empty())
+				if (!IsAnyChainElementKind(node.kind) && node.event_ids.empty())
 				{
 					chain_resolvable = false;
 					break;

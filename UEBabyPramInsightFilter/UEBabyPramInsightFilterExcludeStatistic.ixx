@@ -93,6 +93,9 @@ export namespace UEBabyPram::InsightFilter
 		// The query system which resolves the chain, the time and the thread conditions and tells which occurrences the
 		// query counts.
 		EventQueryMapping query_mapping;
+		// The events manager dedups the discovered events, so the query system is only asked about an event once, and
+		// the lookup of the dedup of the query system is skipped. The file and the line of the spec are not read here.
+		EventSpecManager events_manager;
 		std::pmr::vector<EventStatistic> event_statistics;
 		// The statistic of every event name, the name is the key.
 		std::map<std::u8string, std::size_t, std::less<>> statistic_indices;

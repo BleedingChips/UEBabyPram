@@ -22,10 +22,17 @@ namespace
 	//   chain      := elem ( '->' elem )*
 	//   elem       := '(' CaretReg ')'   // query only
 	//               | '[' CaretReg ']'   // query and statistics
-	//               | '(' '%' ')'        // any event, query only
+	//               | '%' '[' CaretReg ']' // query and one merged statistic
+	//               | '%%'               // any event, query and statistics
+	//               | '%'                // any event, query only
 	//   timerange  := '[' TimePoint ',' TimePoint ']'
 	//   TimePoint  := Integer 'm' Decimal 's' | Decimal 's' | Integer 's'
 	//               | Integer 'm' Integer 's'
+	//
+	// The pattern '.*' matches every event, so '(' '^.*^' ')' is read as '%', '[' '^.*^' ']' is read as
+	// '%%', and '%' '[' '^.*^' ']' is read as the merged statistic of every event: the element carries no
+	// regular expression then, and the shortcuts are only about the performance of the query, the selected
+	// events are the same.
 	//
 	// 'ITime' is an accepted spelling of 'Time', both conditions mean the same thing: an occurrence is counted only
 	// when one of the ranges of the condition equals or contains its time range. The keyword is kept so a query which
@@ -36,7 +43,7 @@ namespace
 	//
 	// The Tracker condition follows the Thread condition, the two are joined by '&' as well, and every part is
 	// optional. The event chain is required. The lexical terminals carry the masks CaretReg[1], Integer[2] and
-	// Decimal[3], the reduce masks are: 1 Query, 2/3 Chain, 4/5/19/20 ChainElem, 6/7/21 QueryTail,
+	// Decimal[3], the reduce masks are: 1 Query, 2/3 Chain, 4/5/19/20/28 ChainElem, 6/7/21 QueryTail,
 	// 22/23/24 CondTail, 25/26 TrackerTail, 11 ThreadCond, 27 TrackerCond, 12/13 TimeRanges, 14 TimeRange,
 	// 15/16/17/18 TimePoint.
 	//
@@ -67,6 +74,7 @@ $ := <Query> ;
 <ChainElem> := '(' CaretReg ')' : [4] ;
             := '[' CaretReg ']' : [5] ;
 			:= '%' '[' CaretReg ']': [20];
+			:= '%%' : [28] ;
             := '%' : [19] ;
 
 <QueryTail> := '&' 'Time' '=' <TimeRanges> <CondTail> : [6] ;
@@ -140,6 +148,15 @@ $ := <Query> ;
 			throw message;
 		}
 		return matcher;
+	}
+
+	// Whether the compiled pattern matches every name, which is the pattern '.*'. The query of such an
+	// element is the same as the element which carries no regular expression at all, so the element is
+	// turned into the Any or the AnyAndStatics kind and the matcher is dropped: the kind is matched
+	// without running re2 for every event of the trace.
+	bool IsMatchEveryName(re2::RE2 const& matcher)
+	{
+		return std::string_view{ matcher.pattern() } == ".*";
 	}
 
 	std::size_t BuildInteger(std::u8string_view token)
@@ -249,24 +266,64 @@ namespace UEBabyPram::InsightFilter
 				}
 				case 4:
 				{
+					auto matcher = production[1].Consume<std::shared_ptr<re2::RE2>>();
+					if (IsMatchEveryName(*matcher))
+					{
+						// (^.*^) matches every event without a regular expression, which is the % element.
+						return EventQuery::ChainElement{
+							EventQuery::ChainElement::Kind::Any,
+							std::shared_ptr<re2::RE2>{}
+						};
+					}
+
 					return EventQuery::ChainElement{
 						EventQuery::ChainElement::Kind::QueryOnly,
-						production[1].Consume<std::shared_ptr<re2::RE2>>()
+						std::move(matcher)
 					};
 				}
 				case 5:
 				{
+					auto matcher = production[1].Consume<std::shared_ptr<re2::RE2>>();
+					if (IsMatchEveryName(*matcher))
+					{
+						// [^.*^] matches every event and accumulates its timing, which is the %% element.
+						return EventQuery::ChainElement{
+							EventQuery::ChainElement::Kind::AnyAndStatics,
+							std::shared_ptr<re2::RE2>{}
+						};
+					}
+
 					return EventQuery::ChainElement{
 						EventQuery::ChainElement::Kind::QueryAndStatistic,
-						production[1].Consume<std::shared_ptr<re2::RE2>>()
+						std::move(matcher)
+					};
+				}
+				case 28:
+				{
+					// The element matches every event and accumulates most of its timing, it carries no
+					// regular expression and every event keeps its own statistic.
+					return EventQuery::ChainElement{
+						EventQuery::ChainElement::Kind::AnyAndStatics,
+						std::shared_ptr<re2::RE2>{}
 					};
 				}
 				case 20:
 				{
+					auto matcher = production[2].Consume<std::shared_ptr<re2::RE2>>();
+					if (IsMatchEveryName(*matcher))
+					{
+						// %[^.*^] matches every event and merges the timing of all of them into one statistic, which is
+						// the AnyAndStatisticMerged element.
+						return EventQuery::ChainElement{
+							EventQuery::ChainElement::Kind::AnyAndStatisticMerged,
+							std::shared_ptr<re2::RE2>{}
+						};
+					}
+
 					// The element accumulates the timing of every event which it matches into one statistic.
 					return EventQuery::ChainElement{
 						EventQuery::ChainElement::Kind::QueryAndStatisticMerged,
-						production[2].Consume<std::shared_ptr<re2::RE2>>()
+						std::move(matcher)
 					};
 				}
 				case 19:

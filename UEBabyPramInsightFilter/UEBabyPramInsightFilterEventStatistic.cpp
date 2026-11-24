@@ -244,8 +244,12 @@ namespace UEBabyPram::InsightFilter
 	{
 		// The statistic of a merged element is keyed by the element itself: every event which the element matches shares
 		// one statistic, and the name of the statistic is the regular expression of the element, so the report tells
-		// which element the timing belongs to.
-		if (kind == EventQuery::ChainElement::Kind::QueryAndStatisticMerged)
+		// which element the timing belongs to. The element which matches every event carries no regular expression, so
+		// its statistic is named by the pattern which matches every name instead.
+		if (
+			kind == EventQuery::ChainElement::Kind::QueryAndStatisticMerged
+			|| kind == EventQuery::ChainElement::Kind::AnyAndStatisticMerged
+			)
 		{
 			for (auto& statistic : event_statistics)
 			{
@@ -268,7 +272,8 @@ namespace UEBabyPram::InsightFilter
 			statistic.event_ids.push_back(id);
 
 			// The name of a merged statistic is the regular expression of its element, it is written back with the
-			// delimiters of the query grammar, so the report tells which element the timing belongs to.
+			// delimiters of the query grammar, so the report tells which element the timing belongs to. The element
+			// which matches every event has no pattern, so the name is the pattern which matches every name.
 			auto const& node = query_mapping.GetQueries()[query_index].nodes[node_index];
 			if (node.matcher)
 			{
@@ -279,6 +284,9 @@ namespace UEBabyPram::InsightFilter
 					static_cast<std::size_t>(pattern.size())
 				);
 				statistic.event_name.push_back(u8'\u005e');
+			}
+			else {
+				statistic.event_name.assign(u8"^.*^");
 			}
 
 			return statistic;
@@ -750,7 +758,9 @@ namespace UEBabyPram::InsightFilter
 		// The query is written back from the regular expressions of its elements, with the same delimiters which the
 		// grammar of the query accepts, so the text can be used as an input query again: '(^Re^)' for a query only
 		// element, '[^Re^]' for an element which collects its timing, '%[^Re^]' for an element which merges the timing
-		// of every event which it matches, and '%' for the element which matches any event.
+		// of every event which it matches, '%' for the element which matches any event, '%%' for the element which
+		// matches any event and collects its timing, and '%[^.*^]' for the element which matches any event and merges
+		// the timing of all of them.
 		auto queries = query_mapping.GetQueries();
 		if (query_index >= queries.size())
 		{
@@ -773,6 +783,14 @@ namespace UEBabyPram::InsightFilter
 			case EventQuery::ChainElement::Kind::Any:
 				// The element matches any event, it carries no regular expression.
 				text += L"%";
+				break;
+			case EventQuery::ChainElement::Kind::AnyAndStatics:
+				// The element matches any event and collects its timing, it carries no regular expression.
+				text += L"%%";
+				break;
+			case EventQuery::ChainElement::Kind::AnyAndStatisticMerged:
+				// The element matches any event and merges the timing of all of them, it carries no regular expression.
+				text += L"%[^.*^]";
 				break;
 			case EventQuery::ChainElement::Kind::QueryOnly:
 				text += L"(";
@@ -797,6 +815,8 @@ namespace UEBabyPram::InsightFilter
 			switch (node.kind)
 			{
 			case EventQuery::ChainElement::Kind::Any:
+			case EventQuery::ChainElement::Kind::AnyAndStatics:
+			case EventQuery::ChainElement::Kind::AnyAndStatisticMerged:
 				break;
 			case EventQuery::ChainElement::Kind::QueryOnly:
 				text += L")";

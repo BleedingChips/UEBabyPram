@@ -79,12 +79,14 @@ export namespace UEBabyPram::InsightFilter
 			// appended when the events are discovered, so the order is the discovery order. The
 			// element which is only a part of the call chain keeps them as well, they are what the
 			// chain is matched by, and an element whose list stays empty never completes a chain.
+			// The element which matches any event (Any, AnyAndStatics or AnyAndStatisticMerged) carries no id
+			// and completes every chain, GetEventIDs() answers it with an empty span instead of this list.
 			std::pmr::vector<EventID> event_ids;
 
 			// The ids which the element is matched by, empty when the element matches any event.
 			std::span<EventID const> GetEventIDs() const
 			{
-				if (kind == EventQuery::ChainElement::Kind::Any)
+				if (IsAnyChainElementKind(kind))
 				{
 					return {};
 				}
@@ -121,7 +123,7 @@ export namespace UEBabyPram::InsightFilter
 
 		// What one discovered event is by the queries: whether the name of the event is matched by the regular expression
 		// of any chain element of any query, and whether the event is exported, which needs an element of the
-		// QueryAndStatistic or the QueryAndStatisticMerged kind to match it.
+		// QueryAndStatistic, the QueryAndStatisticMerged or the AnyAndStatics kind to match it.
 		struct AddEventResult
 		{
 			// Whether the name is matched by the regular expression of any chain element of any query.
@@ -144,8 +146,17 @@ export namespace UEBabyPram::InsightFilter
 		// An element only resolves an id once: an id which the element already carries is not added to it again, and
 		// neither the result nor the visitor reports it again, so an element exports a name which is discovered more
 		// than once (ex: the event of the CPU scope logger) only once.
-		AddEventResult AddEvent(EventID id, std::wstring_view event_name, ExportVisitorT visitor = {});
-		AddEventResult AddEvent(EventID id, std::u8string_view event_name, ExportVisitorT visitor = {});
+		//
+		// An element of the AnyAndStatics kind carries no id and matches every event: it exports every event which is
+		// resolved, without a regular expression and without keeping the ids, so the caller is the one which has to
+		// resolve an event once (the parsers do it with the event manager).
+		//
+		// skip_dedup skips the lookup of the id in the elements which it already matched, which is a linear search per
+		// element and is the price of the dedup above. It is a promise of the caller that every id is resolved once
+		// (ex: because the event manager has already deduplicated it), so the id is appended to every matched element
+		// as it is.
+		AddEventResult AddEvent(EventID id, std::wstring_view event_name, ExportVisitorT visitor = {}, bool skip_dedup = false);
+		AddEventResult AddEvent(EventID id, std::u8string_view event_name, ExportVisitorT visitor = {}, bool skip_dedup = false);
 		// Resolve one discovered thread against the thread condition of every query, the query which
 		// carries no thread condition ignores it, it counts every thread. The thread is kept with both of its ids,
 		// because the stack tree carries the thread id and the events which are not carried by the stack tree
