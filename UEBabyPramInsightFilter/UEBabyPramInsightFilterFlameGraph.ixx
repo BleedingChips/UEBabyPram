@@ -50,9 +50,9 @@ export namespace UEBabyPram::InsightFilter
 			EventQuery query;
 			// The text which the query is built from, it is only reported with the flame graph.
 			std::u8string query_text;
-			// How many of the longest stack trees are aggregated at most, the stack tree which is kept is dropped for a
-			// longer one when the count is reached, 0 for none. It is the same option with the same meaning as
-			// EventDetailParser::Config::max_view_count.
+			// How many of the longest stack trees are aggregated, 0 for none. The trees are buffered and the buffer is
+			// only sorted when it carries more than this count plus half of it (capped at 200), and it is cut to this
+			// count when the analysis is done, so the report carries exactly the longest trees.
 			std::size_t max_view_count = 10;
 			// The path of the folded stack file which the flame graph is written into instead of the text report, the
 			// file is created and its previous content is emptied. Every line of the file is one call path and the time
@@ -140,6 +140,13 @@ export namespace UEBabyPram::InsightFilter
 		// The stack trees which are kept, they are the Config::max_view_count longest ones which the query matches.
 		std::pmr::vector<StoredView> stored_views;
 		std::size_t max_view_count = 10;
+		// The count of the stored views which triggers a sort and a trim: the trees are buffered until the buffer
+		// carries max_view_count plus the slack, which is half of max_view_count capped at 200, and only a buffer
+		// which is over it is sorted, so the sort is paid for once per slack kept trees instead of once per tree.
+		std::size_t view_buffer_limit = 10;
+		// The shortest duration of the stored views, 0 while the buffer has never been sorted: a tree which is shorter
+		// than it can not be one of the longest trees, so it is dropped without entering the buffer.
+		DurationSec min_view_duration = DurationSec::zero();
 		// The path of the folded stack file which the flame graph is written into instead of the text report, it is
 		// described by Config::folded_stack_path.
 		std::optional<std::filesystem::path> folded_stack_path;

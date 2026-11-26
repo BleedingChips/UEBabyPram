@@ -21,6 +21,8 @@ namespace UEBabyPram::InsightFilter
 		, frame_summaries(&resource)
 		, csv_path(std::move(in_config.csv_path))
 		, max_record_frame(in_config.max_record_frame)
+		, record_buffer_limit(GetTopNBufferLimit(in_config.max_record_frame))
+		, min_record_duration(DurationSec::zero())
 		, max_exclude_time_count(in_config.max_exclude_time_count)
 	{
 		
@@ -128,9 +130,10 @@ namespace UEBabyPram::InsightFilter
 					return;
 				}
 
-				// The frame is dropped when it is not longer than the shortest frame of a full top list, so the
-				// frames which are outside the sampling range do not keep their event data.
-				if (event_records.size() >= max_record_frame && duration <= event_records.back().duration)
+				// A frame which is shorter than the shortest buffered one can not be one of the longest frames, so it is
+				// dropped without copying its events. The shortest buffered frame is recorded when the buffer is sorted,
+				// and it is 0 while the buffer has never been sorted, when every frame enters.
+				if (duration < min_record_duration)
 				{
 					return;
 				}
@@ -142,21 +145,18 @@ namespace UEBabyPram::InsightFilter
 				record.context_switch_listener = listener;
 				record.events.insert(record.events.end(), event_scope.view.begin(), event_scope.view.end());
 
-				// The records are kept sorted from the longest to the shortest, so the report is ready without a
-				// sort and the shortest record is the one which is dropped.
-				auto position = std::upper_bound(
-					event_records.begin(),
-					event_records.end(),
-					duration,
-					[](DurationSec value, FrameRecord const& entry) {
-						return value > entry.duration;
-					}
-				);
-
-				event_records.insert(position, std::move(record));
-				if (event_records.size() > max_record_frame)
+				// The frames are buffered and the buffer is only sorted when it carries more than max_record_frame plus
+				// the slack, so the sort is paid once per slack frames instead of once per frame: the sort keeps the
+				// longest max_record_frame frames, the ones beyond them are the shortest of the buffer and they are
+				// dropped, and the shortest of the kept ones is what the frames which follow are compared with.
+				event_records.push_back(std::move(record));
+				if (event_records.size() > record_buffer_limit)
 				{
-					event_records.pop_back();
+					min_record_duration = SortAndTrimTopN(
+						event_records,
+						max_record_frame,
+						[](FrameRecord const& item) { return item.duration; }
+					);
 				}
 			}
 		}
@@ -170,6 +170,18 @@ namespace UEBabyPram::InsightFilter
 		// given to the listeners of the frames, which is what makes the listeners carry the last events of the trace
 		// as well when their statistic is read below.
 		context_switch_streamer.Flush();
+
+		// The records are only sorted when the buffer is over its limit, so the frames which were added after the last
+		// sort are not in order yet: the buffer is sorted from the longest frame to the shortest one here, which is the
+		// order of the report, and it is cut to max_record_frame.
+		if (!event_records.empty())
+		{
+			SortAndTrimTopN(
+				event_records,
+				max_record_frame,
+				[](FrameRecord const& record) { return record.duration; }
+			);
+		}
 
 		if (event_records.size() > 0)
 		{
@@ -240,19 +252,14 @@ namespace UEBabyPram::InsightFilter
 
 			StatisRecord(view, longest_frame_records, 0);
 
-			std::sort(
-				longest_frame_records.begin(),
-				longest_frame_records.end(),
-				[](CrossFrameEventRecord const& record1, CrossFrameEventRecord const& record2) {
-					return record1.durations > record2.durations;
-				}
-			);
-
-			if (longest_frame_records.size() > max_exclude_time_count)
+			// The records are sorted from the longest exclude time to the shortest one, which is the order of the report,
+			// and the ones beyond max_exclude_time_count are dropped.
+			if (!longest_frame_records.empty())
 			{
-				longest_frame_records.erase(
-					longest_frame_records.begin() + max_exclude_time_count,
-					longest_frame_records.end()
+				SortAndTrimTopN(
+					longest_frame_records,
+					max_exclude_time_count,
+					[](CrossFrameEventRecord const& record) { return record.durations; }
 				);
 			}
 
@@ -298,19 +305,14 @@ namespace UEBabyPram::InsightFilter
 				}
 			}
 
-			std::sort(
-				longest_frame_records_in_top.begin(),
-				longest_frame_records_in_top.end(),
-				[](CrossFrameEventRecord const& record1, CrossFrameEventRecord const& record2) {
-					return record1.durations > record2.durations;
-				}
-			);
-
-			if (longest_frame_records_in_top.size() > max_exclude_time_count)
+			// The records are sorted from the longest exclude time to the shortest one, which is the order of the report,
+			// and the ones beyond max_exclude_time_count are dropped.
+			if (!longest_frame_records_in_top.empty())
 			{
-				longest_frame_records_in_top.erase(
-					longest_frame_records_in_top.begin() + max_exclude_time_count,
-					longest_frame_records_in_top.end()
+				SortAndTrimTopN(
+					longest_frame_records_in_top,
+					max_exclude_time_count,
+					[](CrossFrameEventRecord const& record) { return record.durations; }
 				);
 			}
 		}
@@ -675,6 +677,15 @@ namespace UEBabyPram::InsightFilter
 
 	void GameThreadParser::ContextSwitchEvent(ThreadSystemID thread_id, std::size_t core_name, Potato::Misc::IndexSpan<DurationSec> duration)
 	{
+		// The listeners only exist for the frames of the game thread, so an event of a thread which is not discovered
+		// yet, or which is not the game thread, carries no time which is read: it is dropped before it enters the
+		// streamer.
+		auto thread_info = GetThreadInfo(thread_id);
+		if (!thread_info || !IsThreadRequired(thread_info->thread_id))
+		{
+			return;
+		}
+
 		// The events are streamed to the listeners of the recorded frames, so a frame reads the time which the game
 		// thread spent out of the CPU from the blocks which its listener collected.
 		context_switch_streamer.AddContextSwitchEvent(thread_id, core_name, duration);

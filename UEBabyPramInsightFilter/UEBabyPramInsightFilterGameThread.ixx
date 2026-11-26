@@ -20,10 +20,11 @@ export namespace UEBabyPram::InsightFilter
 	{
 		struct Config
 		{
-			// How many of the longest frames are kept and analyzed in detail. The frames are sampled while the
-			// trace is analyzed: only the longest max_record_frame frames keep their events, and a frame which
-			// is not in this top list is dropped in OnCPUStackTree(). Every frame still counts in the total
-			// time, the frame count and the frame rate statistics.
+			// How many of the longest frames are kept and analyzed in detail. The frames are buffered while the trace is
+			// analyzed and the buffer is only sorted when it carries more than this count plus half of it (capped at
+			// 200), so only the longest frames keep their events, and a frame which is not in this top list is dropped in
+			// OnCPUStackTree(). The buffer is cut to this count when the analysis is done. Every frame still counts in the
+			// total time, the frame count and the frame rate statistics.
 			std::size_t max_record_frame = 10;
 			std::size_t max_exclude_time_count = 30;
 			// The path of the CSV file which the frames are written into instead of the text report, the file is
@@ -88,14 +89,22 @@ export namespace UEBabyPram::InsightFilter
 		// it only reports the longest frames.
 		bool WriteCSV() const;
 
-		// The longest frames which are kept, sorted by the duration from the longest to the shortest while the trace is
-		// analyzed. A frame which is not in this top list is dropped in OnCPUStackTree().
+		// The longest frames which are buffered, they are sorted from the longest to the shortest one when the buffer is
+		// over its limit and when the analysis is done. A frame which is not in this top list is dropped in
+		// OnCPUStackTree().
 		std::pmr::vector<FrameRecord> event_records;
 		// Every analyzed frame, in the order of the time, it is only filled when the CSV file is requested.
 		std::pmr::vector<FrameSummary> frame_summaries;
 		// The path of the CSV file of the frames, it is described by Config::csv_path.
 		std::optional<std::filesystem::path> csv_path;
 		std::size_t max_record_frame = 10;
+		// The count of the buffered frames which triggers a sort and a trim: the frames are buffered until the buffer
+		// carries max_record_frame plus the slack, which is half of max_record_frame capped at 200, and only a buffer
+		// which is over it is sorted, so the sort is paid for once per slack kept frames instead of once per frame.
+		std::size_t record_buffer_limit = 10;
+		// The shortest duration of the buffered frames, 0 while the buffer has never been sorted: a frame which is
+		// shorter than it can not be one of the longest frames, so it is dropped without copying its events.
+		DurationSec min_record_duration = DurationSec::zero();
 		std::size_t max_exclude_time_count = 30;
 		std::array<std::size_t, 5> fps_frame_record = {0, 0, 0, 0, 0};
 		InsightParser::DurationSec total_time = InsightParser::DurationSec::zero();

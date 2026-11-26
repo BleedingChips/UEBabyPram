@@ -1,5 +1,6 @@
 module;
 
+#include <cassert>
 #include <re2/re2.h>
 
 export module UEBabyPramInsightFilterParser;
@@ -17,6 +18,39 @@ export namespace UEBabyPram::InsightFilter
 		virtual ~Parser() = default;
 		virtual bool PrintToLog(Potato::Log::LogPrinter& printer) { return false; }
 	};
+
+	// The limit of a buffered top-N list: the count which is reported plus a slack of half of that count capped at
+	// 200, so the list is sorted once per slack kept items instead of once per item which is added to it.
+	inline std::size_t GetTopNBufferLimit(std::size_t count)
+	{
+		return count + std::min(count / 2, std::size_t{ 200 });
+	}
+
+	// Sort a buffered top-N list from the longest item to the shortest one, drop the items beyond count and return the
+	// duration of the shortest kept one, which is the shortest duration which a later item has to reach to enter the
+	// buffer. The parse loop only calls it when the list is over its limit, so the sort is paid once per slack kept
+	// items; the end of the analysis calls it once more to put the report in order and to cut the buffer exactly.
+	template<typename ContainerT, typename DurationGetterT>
+	DurationSec SortAndTrimTopN(ContainerT& items, std::size_t count, DurationGetterT get_duration)
+	{
+		assert(!items.empty());
+
+		std::sort(items.begin(), items.end(), [&get_duration](auto const& left, auto const& right) {
+			return get_duration(left) > get_duration(right);
+		});
+
+		if (items.size() > count)
+		{
+			items.erase(items.begin() + count, items.end());
+		}
+
+		if (items.empty())
+		{
+			return DurationSec::zero();
+		}
+
+		return get_duration(items.back());
+	}
 
 	constexpr auto LogCategory = Potato::TMP::TypeString("FilterLog");
 	constexpr auto OutputCategory = Potato::TMP::TypeString("UEBabyPram::InsightFilter");

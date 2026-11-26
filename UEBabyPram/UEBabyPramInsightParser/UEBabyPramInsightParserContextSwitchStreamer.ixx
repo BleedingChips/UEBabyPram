@@ -27,6 +27,10 @@ export namespace UEBabyPram::InsightParser
 	// more, and it is created by AddListener() and owned by the requester: the streamer only holds it weakly, so a
 	// listener which the requester drops is not kept alive by the streamer, and the streamer removes the listeners
 	// which are gone every Config::listener_prune_interval additions of a thread.
+	//
+	// Every block records the time of the first event of every EventBlock::check_point_event_interval events, so
+	// the events which a listener walks are located by the check points of the block instead of a scan from the
+	// first event of the block.
 	struct ContextSwitchStreamer
 	{
 		// How many context switch events one memory block holds, every block has exactly this many events.
@@ -62,12 +66,32 @@ export namespace UEBabyPram::InsightParser
 		// is only valid when the block is completed.
 		struct EventBlock
 		{
+			// How many events one time check point of the block covers: the time of the first event of every
+			// interval is recorded, so the events which end before a time are skipped without scanning them.
+			static constexpr std::size_t check_point_event_interval = 400;
+
+			// How many time check points one block carries, the last interval may cover fewer events than the
+			// interval, so the count is rounded up.
+			static constexpr std::size_t check_point_capacity =
+				(block_event_capacity + check_point_event_interval - 1) / check_point_event_interval;
+
 			std::array<Event, block_event_capacity> events;
+			// The time of the first event of every check_point_event_interval events, the times are in the order
+			// of the stream, so a time is located with a binary search over the check points instead of a scan
+			// from the first event of the block.
+			std::array<DurationSec, check_point_capacity> check_points;
+			// How many check points are valid, the block carries one as soon as its first event is written.
+			std::size_t check_point_count = 0;
 			// How many events are written into the block, the block is full when all of its events are written.
 			std::size_t event_count = 0;
 			Potato::Misc::IndexSpan<DurationSec> time_range;
 
 			bool IsFull() const { return event_count >= block_event_capacity; }
+
+			// The index of the first event of the block which can carry time of a range which begins at the point: the
+			// events before it end before the point, so a scan for the point starts here instead of at the first event
+			// of the block. 0 is returned when the point is before the beginning of the block.
+			std::size_t LocateFirstEventIndex(DurationSec point) const;
 		};
 
 		// The listener of the context switch events of one thread, it collects the blocks whose time range overlaps

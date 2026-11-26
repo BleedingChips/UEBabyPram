@@ -18,6 +18,13 @@ namespace UEBabyPram::InsightFilter
 
 	namespace
 	{
+		// Whether the element merges every event which it matches into one statistic.
+		bool IsMergedKind(EventQuery::ChainElement::Kind kind)
+		{
+			return kind == EventQuery::ChainElement::Kind::QueryAndStatisticMerged
+				|| kind == EventQuery::ChainElement::Kind::AnyAndStatisticMerged;
+		}
+
 		// The pattern of a matcher in wide characters, the report is printed in wide characters.
 		std::wstring EncodePattern(re2::RE2 const& matcher)
 		{
@@ -34,6 +41,9 @@ namespace UEBabyPram::InsightFilter
 		{
 			ThreadCPUEventView::EventView event_view;
 			std::size_t query_index = 0;
+			// The index of the chain element which reports the occurrence, it tells the kind of the statistic and the
+			// element of a merged statistic.
+			std::size_t node_index = 0;
 		};
 
 	}
@@ -42,10 +52,12 @@ namespace UEBabyPram::InsightFilter
 		: resource(in_config.resource)
 		, context_switch_streamer(ContextSwitchStreamer::Config{ 3, DurationSec{ 1 }, &resource })
 		, game_frame_recoder(GameFrameRecoder::Config{ &resource })
+		, events_manager(EventSpecManager::Config{ false, &resource })
 		, query_mapping(EventQueryMapping::Config{ std::move(in_config.queries), &resource })
+		, event_statistic_records(&resource)
 		, event_statistics(&resource)
-		, scope_event_ids(&resource)
 		, top_count(in_config.top_count)
+		, top_occurrence_buffer_limit(GetTopNBufferLimit(in_config.top_count))
 		, duration_bucket_count(in_config.duration_bucket_count)
 		, csv_path(std::move(in_config.csv_path))
 	{
@@ -66,41 +78,35 @@ namespace UEBabyPram::InsightFilter
 
 	void EventStatisticParser::OnCPUEventDiscovered(EventID id, std::wstring_view event_name, std::wstring_view file_name, std::size_t file_line)
 	{
-		// The name of the event is resolved by the query system, which keeps the ids of every chain element, and the
-		// statistic of the event is created for every element which exports it, with a copy of the name of the event,
-		// so the report does not need the events manager. The file and the line of the spec are not used here.
-		query_mapping.AddEvent(id, event_name, [this, &event_name](EventID exported_id, std::size_t query_index, std::size_t node_index) {
-			// The kind of the chain element is what the statistic is keyed by: a merged element shares one statistic
-			// between every event which it matches.
-			EventQuery::ChainElement::Kind kind = query_mapping.GetQueries()[query_index].nodes[node_index].kind;
-			AddEventStatistic(query_index, node_index, exported_id, kind, event_name);
-		});
+		// The events manager stores the name of the event and dedups it, so the query system is asked about the event
+		// once and the statistic of the event is only created when the stack tree carries it. The file and the line of
+		// the spec are not read here.
+		if (!events_manager.AddEvent(id, event_name, file_name, file_line))
+		{
+			return;
+		}
+
+		query_mapping.AddEvent(id, event_name);
 
 		game_frame_recoder.RecordEvent(id, event_name);
 	}
 
 	void EventStatisticParser::OnCPUScopeEventDiscovered(EventID id, std::u8string_view event_name)
 	{
-		// The event of the CPU scope logger is reported many times with the same id, so the ids which are already
-		// handled are kept and only a new id is resolved, the same as the event of the event spec. The name is
-		// already UTF-8, which is what the matcher needs, so it is resolved in place without any conversion.
+		// The event of the CPU scope logger is reported many times with the same id, so the events manager stores the
+		// name once and dedups the id, and only then the query system is asked about the event. The name is already
+		// UTF-8, which is what the matcher needs, so it is resolved in place without any conversion.
 		if (!id)
 		{
 			return;
 		}
 
-		if (std::find(scope_event_ids.begin(), scope_event_ids.end(), id) != scope_event_ids.end())
+		if (!events_manager.AddEvent(id, event_name, {}, 0))
 		{
 			return;
 		}
-		scope_event_ids.push_back(id);
 
-		query_mapping.AddEvent(id, event_name, [this, &event_name](EventID exported_id, std::size_t query_index, std::size_t node_index) {
-			// The kind of the chain element is what the statistic is keyed by: a merged element shares one statistic
-			// between every event which it matches.
-			EventQuery::ChainElement::Kind kind = query_mapping.GetQueries()[query_index].nodes[node_index].kind;
-			AddEventStatistic(query_index, node_index, exported_id, kind, event_name);
-		});
+		query_mapping.AddEvent(id, event_name);
 
 		game_frame_recoder.RecordEvent(id, event_name);
 	}
@@ -145,6 +151,15 @@ namespace UEBabyPram::InsightFilter
 
 	void EventStatisticParser::ContextSwitchEvent(ThreadSystemID thread_id, std::size_t core_name, Potato::Misc::IndexSpan<DurationSec> duration)
 	{
+		// The listeners only exist for the occurrences of the threads which the query counts, so an event of a thread
+		// which is not discovered yet, or which the query does not count, carries no time which is read: it is dropped
+		// before it enters the streamer.
+		auto thread_info = GetThreadInfo(thread_id);
+		if (!thread_info || !query_mapping.IsThreadMatched(thread_info->thread_id))
+		{
+			return;
+		}
+
 		// The events are streamed to the listeners of the top occurrences, so an occurrence reads the time which its
 		// thread spent out of the CPU from the blocks which its listener collected.
 		context_switch_streamer.AddContextSwitchEvent(thread_id, core_name, duration);
@@ -195,160 +210,85 @@ namespace UEBabyPram::InsightFilter
 				++index;
 			}
 
-			occurrences.push_back(MatchedOccurrence{ match.event_view, match.query_index });
+			occurrences.push_back(MatchedOccurrence{ match.event_view, match.query_index, match.node_index });
 		});
 
 		// The occurrences which are left are the calls which have to be counted, the exclude time of an
-		// occurrence is the duration of its subtree without the time of its child events. The statistic of the
-		// occurrence is found by the query and by the id of the event, which is what the statistic is keyed by,
-		// and the occurrence is dropped when no statistic carries it.
+		// occurrence is the duration of its subtree without the time of its child events. The record of the
+		// occurrence is keyed by the query, the element and the id of the event, so every id is counted separately
+		// and the record keeps no name: the name is resolved when the records are aggregated in AllAnalyzeDone().
 		for (auto const& occurrence : occurrences)
 		{
-			auto statistic = FindEventStatistic(occurrence.query_index, occurrence.event_view.event_id);
-			if (statistic == nullptr)
-			{
-				continue;
-			}
-
 			DurationSec exclude_time = DurationSec::zero();
 			if (auto exclude_statistic = event_scope.GetExcludeTime(occurrence.event_view); exclude_statistic)
 			{
 				exclude_time = exclude_statistic->active_time;
 			}
 
-			RecordEventOccurrence(event_scope, occurrence.event_view, exclude_time, *statistic);
+			EventStatisticRecord& record = AddEventStatisticRecord(
+				occurrence.query_index,
+				occurrence.node_index,
+				occurrence.event_view.event_id
+			);
+
+			RecordEventOccurrence(event_scope, occurrence.event_view, exclude_time, record);
 		}
 	}
 
-	EventStatisticParser::EventStatistic* EventStatisticParser::FindEventStatistic(std::size_t query_index, EventID id)
+	EventStatisticParser::EventStatisticRecord& EventStatisticParser::AddEventStatisticRecord(std::size_t query_index, std::size_t node_index, EventID id)
 	{
-		// The statistic is keyed by the query and by the name of the event, and it carries the ids of the events which
-		// the name belongs to, so the stack tree finds the statistic of its event by the id.
-		for (auto& statistic : event_statistics)
+		// The record is keyed by the query, the chain element and the id of the event, so every id is counted
+		// separately and an occurrence finds its record without walking the statistics. The name of the event is not
+		// stored here: it is resolved from the events manager when the records are aggregated in AllAnalyzeDone().
+		auto key = std::make_tuple(query_index, node_index, id.id);
+		auto found = event_statistic_record_indices.find(key);
+		if (found != event_statistic_record_indices.end())
 		{
-			if (statistic.query_index != query_index)
-			{
-				continue;
-			}
-
-			if (std::find(statistic.event_ids.begin(), statistic.event_ids.end(), id) != statistic.event_ids.end())
-			{
-				return &statistic;
-			}
+			return event_statistic_records[found->second];
 		}
 
-		return nullptr;
+		std::size_t index = event_statistic_records.size();
+		auto& record = event_statistic_records.emplace_back(&resource);
+		record.query_index = query_index;
+		record.node_index = node_index;
+		record.event_id = id;
+		event_statistic_record_indices.emplace(std::move(key), index);
+		return record;
 	}
 
-	EventStatisticParser::EventStatistic& EventStatisticParser::AddEventStatistic(std::size_t query_index, std::size_t node_index, EventID id, EventQuery::ChainElement::Kind kind, std::u8string_view event_name)
-	{
-		// The statistic of a merged element is keyed by the element itself: every event which the element matches shares
-		// one statistic, and the name of the statistic is the regular expression of the element, so the report tells
-		// which element the timing belongs to. The element which matches every event carries no regular expression, so
-		// its statistic is named by the pattern which matches every name instead.
-		if (
-			kind == EventQuery::ChainElement::Kind::QueryAndStatisticMerged
-			|| kind == EventQuery::ChainElement::Kind::AnyAndStatisticMerged
-			)
-		{
-			for (auto& statistic : event_statistics)
-			{
-				if (statistic.query_index != query_index || !statistic.is_merged || statistic.merged_node_index != node_index)
-				{
-					continue;
-				}
-
-				if (std::find(statistic.event_ids.begin(), statistic.event_ids.end(), id) == statistic.event_ids.end())
-				{
-					statistic.event_ids.push_back(id);
-				}
-				return statistic;
-			}
-
-			auto& statistic = event_statistics.emplace_back(&resource);
-			statistic.query_index = query_index;
-			statistic.is_merged = true;
-			statistic.merged_node_index = node_index;
-			statistic.event_ids.push_back(id);
-
-			// The name of a merged statistic is the regular expression of its element, it is written back with the
-			// delimiters of the query grammar, so the report tells which element the timing belongs to. The element
-			// which matches every event has no pattern, so the name is the pattern which matches every name.
-			auto const& node = query_mapping.GetQueries()[query_index].nodes[node_index];
-			if (node.matcher)
-			{
-				std::string_view pattern = node.matcher->pattern();
-				statistic.event_name.push_back(u8'\u005e');
-				statistic.event_name.append(
-					reinterpret_cast<char8_t const*>(pattern.data()),
-					static_cast<std::size_t>(pattern.size())
-				);
-				statistic.event_name.push_back(u8'\u005e');
-			}
-			else {
-				statistic.event_name.assign(u8"^.*^");
-			}
-
-			return statistic;
-		}
-
-		// The statistic of a normal element is found by the name first: the events which carry the same name share one
-		// statistic inside one query, and only the id is pushed into it, so the name is only copied when it is not
-		// counted yet.
-		for (auto& statistic : event_statistics)
-		{
-			if (statistic.query_index != query_index || statistic.is_merged || statistic.event_name != event_name)
-			{
-				continue;
-			}
-
-			if (std::find(statistic.event_ids.begin(), statistic.event_ids.end(), id) == statistic.event_ids.end())
-			{
-				statistic.event_ids.push_back(id);
-			}
-			return statistic;
-		}
-
-		auto& statistic = event_statistics.emplace_back(&resource);
-		statistic.query_index = query_index;
-		statistic.event_ids.push_back(id);
-		statistic.event_name.assign(event_name.begin(), event_name.end());
-		return statistic;
-	}
-
-	EventStatisticParser::EventStatistic& EventStatisticParser::AddEventStatistic(std::size_t query_index, std::size_t node_index, EventID id, EventQuery::ChainElement::Kind kind, std::wstring_view event_name)
-	{
-		// The name of an event spec is wide, it is encoded into the temporary storage first, so the name is compared and
-		// copied in the same form as the name which is UTF-8 already.
-		std::pmr::u8string encoded_event_name{ &resource };
-		Potato::Encode::UnicodeEncoder<wchar_t, char8_t>::EncodeTo(event_name, std::back_inserter(encoded_event_name));
-		return AddEventStatistic(query_index, node_index, id, kind, std::u8string_view{ encoded_event_name });
-	}
-	void EventStatisticParser::RecordEventOccurrence(ThreadCPUEventView event_scope, ThreadCPUEventView::EventView event_view, DurationSec exclude_time, EventStatistic& statistic)
+	void EventStatisticParser::RecordEventOccurrence(ThreadCPUEventView event_scope, ThreadCPUEventView::EventView event_view, DurationSec exclude_time, EventStatisticRecord& record)
 	{
 		// The duration of the occurrence is the whole time which it takes.
 		DurationSec duration = event_view.time_range.Size();
 
-		// Accumulate the occurrence into the statistic of its event name, the duration of the single
+		// Accumulate the occurrence into the record of its event id, the duration of the single
 		// occurrence is kept for the median and the standard deviation.
-		++statistic.count;
-		statistic.total_duration += duration;
-		statistic.total_exclude_time += exclude_time;
-		statistic.durations.push_back(duration);
-		statistic.occurrence_time_ranges.push_back(event_view.time_range);
+		++record.count;
+		record.total_duration += duration;
+		record.total_exclude_time += exclude_time;
+		record.durations.push_back(duration);
+		record.occurrence_time_ranges.push_back(event_view.time_range);
 
 		if (top_count == 0)
 		{
 			return;
 		}
 
-		// Keep the top N longest occurrences of this event name: the occurrence is recorded and the
-		// shortest one is kicked out when the list is already full, so an occurrence which does not
-		// rank in the top N is kicked out right away. The thread of the stack tree is kept with the
-		// occurrence, its name is resolved when the occurrence is reported, and the exclude time
-		// without the context switch time is initialized to the exclude time, the context switch time
-		// is only removed in AllAnalyzeDone(), when the context switch events are complete.
-		auto& occurrence = statistic.top_occurrences.emplace_back();
+		// An occurrence which is shorter than the shortest buffered one can not be one of the longest occurrences of
+		// the record, so it is dropped without creating its listener. The shortest buffered occurrence is recorded
+		// when the buffer is sorted, and it is 0 while the buffer has never been sorted, when every occurrence enters.
+		if (duration < record.min_top_occurrence_duration)
+		{
+			return;
+		}
+
+		// Keep the buffered top N longest occurrences of this event id: the occurrence is recorded, and the buffer
+		// is only sorted when it carries more than top_count plus the slack, so the occurrences which do not rank in
+		// the top N are dropped once per slack occurrences instead of once per occurrence. The thread of the stack tree
+		// is kept with the occurrence, its name is resolved when the occurrence is reported, and the exclude time
+		// without the context switch time is initialized to the exclude time, the context switch time is only removed
+		// in AllAnalyzeDone(), when the context switch events are complete.
+		auto& occurrence = record.top_occurrences.emplace_back();
 		occurrence.time_range = event_view.time_range;
 		occurrence.depth = event_view.depth;
 		occurrence.exclude_time = exclude_time;
@@ -370,25 +310,17 @@ namespace UEBabyPram::InsightFilter
 			}
 		}
 
-		// The occurrence is kicked out right away when it is the shortest one of a full list, so the
-		// occurrences which do not rank in the top N of the statistic are never kept.
-		if (statistic.top_occurrences.size() > top_count)
+		// The buffer is only sorted when it carries more than top_count plus the slack, so the sort is paid once per
+		// slack occurrences instead of once per occurrence: the sort keeps the longest top_count occurrences, the ones
+		// beyond them are the shortest of the buffer and they are dropped, and the shortest of the kept ones is what
+		// the occurrences which follow are compared with.
+		if (record.top_occurrences.size() > top_occurrence_buffer_limit)
 		{
-			auto shortest = std::min_element(
-				statistic.top_occurrences.begin(),
-				statistic.top_occurrences.end(),
-				[](TopEventOccurrence const& left, TopEventOccurrence const& right) {
-					return left.time_range.Size() < right.time_range.Size();
-				});
-			if (shortest != statistic.top_occurrences.end())
-			{
-				bool is_new_occurrence = shortest == std::prev(statistic.top_occurrences.end());
-				statistic.top_occurrences.erase(shortest);
-				if (is_new_occurrence)
-				{
-					return;
-				}
-			}
+			record.min_top_occurrence_duration = SortAndTrimTopN(
+				record.top_occurrences,
+				top_count,
+				[](TopEventOccurrence const& item) { return item.time_range.Size(); }
+			);
 		}
 	}
 
@@ -401,11 +333,179 @@ namespace UEBabyPram::InsightFilter
 		// trace as well when their statistic is read below.
 		context_switch_streamer.Flush();
 
+		// The records are aggregated by name, which is where the name of the event is resolved: a normal element
+		// reports one statistic per name, so the ids which carry the same name share it, and a merged element reports
+		// one statistic per element, so every id which the element matched is counted together. The records are
+		// sorted by the key of the group first, so the records of one group are next to each other.
+		struct GroupKey
+		{
+			std::size_t query_index = 0;
+			bool is_merged = false;
+			// The element of a merged group, the name of a normal group.
+			std::size_t node_index = 0;
+			std::u8string_view event_name;
+		};
+
+		std::vector<std::pair<GroupKey, std::size_t>> groups;
+		groups.reserve(event_statistic_records.size());
+
+		for (std::size_t index = 0; index < event_statistic_records.size(); ++index)
+		{
+			auto const& record = event_statistic_records[index];
+			auto const& node = query_mapping.GetQueries()[record.query_index].nodes[record.node_index];
+			bool is_merged = IsMergedKind(node.kind);
+
+			GroupKey key{ record.query_index, is_merged, record.node_index, {} };
+			if (!is_merged)
+			{
+				auto event_spec = events_manager.GetEventSpec(record.event_id);
+				if (!event_spec)
+				{
+					// The name of the event is not discovered, so the report would carry no name for it.
+					continue;
+				}
+				key.event_name = event_spec.name_view;
+			}
+
+			groups.emplace_back(key, index);
+		}
+
+		auto is_group_less = [](std::pair<GroupKey, std::size_t> const& left, std::pair<GroupKey, std::size_t> const& right) {
+			if (left.first.query_index != right.first.query_index)
+			{
+				return left.first.query_index < right.first.query_index;
+			}
+			if (left.first.is_merged != right.first.is_merged)
+			{
+				return left.first.is_merged < right.first.is_merged;
+			}
+			if (left.first.is_merged)
+			{
+				return left.first.node_index < right.first.node_index;
+			}
+			return left.first.event_name < right.first.event_name;
+		};
+
+		std::sort(groups.begin(), groups.end(), is_group_less);
+
+		auto is_same_group = [](GroupKey const& left, GroupKey const& right) {
+			if (left.query_index != right.query_index || left.is_merged != right.is_merged)
+			{
+				return false;
+			}
+			return left.is_merged ? left.node_index == right.node_index : left.event_name == right.event_name;
+		};
+
+		event_statistics.clear();
+
+		for (std::size_t group_begin = 0; group_begin < groups.size();)
+		{
+			std::size_t group_end = group_begin + 1;
+			while (group_end < groups.size() && is_same_group(groups[group_begin].first, groups[group_end].first))
+			{
+				++group_end;
+			}
+
+			GroupKey const& key = groups[group_begin].first;
+
+			auto& statistic = event_statistics.emplace_back(&resource);
+			statistic.query_index = key.query_index;
+			statistic.is_merged = key.is_merged;
+
+			if (key.is_merged)
+			{
+				// The name of a merged statistic is the regular expression of its element, it is written back with the
+				// delimiters of the query grammar, so the report tells which element the timing belongs to. The element
+				// which matches every event carries no regular expression, so its name is the pattern which matches
+				// every name instead.
+				auto const& node = query_mapping.GetQueries()[key.query_index].nodes[key.node_index];
+				if (node.matcher)
+				{
+					std::string_view pattern = node.matcher->pattern();
+					statistic.event_name.push_back(u8'\u005e');
+					statistic.event_name.append(
+						reinterpret_cast<char8_t const*>(pattern.data()),
+						static_cast<std::size_t>(pattern.size())
+					);
+					statistic.event_name.push_back(u8'\u005e');
+				}
+				else {
+					statistic.event_name.assign(u8"^.*^");
+				}
+			}
+			else {
+				statistic.event_name.assign(key.event_name.begin(), key.event_name.end());
+			}
+
+			for (std::size_t index = group_begin; index < group_end; ++index)
+			{
+				auto& record = event_statistic_records[groups[index].second];
+
+				statistic.count += record.count;
+				statistic.total_duration += record.total_duration;
+				statistic.total_exclude_time += record.total_exclude_time;
+
+				statistic.durations.insert(
+					statistic.durations.end(),
+					std::make_move_iterator(record.durations.begin()),
+					std::make_move_iterator(record.durations.end())
+				);
+				statistic.occurrence_time_ranges.insert(
+					statistic.occurrence_time_ranges.end(),
+					std::make_move_iterator(record.occurrence_time_ranges.begin()),
+					std::make_move_iterator(record.occurrence_time_ranges.end())
+				);
+
+				if (key.is_merged)
+				{
+					// The records of a merged element are keyed by the id of the event, so the ids are unique already.
+					statistic.event_ids.push_back(record.event_id);
+				}
+				else if (std::find(statistic.event_ids.begin(), statistic.event_ids.end(), record.event_id) == statistic.event_ids.end())
+				{
+					statistic.event_ids.push_back(record.event_id);
+				}
+
+				statistic.top_occurrences.insert(
+					statistic.top_occurrences.end(),
+					std::make_move_iterator(record.top_occurrences.begin()),
+					std::make_move_iterator(record.top_occurrences.end())
+				);
+
+				if (statistic.top_occurrences.size() > top_occurrence_buffer_limit)
+				{
+					SortAndTrimTopN(
+						statistic.top_occurrences,
+						top_count,
+						[](TopEventOccurrence const& item) { return item.time_range.Size(); }
+					);
+				}
+			}
+
+			group_begin = group_end;
+		}
+
+		// The records are only needed to build the statistics of the names, so their memory is given back here.
+		event_statistic_records.clear();
+		event_statistic_record_indices.clear();
+
 		for (auto& statistic : event_statistics)
 		{
 			if (statistic.count == 0)
 			{
 				continue;
+			}
+
+			// The buffer is only sorted when it is over its limit, so the occurrences which were added after the last
+			// sort are kept as well: the buffer is cut to top_count here, so the report carries exactly the longest
+			// occurrences of the event.
+			if (statistic.top_occurrences.size() > top_count)
+			{
+				SortAndTrimTopN(
+					statistic.top_occurrences,
+					top_count,
+					[](TopEventOccurrence const& item) { return item.time_range.Size(); }
+				);
 			}
 
 			// The median and the standard deviation are computed from the duration of the single

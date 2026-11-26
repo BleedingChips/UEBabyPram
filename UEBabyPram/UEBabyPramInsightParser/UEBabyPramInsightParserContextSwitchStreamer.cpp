@@ -38,6 +38,15 @@ namespace UEBabyPram::InsightParser
 		auto& block = *stream.current_block;
 		assert(!block.IsFull());
 
+		// The first event of every check point interval records the time which the interval begins at, so a time
+		// inside the block is located by the check points instead of a scan from the first event of the block.
+		if (block.event_count % EventBlock::check_point_event_interval == 0)
+		{
+			assert(block.check_point_count < EventBlock::check_point_capacity);
+			block.check_points[block.check_point_count] = active_time.Begin();
+			block.check_point_count += 1;
+		}
+
 		block.events[block.event_count] = Event{ active_core, active_time };
 		block.event_count += 1;
 
@@ -194,6 +203,30 @@ namespace UEBabyPram::InsightParser
 		}
 	}
 
+	auto ContextSwitchStreamer::EventBlock::LocateFirstEventIndex(DurationSec point) const -> std::size_t
+	{
+		// The check points are the times which the intervals begin at, so the count of the check points which are
+		// before the point is the interval which the scan has to start with. The point is compared with '<' instead
+		// of '<=', because an event which ends exactly at the point still carries the context switch of the point:
+		// such an event is before the point but it is kept by the scan.
+		std::size_t begin = 0;
+		std::size_t end = check_point_count;
+
+		while (begin < end)
+		{
+			std::size_t middle = begin + (end - begin) / 2;
+			if (check_points[middle] < point)
+			{
+				begin = middle + 1;
+			}
+			else {
+				end = middle;
+			}
+		}
+
+		return begin == 0 ? 0 : (begin - 1) * check_point_event_interval;
+	}
+
 	auto ContextSwitchStreamer::Listener::GetContextSwitchStatis(Potato::Misc::IndexSpan<DurationSec> time_range) const -> Statis
 	{
 		DurationSec active_time = DurationSec::zero();
@@ -209,7 +242,11 @@ namespace UEBabyPram::InsightParser
 				continue;
 			}
 
-			for (std::size_t index = 0; index < block->event_count; ++index)
+			// The check points of the block locate the first event which can carry time of the range, so the events
+			// which end before the range are skipped without walking them.
+			std::size_t begin_index = block->LocateFirstEventIndex(time_range.Begin());
+
+			for (std::size_t index = begin_index; index < block->event_count; ++index)
 			{
 				auto const& event = block->events[index];
 				auto begin = std::max(event.active_time_range.Begin(), time_range.Begin());

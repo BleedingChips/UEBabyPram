@@ -22,6 +22,8 @@ namespace UEBabyPram::InsightFilter
 		, stored_views(&resource)
 		, query_text(std::move(config.query_text))
 		, max_view_count(config.max_view_count)
+		, view_buffer_limit(GetTopNBufferLimit(config.max_view_count))
+		, min_view_duration(DurationSec::zero())
 		, max_node_count(config.max_node_count)
 		, max_depth(config.max_depth)
 	{
@@ -94,6 +96,15 @@ namespace UEBabyPram::InsightFilter
 
 	void EventDetailParser::ContextSwitchEvent(ThreadSystemID thread_id, std::size_t core_name, Potato::Misc::IndexSpan<DurationSec> duration)
 	{
+		// The listeners only exist for the saved stack trees of the threads which the query counts, so an event of a
+		// thread which is not discovered yet, or which the query does not count, carries no time which is read: it is
+		// dropped before it enters the streamer.
+		auto thread_info = GetThreadInfo(thread_id);
+		if (!thread_info || !query_mapping.IsThreadMatched(thread_info->thread_id))
+		{
+			return;
+		}
+
 		// The context switch events are streamed to the listeners of the saved stack trees, which have
 		// been created with the time range of their stack trees.
 		context_switch_streamer.AddContextSwitchEvent(thread_id, core_name, duration);
@@ -137,24 +148,12 @@ namespace UEBabyPram::InsightFilter
 
 		DurationSec duration = time_range->Size();
 
-		// Config::max_view_count is the count of the longest calls which are kept: while the stored views are fewer
-		// than it the view is stored, and after that the view is only stored when it is longer than the shortest of
-		// the stored ones, which is dropped for it.
-		if (stored_views.size() >= max_view_count)
+		// A tree which is shorter than the shortest kept one can not be one of the longest trees which are kept, so it
+		// is dropped without touching the storage or creating its listener. The shortest kept tree is recorded when
+		// the buffer is sorted, and it is 0 while the buffer has never been sorted, when every tree is stored.
+		if (duration < min_view_duration)
 		{
-			auto shortest = std::min_element(
-				stored_views.begin(),
-				stored_views.end(),
-				[](StoredView const& left, StoredView const& right) {
-					return left.duration < right.duration;
-				});
-
-			if (shortest == stored_views.end() || shortest->duration >= duration)
-			{
-				return;
-			}
-
-			stored_views.erase(shortest);
+			return;
 		}
 
 		// The view of the stack tree points into the storage of the analysis, which is reused after the
@@ -172,11 +171,36 @@ namespace UEBabyPram::InsightFilter
 		stored_view.context_switch_listener = context_switch_streamer.AddListener(event_scope.system_thread_id, *time_range);
 
 		stored_view.events.assign(event_scope.view.begin(), event_scope.view.end());
+
+		// The buffer is only sorted when it carries more than max_view_count plus the slack, so the sort is paid once
+		// per slack kept trees instead of once per tree: the sort keeps the longest max_view_count trees of the buffer,
+		// the ones beyond them are the shortest of the buffer and they are dropped, and the shortest of the kept trees
+		// is what the trees which follow are compared with.
+		if (stored_views.size() > view_buffer_limit)
+		{
+			min_view_duration = SortAndTrimTopN(
+				stored_views,
+				max_view_count,
+				[](StoredView const& view) { return view.duration; }
+			);
+		}
 	}
 
 	void EventDetailParser::AllAnalyzeDone()
 	{
 		Parser::AllAnalyzeDone();
+
+		// The buffer is only sorted when it is over its limit, so a trace which ends before that keeps more than
+		// max_view_count trees: the buffer is cut to max_view_count here, so the report carries exactly the longest
+		// trees which the query matched.
+		if (stored_views.size() > max_view_count)
+		{
+			SortAndTrimTopN(
+				stored_views,
+				max_view_count,
+				[](StoredView const& view) { return view.duration; }
+			);
+		}
 
 		// The block which the streamer is still writing is completed and given to the listeners, so
 		// they carry the context switch events at the end of the trace as well.

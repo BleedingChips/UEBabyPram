@@ -33,11 +33,11 @@ export namespace UEBabyPram::InsightFilter
 	// the order of the call, the ancestors which the query did not capture are left out, and the whole
 	// subtree of the last captured event is reported under it.
 	//
-	// One kept stack tree is one copy (the Config::max_view_count longest ones are kept at most, a
-	// shorter stack tree is only kept while there is room for it, or when it is longer than the
-	// shortest of the kept ones, which is dropped for it). The events of the stack tree are copied into
-	// the storage of the parser, because the view of the stack tree only points into the storage of
-	// the analysis, which is reused after the stack tree is analyzed.
+	// One kept stack tree is one copy, and Config::max_view_count of the longest ones are kept: the trees are buffered
+	// and the buffer is only sorted when it carries more than that count plus half of it (capped at 200), then it is
+	// cut back to the count, and the shortest kept tree is what the trees which follow are compared with. The events
+	// of the stack tree are copied into the storage of the parser, because the view of the stack tree only points into
+	// the storage of the analysis, which is reused after the stack tree is analyzed.
 	struct EventDetailParser : public Parser
 	{
 		struct Config
@@ -49,8 +49,9 @@ export namespace UEBabyPram::InsightFilter
 			EventQuery query;
 			// The text which the query is built from, it is only reported with the saved views.
 			std::u8string query_text;
-			// How many of the longest stack trees are kept at most, every stack tree is one copy, and the shortest
-			// one is dropped for a longer one when the count is reached, 0 for none.
+			// How many of the longest stack trees are kept, 0 for none. The trees are buffered and the buffer is only
+			// sorted when it carries more than this count plus half of it (capped at 200), and it is cut to this count
+			// when the analysis is done, so the report carries exactly the longest trees.
 			std::size_t max_view_count = 10;
 			// How many nodes of one reported tree are printed at most, the nodes over the count are not printed and
 			// their place is marked with '...', 0 for no limit. The limit is applied to every reported tree, so a
@@ -128,6 +129,13 @@ export namespace UEBabyPram::InsightFilter
 		std::pmr::vector<StoredView> stored_views;
 		std::u8string query_text;
 		std::size_t max_view_count = 10;
+		// The count of the stored views which triggers a sort and a trim: the trees are buffered until the buffer
+		// carries max_view_count plus the slack, which is half of max_view_count capped at 200, and only a buffer
+		// which is over it is sorted, so the sort is paid for once per slack kept trees instead of once per tree.
+		std::size_t view_buffer_limit = 10;
+		// The shortest duration of the stored views, 0 while the buffer has never been sorted: a tree which is shorter
+		// than it can not be one of the longest trees, so it is dropped without entering the buffer.
+		DurationSec min_view_duration = DurationSec::zero();
 		// The limits of the report of one saved stack tree, they are described by Config::max_node_count and
 		// Config::max_depth. Every limit is applied to every saved stack tree separately, and the nodes which are
 		// left out are marked with '...'.
